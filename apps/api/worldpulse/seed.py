@@ -1,0 +1,383 @@
+from datetime import UTC, datetime, timedelta
+
+from sqlalchemy import delete
+
+from .database import SessionLocal
+from .models import Article, Country, Event, Source
+from .scoring import ScoringInput, calculate_importance
+
+COUNTRIES = [
+    ("CA", "CAN", "Canada", "124", "North America"),
+    ("US", "USA", "United States", "840", "North America"),
+    ("MX", "MEX", "Mexico", "484", "North America"),
+    ("BR", "BRA", "Brazil", "076", "South America"),
+    ("AR", "ARG", "Argentina", "032", "South America"),
+    ("GB", "GBR", "United Kingdom", "826", "Europe"),
+    ("FR", "FRA", "France", "250", "Europe"),
+    ("DE", "DEU", "Germany", "276", "Europe"),
+    ("UA", "UKR", "Ukraine", "804", "Europe"),
+    ("NG", "NGA", "Nigeria", "566", "Africa"),
+    ("ZA", "ZAF", "South Africa", "710", "Africa"),
+    ("EG", "EGY", "Egypt", "818", "Africa"),
+    ("IN", "IND", "India", "356", "Asia"),
+    ("CN", "CHN", "China", "156", "Asia"),
+    ("JP", "JPN", "Japan", "392", "Asia"),
+    ("AU", "AUS", "Australia", "036", "Oceania"),
+]
+
+SOURCES = [
+    ("reuters", "Reuters", "https://www.reuters.com", "GB", 95),
+    ("ap", "Associated Press", "https://apnews.com", "US", 94),
+    ("cbc", "CBC News", "https://www.cbc.ca/news", "CA", 81),
+    ("dw", "Deutsche Welle", "https://www.dw.com", "DE", 82),
+]
+
+EVENT_SPECS = [
+    (
+        "pacific-climate-pact",
+        "Pacific nations agree accelerated coastal resilience plan",
+        "Regional leaders agreed a shared financing framework for flood defences "
+        "and early-warning systems.",
+        "Environment",
+        "AU",
+        ["AU", "JP", "CA", "US"],
+        "International",
+        3,
+        8,
+        5,
+        9,
+        78,
+        89,
+        3.4,
+    ),
+    (
+        "canada-health-data",
+        "Provinces launch shared emergency-room capacity dashboard",
+        "A national data standard will publish comparable wait-time and bed-capacity indicators.",
+        "Health",
+        "CA",
+        ["CA"],
+        "National",
+        6,
+        5,
+        2,
+        1,
+        66,
+        80,
+        1.8,
+    ),
+    (
+        "us-chip-grid",
+        "Grid operators coordinate power plan for new chip plants",
+        "Regulators outlined a joint process for electricity demand around manufacturing hubs.",
+        "Science and technology",
+        "US",
+        ["US", "CA", "MX"],
+        "International",
+        10,
+        6,
+        3,
+        3,
+        82,
+        91,
+        2.3,
+    ),
+    (
+        "mexico-water",
+        "Northern states adopt coordinated industrial water rules",
+        "The agreement introduces shared drought triggers for high-volume industrial users.",
+        "Environment",
+        "MX",
+        ["MX", "US"],
+        "International",
+        18,
+        4,
+        2,
+        2,
+        61,
+        72,
+        1.1,
+    ),
+    (
+        "brazil-forest-fund",
+        "Amazon restoration fund expands community grants",
+        "Financing will support community monitoring and degraded-land recovery.",
+        "Environment",
+        "BR",
+        ["BR"],
+        "National",
+        12,
+        7,
+        4,
+        1,
+        79,
+        86,
+        2.6,
+    ),
+    (
+        "argentina-inflation",
+        "Monthly inflation slows as food prices stabilize",
+        "Official data showed a further easing in headline inflation.",
+        "Economy",
+        "AR",
+        ["AR"],
+        "National",
+        20,
+        5,
+        3,
+        1,
+        63,
+        84,
+        1.4,
+    ),
+    (
+        "uk-local-vote",
+        "Councils test common standard for digital ballot access",
+        "A cross-party pilot will evaluate accessibility and security safeguards.",
+        "Politics",
+        "GB",
+        ["GB"],
+        "National",
+        14,
+        4,
+        1,
+        1,
+        55,
+        82,
+        1.2,
+    ),
+    (
+        "france-games-legacy",
+        "Cities publish first results from community sport grants",
+        "Local clubs report higher youth participation after targeted facilities grants.",
+        "Culture and sports",
+        "FR",
+        ["FR"],
+        "National",
+        28,
+        3,
+        1,
+        1,
+        42,
+        69,
+        0.8,
+    ),
+    (
+        "germany-rail",
+        "Rail modernization package clears final parliamentary vote",
+        "The package prioritizes signalling upgrades and high-traffic corridors.",
+        "Economy",
+        "DE",
+        ["DE", "FR"],
+        "International",
+        7,
+        7,
+        4,
+        4,
+        73,
+        87,
+        2.9,
+    ),
+    (
+        "ukraine-grain-route",
+        "New inspections agreement stabilizes regional grain corridor",
+        "Governments and port authorities agreed procedures to reduce delays.",
+        "Conflict and security",
+        "UA",
+        ["UA", "FR", "EG"],
+        "International",
+        2,
+        10,
+        6,
+        5,
+        92,
+        94,
+        4.2,
+    ),
+    (
+        "nigeria-vaccine",
+        "West African vaccine facility completes validation run",
+        "The milestone advances plans for regional supply of childhood vaccines.",
+        "Health",
+        "NG",
+        ["NG"],
+        "Regional",
+        9,
+        6,
+        4,
+        4,
+        77,
+        79,
+        2.1,
+    ),
+    (
+        "south-africa-radio",
+        "Community radio archive opens to public",
+        "A digitized collection preserves four decades of local reporting and oral history.",
+        "Culture and sports",
+        "ZA",
+        ["ZA"],
+        "National",
+        44,
+        3,
+        2,
+        1,
+        38,
+        62,
+        0.4,
+    ),
+    (
+        "egypt-solar-storage",
+        "Desert solar-storage project begins grid testing",
+        "The first phase pairs utility-scale solar generation with battery storage.",
+        "Science and technology",
+        "EG",
+        ["EG"],
+        "Regional",
+        16,
+        5,
+        3,
+        2,
+        67,
+        78,
+        1.6,
+    ),
+    (
+        "india-monsoon",
+        "Monsoon rail disruptions prompt national logistics response",
+        "Authorities rerouted freight after severe rainfall affected key corridors.",
+        "Other",
+        "IN",
+        ["IN"],
+        "Regional",
+        4,
+        8,
+        4,
+        3,
+        84,
+        88,
+        3.5,
+    ),
+    (
+        "china-consumption",
+        "Consumer support measures focus on household services",
+        "The package expands targeted incentives for care, tourism and home upgrades.",
+        "Economy",
+        "CN",
+        ["CN"],
+        "National",
+        11,
+        7,
+        5,
+        1,
+        90,
+        90,
+        2.7,
+    ),
+    (
+        "japan-ocean-sensor",
+        "Deep-ocean sensor network begins public data release",
+        "Researchers are publishing measurements for earthquake and climate models.",
+        "Science and technology",
+        "JP",
+        ["JP", "AU"],
+        "International",
+        8,
+        6,
+        4,
+        3,
+        76,
+        84,
+        2.2,
+    ),
+]
+
+
+def run_seed() -> None:
+    now = datetime(2026, 7, 24, 20, tzinfo=UTC)
+    with SessionLocal.begin() as session:
+        session.execute(delete(Article))
+        session.execute(delete(Event))
+        session.execute(delete(Source))
+        session.execute(delete(Country))
+        country_models = {
+            row[0]: Country(iso2=row[0], iso3=row[1], name=row[2], map_id=row[3], region=row[4])
+            for row in COUNTRIES
+        }
+        source_models = {
+            row[0]: Source(
+                id=row[0],
+                publisher_name=row[1],
+                url=row[2],
+                country_code=row[3],
+                prominence_score=row[4],
+            )
+            for row in SOURCES
+        }
+        session.add_all([*country_models.values(), *source_models.values()])
+        session.flush()
+
+        for spec in EVENT_SPECS:
+            (
+                event_id,
+                headline,
+                summary,
+                category,
+                primary,
+                affected,
+                scope,
+                age,
+                source_count,
+                source_country_count,
+                affected_count,
+                significance,
+                prominence,
+                velocity,
+            ) = spec
+            score = calculate_importance(
+                ScoringInput(
+                    independent_source_count=source_count,
+                    source_country_count=source_country_count,
+                    affected_country_count=affected_count,
+                    country_significance=significance,
+                    publisher_prominence=prominence,
+                    age_hours=age,
+                    articles_per_hour=velocity,
+                )
+            )
+            published = now - timedelta(hours=age)
+            event = Event(
+                id=event_id,
+                headline=headline,
+                summary=summary,
+                category=category,
+                importance_score=score.score,
+                importance_label=score.label,
+                geographic_scope=scope,
+                primary_country_code=primary,
+                first_seen_at=published,
+                last_updated_at=published + timedelta(minutes=30),
+                scoring_components=score.components,
+                scoring_input=score.input,
+                generated_summary=True,
+                active=True,
+                affected_countries=[country_models[code] for code in affected],
+            )
+            event.articles = [
+                Article(
+                    id=f"{event_id}-article-{index + 1}",
+                    headline=headline,
+                    original_url=f"https://example.com/reporting/{event_id}/{index + 1}",
+                    published_at=published + timedelta(minutes=index * 8),
+                    extracted_countries=affected,
+                    category=category,
+                    source=source_models[source_id],
+                )
+                for index, source_id in enumerate(list(source_models)[: min(4, source_count)])
+            ]
+            session.add(event)
+    print(f"Seeded {len(COUNTRIES)} countries and {len(EVENT_SPECS)} events.")
+
+
+if __name__ == "__main__":
+    run_seed()

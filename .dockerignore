@@ -1,0 +1,12 @@
+node_modules
+.git
+.vinext
+.wrangler
+dist
+.env
+apps/api/.venv
+apps/api/.pytest_cache
+apps/api/__pycache__
+coverage
+*.db
+*.log

@@ -1,0 +1,87 @@
+export const CATEGORIES = [
+  "Politics",
+  "Economy",
+  "Conflict and security",
+  "Environment",
+  "Health",
+  "Science and technology",
+  "Culture and sports",
+  "Other",
+] as const;
+
+export type Category = (typeof CATEGORIES)[number];
+export type ImportanceLabel = "Major" | "Significant" | "Developing" | "Routine";
+export type GeographicScope =
+  | "Global"
+  | "International"
+  | "National"
+  | "Regional"
+  | "Local";
+
+export interface Country {
+  iso2: string;
+  iso3: string;
+  name: string;
+  mapId: string;
+  region: string;
+}
+
+export interface NewsSource {
+  id: string;
+  publisherName: string;
+  url: string;
+  country: string;
+  prominenceScore: number;
+}
+
+export interface Article {
+  id: string;
+  headline: string;
+  originalUrl: string;
+  source: NewsSource;
+  publishedAt: string;
+  extractedCountries: string[];
+  category: Category;
+  eventId: string;
+}
+
+export interface ScoringInput {
+  independentSourceCount: number;
+  sourceCountryCount: number;
+  affectedCountryCount: number;
+  countrySignificance: number;
+  publisherProminence: number;
+  ageHours: number;
+  articlesPerHour: number;
+}
+
+export interface ScoringComponents {
+  sourceDiversity: number;
+  geographicImpact: number;
+  publisherProminence: number;
+  recency: number;
+  coverageVelocity: number;
+}
+
+export interface Event {
+  id: string;
+  headline: string;
+  summary: string;
+  category: Category;
+  importanceScore: number;
+  importanceLabel: ImportanceLabel;
+  geographicScope: GeographicScope;
+  primaryCountry: string;
+  affectedCountries: string[];
+  firstSeenAt: string;
+  lastUpdatedAt: string;
+  scoringComponents: ScoringComponents;
+  scoringInput: ScoringInput;
+  articles: Article[];
+  generatedSummary: boolean;
+}
+
+export interface CountryPulse extends Country {
+  events: Event[];
+  topEvent?: Event;
+}
