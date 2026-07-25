@@ -43,6 +43,7 @@ const formatTime = (value: string) =>
     day: "numeric",
     hour: "numeric",
     minute: "2-digit",
+    timeZone: "America/Toronto",
   }).format(new Date(value));
 
 function ImportancePill({ event }: { event: Event }) {
