@@ -3,6 +3,7 @@ import {
   countrySearchTerms,
   textMatchesCountry,
 } from "../lib/country-terms";
+import { googleNewsLocaleForCountry } from "../lib/country-locale";
 
 export interface FeedArticle {
   id: string;
@@ -43,7 +44,7 @@ interface NewsProvider {
 type FetchImplementation = typeof fetch;
 
 const MAX_PROVIDER_BYTES = 1_500_000;
-const MAX_COUNTRY_ARTICLES = 80;
+const MAX_COUNTRY_ARTICLES = 180;
 const MAX_GLOBAL_ARTICLES = 700;
 const CACHE_SECONDS = 300;
 
@@ -237,7 +238,7 @@ function fixedRssProvider(
   };
 }
 
-const PROVIDERS: NewsProvider[] = [
+const CORE_PROVIDERS: NewsProvider[] = [
   fixedRssProvider(
     "The Guardian",
     "https://www.theguardian.com/world",
@@ -318,49 +319,106 @@ const PROVIDERS: NewsProvider[] = [
     "https://news.un.org/",
     "https://news.un.org/feed/subscribe/en/news/all/rss.xml",
   ),
-  {
-    name: "GDELT",
-    publisherUrl: "https://www.gdeltproject.org/",
-    timeoutMs: 3_500,
-    filterByCountry: false,
-    url: (scope, countryName) => {
-      const url = new URL("https://api.gdeltproject.org/api/v2/doc/doc");
-      url.searchParams.set(
-        "query",
-        scope === "country" && countryName
-          ? `"${countryName}" sourcelang:english`
-          : "sourcelang:english",
-      );
-      url.searchParams.set("mode", "artlist");
-      url.searchParams.set("maxrecords", "50");
-      url.searchParams.set("format", "json");
-      url.searchParams.set("timespan", "3d");
-      url.searchParams.set("sort", "datedesc");
-      return url;
-    },
-    parse: parseGdeltJson,
-  },
-  {
-    name: "Google News",
-    publisherUrl: "https://news.google.com/",
-    timeoutMs: 3_500,
-    filterByCountry: false,
-    url: (scope, countryName) => {
-      const url =
-        scope === "global"
-          ? new URL(
-              "https://news.google.com/rss/headlines/section/topic/WORLD",
-            )
-          : new URL("https://news.google.com/rss/search");
-      url.searchParams.set("hl", "en-CA");
-      url.searchParams.set("gl", "CA");
-      url.searchParams.set("ceid", "CA:en");
-      if (countryName) url.searchParams.set("q", `"${countryName}" when:3d`);
-      return url;
-    },
-    parse: parseGoogleNewsFeed,
-  },
 ];
+
+const GDELT_PROVIDER: NewsProvider = {
+  name: "GDELT",
+  publisherUrl: "https://www.gdeltproject.org/",
+  timeoutMs: 3_500,
+  filterByCountry: false,
+  url: (scope, countryName) => {
+    const url = new URL("https://api.gdeltproject.org/api/v2/doc/doc");
+    url.searchParams.set(
+      "query",
+      scope === "country" && countryName
+        ? `"${countryName}" sourcelang:english`
+        : "sourcelang:english",
+    );
+    url.searchParams.set("mode", "artlist");
+    url.searchParams.set("maxrecords", "50");
+    url.searchParams.set("format", "json");
+    url.searchParams.set("timespan", scope === "country" ? "7d" : "3d");
+    url.searchParams.set("sort", "datedesc");
+    return url;
+  },
+  parse: parseGdeltJson,
+};
+
+function googleNewsProvider(
+  name: string,
+  buildUrl: (countryName: string | null) => URL,
+  filterByCountry = false,
+): NewsProvider {
+  return {
+    name,
+    publisherUrl: "https://news.google.com/",
+    timeoutMs: 5_000,
+    filterByCountry,
+    url: (_scope, countryName) => buildUrl(countryName),
+    parse: parseGoogleNewsFeed,
+  };
+}
+
+const GOOGLE_WORLD_PROVIDER = googleNewsProvider("Google News · World", () => {
+  const url = new URL(
+    "https://news.google.com/rss/headlines/section/topic/WORLD",
+  );
+  url.searchParams.set("hl", "en-CA");
+  url.searchParams.set("gl", "CA");
+  url.searchParams.set("ceid", "CA:en");
+  return url;
+});
+
+function countryGoogleProviders(countryName: string, requestedRegion: string) {
+  const locale = googleNewsLocaleForCountry(countryName, requestedRegion);
+  const terms = countrySearchTerms(countryName).slice(0, 6);
+  const query = `${terms.map((term) => `"${term}"`).join(" OR ")} when:7d`;
+
+  return [
+    googleNewsProvider(
+      "Google News · Local top stories",
+      () => {
+        const url = new URL("https://news.google.com/rss");
+        url.searchParams.set("hl", locale.hl);
+        url.searchParams.set("gl", locale.region);
+        url.searchParams.set("ceid", locale.ceid);
+        return url;
+      },
+      true,
+    ),
+    googleNewsProvider("Google News · Local country search", () => {
+      const url = new URL("https://news.google.com/rss/search");
+      url.searchParams.set("q", query);
+      url.searchParams.set("hl", locale.hl);
+      url.searchParams.set("gl", locale.region);
+      url.searchParams.set("ceid", locale.ceid);
+      return url;
+    }),
+    googleNewsProvider("Google News · International country search", () => {
+      const url = new URL("https://news.google.com/rss/search");
+      url.searchParams.set("q", query);
+      url.searchParams.set("hl", "en-US");
+      url.searchParams.set("gl", "US");
+      url.searchParams.set("ceid", "US:en");
+      return url;
+    }),
+  ];
+}
+
+function providersForRequest(
+  scope: "country" | "global",
+  countryName: string | null,
+  requestedRegion: string,
+) {
+  if (scope === "global" || !countryName) {
+    return [...CORE_PROVIDERS, GDELT_PROVIDER, GOOGLE_WORLD_PROVIDER];
+  }
+  return [
+    ...CORE_PROVIDERS,
+    GDELT_PROVIDER,
+    ...countryGoogleProviders(countryName, requestedRegion),
+  ];
+}
 
 export function articleMatchesCountry(
   article: Pick<CandidateArticle, "searchableText">,
@@ -481,6 +539,8 @@ export async function handleLiveNews(
   const url = new URL(request.url);
   const scope = url.searchParams.get("scope") === "global" ? "global" : "country";
   const requestedCountry = url.searchParams.get("country")?.trim() ?? "";
+  const requestedRegion =
+    url.searchParams.get("iso2")?.trim().toUpperCase() ?? "";
   if (
     scope === "country" &&
     (!requestedCountry ||
@@ -489,6 +549,9 @@ export async function handleLiveNews(
   ) {
     return json({ error: "A valid country name is required." }, 400);
   }
+  if (requestedRegion && !/^[A-Z]{2}$/.test(requestedRegion)) {
+    return json({ error: "A valid ISO country code is required." }, 400);
+  }
 
   const countryName =
     scope === "country" ? canonicalCountryName(requestedCountry) : null;
@@ -496,8 +559,9 @@ export async function handleLiveNews(
     scope === "country" && countryName
       ? countrySearchTerms(requestedCountry)
       : [];
+  const providers = providersForRequest(scope, countryName, requestedRegion);
   const results = await Promise.all(
-    PROVIDERS.map((provider) =>
+    providers.map((provider) =>
       fetchProvider(provider, scope, countryName, terms, fetchImpl),
     ),
   );
@@ -524,7 +588,7 @@ export async function handleLiveNews(
     refreshAfterSeconds: CACHE_SECONDS,
     provider: `WorldPulse live index · ${successful.length} feeds`,
     providers: diagnostics,
-    degraded: successful.length < PROVIDERS.length,
+    degraded: successful.length < providers.length,
     articles: mergeArticles(
       successful,
       scope === "global" ? MAX_GLOBAL_ARTICLES : MAX_COUNTRY_ARTICLES,

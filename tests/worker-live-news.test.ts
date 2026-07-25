@@ -1,4 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 
 import {
   articleMatchesCountry,
@@ -7,6 +9,10 @@ import {
   parseGoogleNewsFeed,
   parsePublisherRss,
 } from "../worker/live-news";
+import {
+  countryCodeForName,
+  googleNewsLocaleForCountry,
+} from "../lib/country-locale";
 
 const rssItem = `
   <rss><channel><item>
@@ -109,6 +115,80 @@ describe("worker live-news providers", () => {
     expect(payload.articles).toHaveLength(1);
     expect(payload.degraded).toBe(true);
     expect(payload.provider).toContain("1 feeds");
+  });
+
+  it("uses a country's local Google News edition and local-language search", async () => {
+    vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const requestedUrls: string[] = [];
+    const googleItem = `
+      <rss><channel><item>
+        <title>Le Sénégal lance un nouveau programme - APS</title>
+        <description>Une annonce faite à Dakar.</description>
+        <link>https://news.google.com/rss/articles/senegal-local</link>
+        <guid>senegal-local</guid>
+        <pubDate>Fri, 24 Jul 2026 21:00:00 GMT</pubDate>
+        <source url="https://aps.sn/">APS</source>
+      </item></channel></rss>
+    `;
+    const fetchMock = vi.fn(async (input: URL | RequestInfo) => {
+      const url = String(input);
+      requestedUrls.push(url);
+      if (url.startsWith("https://news.google.com/rss")) {
+        return new Response(googleItem, { status: 200 });
+      }
+      return new Response("Unavailable", { status: 503 });
+    });
+
+    const response = await handleLiveNews(
+      new Request(
+        "https://worldpulse.test/api/live-news?country=Senegal&iso2=SN",
+      ),
+      fetchMock as typeof fetch,
+    );
+    const payload = (await response.json()) as {
+      articles: Array<{ publisherName: string }>;
+    };
+
+    expect(response.status).toBe(200);
+    expect(countryCodeForName("Senegal")).toBe("SN");
+    expect(googleNewsLocaleForCountry("Senegal")).toMatchObject({
+      region: "SN",
+      language: "fr",
+      ceid: "SN:fr",
+    });
+    expect(
+      requestedUrls.some(
+        (url) =>
+          url.startsWith("https://news.google.com/rss?") &&
+          url.includes("gl=SN") &&
+          url.includes("ceid=SN%3Afr"),
+      ),
+    ).toBe(true);
+    expect(
+      requestedUrls.some(
+        (url) =>
+          url.includes("/rss/search?") &&
+          url.includes("gl=SN") &&
+          decodeURIComponent(url).includes('"Dakar"'),
+      ),
+    ).toBe(true);
+    expect(
+      requestedUrls.some(
+        (url) => url.includes("/rss/search?") && url.includes("gl=US"),
+      ),
+    ).toBe(true);
+    expect(payload.articles[0].publisherName).toBe("APS");
+  });
+
+  it("resolves a local-news region for every country on the map", () => {
+    const geojson = JSON.parse(
+      readFileSync(resolve("public/countries.geojson"), "utf8"),
+    ) as { features: Array<{ properties: { name: string } }> };
+    const unresolved = geojson.features
+      .map((feature) => feature.properties.name)
+      .filter((name) => !countryCodeForName(name));
+
+    expect(unresolved).toEqual([]);
   });
 
   it("returns an explicit outage only when every provider fails", async () => {

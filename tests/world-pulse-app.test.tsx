@@ -25,6 +25,19 @@ function TestMap({ onSelect }: WorldMapProps) {
       >
         Select Spain on map
       </button>
+      <button
+        type="button"
+        onClick={() =>
+          onSelect({
+            mapId: "country-57",
+            iso2: "SN",
+            name: "Senegal",
+            events: [],
+          })
+        }
+      >
+        Select Senegal on map
+      </button>
     </>
   );
 }
@@ -62,11 +75,21 @@ describe("WorldPulse interactions", () => {
     ).not.toBeInTheDocument();
   });
 
-  it("loads one global index without requesting every country at startup", async () => {
+  it("loads the global index and only the selected country's local index at startup", async () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input);
       if (url === "/countries.geojson") {
         return Response.json({ features: [] });
+      }
+      if (url.startsWith("/api/live-news?country=Canada")) {
+        return Response.json({
+          countryName: "Canada",
+          scope: "country",
+          generatedAt: "2026-07-25T00:00:00.000Z",
+          refreshAfterSeconds: 600,
+          provider: "Test local index",
+          articles: [],
+        });
       }
       return Response.json({
         countryName: null,
@@ -85,8 +108,48 @@ describe("WorldPulse interactions", () => {
       expect(fetchMock).toHaveBeenCalledWith("/api/live-news?scope=global"),
     );
     const requestedUrls = fetchMock.mock.calls.map(([input]) => String(input));
+    const countryRequests = requestedUrls.filter((url) =>
+      url.includes("/api/live-news?country="),
+    );
+    expect(countryRequests).toEqual([
+      "/api/live-news?country=Canada&iso2=CA",
+    ]);
+  });
+
+  it("loads country-local reporting when a country is selected on the map", async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === "/countries.geojson") {
+        return Response.json({ features: [] });
+      }
+      const countryName = url.includes("country=Senegal")
+        ? "Senegal"
+        : url.includes("country=Canada")
+          ? "Canada"
+          : null;
+      return Response.json({
+        countryName,
+        scope: countryName ? "country" : "global",
+        generatedAt: "2026-07-25T00:00:00.000Z",
+        refreshAfterSeconds: 600,
+        provider: "Test live index",
+        articles: [],
+      });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<WorldPulseApp MapComponent={TestMap} />);
+    fireEvent.click(
+      screen.getByRole("button", { name: "Select Senegal on map" }),
+    );
+
+    await waitFor(() =>
+      expect(fetchMock).toHaveBeenCalledWith(
+        "/api/live-news?country=Senegal&iso2=SN",
+      ),
+    );
     expect(
-      requestedUrls.some((url) => url.includes("/api/live-news?country=")),
-    ).toBe(false);
+      screen.getByRole("heading", { name: "Senegal" }),
+    ).toBeInTheDocument();
   });
 });

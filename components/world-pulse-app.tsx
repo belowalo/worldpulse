@@ -12,6 +12,7 @@ import {
   articlesMentioningCountry,
   buildLiveEvents,
 } from "@/lib/live-news";
+import { countryCodeForName } from "@/lib/country-locale";
 import {
   CATEGORIES,
   type Category,
@@ -300,6 +301,9 @@ export function WorldPulseApp({
   const [globalPayload, setGlobalPayload] =
     useState<LiveNewsPayload | null>(null);
   const [globalFeed, setGlobalFeed] = useState<FeedState>(EMPTY_FEED);
+  const [countryFeeds, setCountryFeeds] = useState<Record<string, FeedState>>(
+    {},
+  );
   const [globalView, setGlobalView] = useState(false);
   const [category, setCategory] = useState<"All" | Category>("All");
   const [importance, setImportance] = useState<ImportanceFilter>("All");
@@ -337,6 +341,51 @@ export function WorldPulseApp({
     }
   }, []);
 
+  const fetchCountryNews = useCallback(async (country: MapCountry) => {
+    const key = country.name;
+    setCountryFeeds((current) => ({
+      ...current,
+      [key]: {
+        ...(current[key] ?? EMPTY_FEED),
+        loading: true,
+        error: null,
+      },
+    }));
+    try {
+      const parameters = new URLSearchParams({ country: country.name });
+      if (country.iso2) parameters.set("iso2", country.iso2);
+      const response = await fetch(`/api/live-news?${parameters.toString()}`);
+      if (!response.ok) {
+        throw new Error(
+          `Local reporting for ${country.name} is temporarily unavailable.`,
+        );
+      }
+      const payload = (await response.json()) as LiveNewsPayload;
+      setCountryFeeds((current) => ({
+        ...current,
+        [key]: {
+          events: buildLiveEvents(payload, country),
+          updatedAt: payload.generatedAt,
+          provider: `${payload.provider} · local + international discovery`,
+          loading: false,
+          error: null,
+        },
+      }));
+    } catch (error) {
+      setCountryFeeds((current) => ({
+        ...current,
+        [key]: {
+          ...(current[key] ?? EMPTY_FEED),
+          loading: false,
+          error:
+            error instanceof Error
+              ? error.message
+              : `Local reporting for ${country.name} is temporarily unavailable.`,
+        },
+      }));
+    }
+  }, []);
+
   useEffect(() => {
     if (!liveUpdates) return;
     let cancelled = false;
@@ -362,6 +411,7 @@ export function WorldPulseApp({
             metadata ?? {
               mapId,
               name,
+              iso2: countryCodeForName(name) ?? undefined,
               events: [],
             },
           ];
@@ -383,15 +433,29 @@ export function WorldPulseApp({
 
   useEffect(() => {
     if (!liveUpdates) return;
+    void fetchCountryNews(selectedCountry);
+  }, [fetchCountryNews, liveUpdates, selectedCountry]);
+
+  useEffect(() => {
+    if (!liveUpdates) return;
     const refreshTimer = window.setInterval(() => {
       void fetchGlobalNews();
+      void fetchCountryNews(selectedCountry);
     }, 600_000);
     return () => window.clearInterval(refreshTimer);
-  }, [fetchGlobalNews, liveUpdates]);
+  }, [fetchCountryNews, fetchGlobalNews, liveUpdates, selectedCountry]);
 
   const mapCountries = useMemo(
     () =>
       countryDirectory.map((country): MapCountry => {
+        const countryFeed = countryFeeds[country.name];
+        if (countryFeed && !countryFeed.loading && !countryFeed.error) {
+          return {
+            ...country,
+            events: countryFeed.events,
+            topEvent: countryFeed.events[0],
+          };
+        }
         if (!globalPayload) return country;
         const matchingArticles = articlesMentioningCountry(
           globalPayload,
@@ -404,13 +468,21 @@ export function WorldPulseApp({
         );
         return { ...country, events, topEvent: events[0] };
       }),
-    [countryDirectory, globalPayload],
+    [countryDirectory, countryFeeds, globalPayload],
   );
   const activeCountry =
     mapCountries.find((country) => country.mapId === selectedCountry.mapId) ??
     selectedCountry;
-  const activeFeed = globalFeed;
-  const baseEvents = globalView ? globalFeed.events : activeCountry.events;
+  const activeFeed = globalView
+    ? globalFeed
+    : countryFeeds[activeCountry.name] ?? {
+        events: activeCountry.events,
+        updatedAt: globalFeed.updatedAt,
+        provider: globalFeed.provider,
+        loading: globalFeed.loading,
+        error: globalFeed.error,
+      };
+  const baseEvents = activeFeed.events;
   const filteredEvents = (() => {
     const limitHours =
       timeRange === "24 hours" ? 24 : timeRange === "3 days" ? 72 : 168;
@@ -568,7 +640,11 @@ export function WorldPulseApp({
               </span>
               <button
                 type="button"
-                onClick={() => void fetchGlobalNews()}
+                onClick={() =>
+                  void (globalView
+                    ? fetchGlobalNews()
+                    : fetchCountryNews(activeCountry))
+                }
                 disabled={activeFeed.loading || !liveUpdates}
                 className="rounded-md border border-[#354359] px-2.5 py-1.5 text-[9px] text-[#aeb9c7] transition hover:border-[#64748b] hover:text-white disabled:cursor-wait disabled:opacity-50"
               >
@@ -699,9 +775,9 @@ export function WorldPulseApp({
             )}
           </div>
           <footer className="border-t border-[#273246] px-5 py-3 text-[9px] leading-4 text-[#68768a]">
-            Live metadata refreshes every 10 minutes. Importance is an estimate,
-            not an objective fact. Uneven digital coverage can make some
-            countries appear less active.
+            Country panels combine local top stories, country-specific search,
+            and international reporting. Metadata refreshes every 10 minutes.
+            Importance is an estimate, not an objective fact.
           </footer>
         </aside>
       </div>
