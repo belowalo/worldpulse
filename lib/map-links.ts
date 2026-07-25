@@ -5,6 +5,7 @@ import type { Event, MapCountry } from "./types";
 export type MapPosition = [number, number];
 
 interface CountryFeature {
+  id?: string | number;
   properties?: { name?: string };
   geometry?: {
     type?: string;
@@ -129,6 +130,9 @@ export function countryCentersFromGeoJson(
       normalizeLongitude(largest.center[0]),
       largest.center[1],
     ];
+    if (feature.id != null) {
+      centers[String(feature.id)] = centers[name];
+    }
   }
   return centers;
 }
@@ -206,6 +210,8 @@ export function buildEventLinkCollection({
   const selectedCountry = countries.find(
     (country) => country.mapId === selectedMapId,
   );
+  const centerForCountry = (country: MapCountry) =>
+    centers[country.name] ?? centers[country.mapId];
   const strongestPair = new Map<
     string,
     EventLinkFeatureCollection["features"][number]
@@ -238,12 +244,16 @@ export function buildEventLinkCollection({
             countries,
             anchoredToSelection,
           )
-    ).filter((country) => centers[country.name]);
+    ).filter((country) => centerForCountry(country));
     if (mentioned.length < 2) continue;
 
     const origin = anchoredToSelection ?? mentioned[0];
+    const originCenter = centerForCountry(origin);
+    if (!originCenter) continue;
     for (const destination of mentioned) {
       if (destination.mapId === origin.mapId) continue;
+      const destinationCenter = centerForCountry(destination);
+      if (!destinationCenter) continue;
       const pairKey = [origin.name, destination.name].sort().join("|");
       const existing = strongestPair.get(pairKey);
       if (
@@ -266,8 +276,8 @@ export function buildEventLinkCollection({
         geometry: {
           type: "LineString",
           coordinates: curvedLine(
-            centers[origin.name],
-            centers[destination.name],
+            originCenter,
+            destinationCenter,
           ),
         },
       });

@@ -108,5 +108,6 @@ describe("multi-country map links", () => {
     expect(centers.Egypt?.[0]).toBeLessThan(33);
     expect(centers.Egypt?.[1]).toBeGreaterThan(24);
     expect(centers.Egypt?.[1]).toBeLessThan(30);
+    expect(centers["840"]).toEqual(centers["United States"]);
   });
 });

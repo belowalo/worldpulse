@@ -121,10 +121,40 @@ function ImportancePill({ event }: { event: Event }) {
   );
 }
 
-function EventCard({ event }: { event: Event }) {
+function EventCard({
+  event,
+  connectionFocused,
+  connectionActionLabel,
+  onConnectionFocus,
+}: {
+  event: Event;
+  connectionFocused: boolean;
+  connectionActionLabel: string;
+  onConnectionFocus: () => void;
+}) {
   const [expanded, setExpanded] = useState(false);
+  const hasConnections = event.affectedCountries.length > 1;
+
   return (
-    <article className="border-b border-[#273246] py-5 first:pt-0 last:border-0">
+    <article
+      className={`border-b border-[#273246] py-5 transition first:pt-0 last:border-0 ${
+        hasConnections ? "cursor-pointer" : ""
+      } ${
+        connectionFocused
+          ? "-mx-3 rounded-xl border border-[#3c6d70] bg-[#13262c] px-3"
+          : ""
+      }`}
+      onClick={
+        hasConnections
+          ? (clickEvent) => {
+              if ((clickEvent.target as HTMLElement).closest("a, button")) {
+                return;
+              }
+              onConnectionFocus();
+            }
+          : undefined
+      }
+    >
       <div className="flex flex-wrap items-center gap-2">
         <span
           className="h-2 w-2 rounded-full"
@@ -135,6 +165,20 @@ function EventCard({ event }: { event: Event }) {
           {event.category}
         </span>
         <ImportancePill event={event} />
+        {hasConnections ? (
+          <button
+            type="button"
+            aria-pressed={connectionFocused}
+            onClick={onConnectionFocus}
+            className={`ml-auto rounded-full border px-2.5 py-1 font-mono text-[8px] uppercase tracking-[0.11em] transition ${
+              connectionFocused
+                ? "border-[#73e2cc] bg-[#17413b] text-[#c3fff4]"
+                : "border-[#3a4a61] text-[#91a2b7] hover:border-[#60728d] hover:text-white"
+            }`}
+          >
+            {connectionActionLabel}
+          </button>
+        ) : null}
       </div>
       <h3
         dir="auto"
@@ -355,6 +399,9 @@ export function WorldPulseApp({
     refreshed: 0,
   });
   const [globalView, setGlobalView] = useState(false);
+  const [connectionEventId, setConnectionEventId] = useState<string | null>(
+    null,
+  );
   const [category, setCategory] = useState<"All" | Category>("All");
   const [importance, setImportance] = useState<ImportanceFilter>("All");
   const [timeRange, setTimeRange] = useState<TimeFilter>("7 days");
@@ -743,10 +790,22 @@ export function WorldPulseApp({
       return matchesCategory && matchesImportance && matchesTime && matchesSearch;
     });
   })();
+  const focusedConnectionEvent = filteredEvents.find(
+    (event) => event.id === connectionEventId,
+  );
+  const mapLinkEvents =
+    connectionEventId !== null
+      ? focusedConnectionEvent
+        ? [focusedConnectionEvent]
+        : []
+      : globalView
+        ? []
+        : filteredEvents;
 
   const handleSelect = (country: MapCountry) => {
     setSelectedCountry(country);
     setGlobalView(false);
+    setConnectionEventId(null);
     setCategory("All");
     setImportance("All");
     setTimeRange("7 days");
@@ -777,7 +836,10 @@ export function WorldPulseApp({
         <nav className="flex items-center gap-2" aria-label="Main navigation">
           <button
             type="button"
-            onClick={() => setGlobalView((value) => !value)}
+            onClick={() => {
+              setGlobalView((value) => !value);
+              setConnectionEventId(null);
+            }}
             className={`rounded-full border px-3 py-2 text-[10px] transition sm:px-4 ${
               globalView
                 ? "border-[#73e2cc] bg-[#14332f] text-[#b7fff1]"
@@ -802,7 +864,7 @@ export function WorldPulseApp({
             countries={mapCountries}
             selectedMapId={selectedCountry.mapId}
             onSelect={handleSelect}
-            linkEvents={filteredEvents}
+            linkEvents={mapLinkEvents}
             statusLabel={
               mapPreload.total
                 ? mapPreload.loaded === mapPreload.total
@@ -828,7 +890,7 @@ export function WorldPulseApp({
                 <span>Intensity = estimated importance</span>
                 <span className="inline-flex items-center gap-1.5">
                   <span className="h-2 w-5 rounded-[50%] border-t border-[#73e2cc]" />
-                  Curves = multi-country events
+                  Curves = selected event connections
                 </span>
               </div>
             </div>
@@ -869,7 +931,7 @@ export function WorldPulseApp({
                   </h2>
                 </div>
                 <p className="mt-1 text-[10px] text-[#8794a6]">
-                  {filteredEvents.length} active{" "}
+                  {filteredEvents.length} grouped{" "}
                   {filteredEvents.length === 1 ? "event" : "events"} · Updated
                   {activeFeed.updatedAt
                     ? ` ${formatTime(activeFeed.updatedAt)}`
@@ -913,7 +975,10 @@ export function WorldPulseApp({
               <FilterSelect
                 label="Filter by category"
                 value={category}
-                onChange={(value) => setCategory(value as "All" | Category)}
+                onChange={(value) => {
+                  setCategory(value as "All" | Category);
+                  setConnectionEventId(null);
+                }}
               >
                 <option value="All">All topics</option>
                 {CATEGORIES.map((item) => (
@@ -923,7 +988,10 @@ export function WorldPulseApp({
               <FilterSelect
                 label="Filter by importance"
                 value={importance}
-                onChange={(value) => setImportance(value as ImportanceFilter)}
+                onChange={(value) => {
+                  setImportance(value as ImportanceFilter);
+                  setConnectionEventId(null);
+                }}
               >
                 {["All", "Major", "Significant", "Developing", "Routine"].map(
                   (item) => (
@@ -934,7 +1002,10 @@ export function WorldPulseApp({
               <FilterSelect
                 label="Filter by time range"
                 value={timeRange}
-                onChange={(value) => setTimeRange(value as TimeFilter)}
+                onChange={(value) => {
+                  setTimeRange(value as TimeFilter);
+                  setConnectionEventId(null);
+                }}
               >
                 {["24 hours", "3 days", "7 days"].map((item) => (
                   <option key={item}>{item}</option>
@@ -946,7 +1017,10 @@ export function WorldPulseApp({
               <input
                 type="search"
                 value={search}
-                onChange={(event) => setSearch(event.target.value)}
+                onChange={(event) => {
+                  setSearch(event.target.value);
+                  setConnectionEventId(null);
+                }}
                 placeholder="Search headlines, summaries, sources…"
                 className="h-9 w-full rounded-lg border border-[#303d51] bg-[#111a29] px-3 text-xs text-white placeholder:text-[#657286]"
               />
@@ -993,7 +1067,23 @@ export function WorldPulseApp({
               </div>
             ) : filteredEvents.length ? (
               filteredEvents.map((event) => (
-                <EventCard key={event.id} event={event} />
+                <EventCard
+                  key={event.id}
+                  event={event}
+                  connectionFocused={connectionEventId === event.id}
+                  connectionActionLabel={
+                    connectionEventId === event.id
+                      ? globalView
+                        ? "Hide connections"
+                        : "Show all connections"
+                      : "Show connections"
+                  }
+                  onConnectionFocus={() =>
+                    setConnectionEventId((current) =>
+                      current === event.id ? null : event.id,
+                    )
+                  }
+                />
               ))
             ) : (
               <div className="grid min-h-60 place-items-center rounded-xl border border-dashed border-[#354157] p-8 text-center">
@@ -1021,6 +1111,7 @@ export function WorldPulseApp({
                         setImportance("All");
                         setTimeRange("7 days");
                         setSearch("");
+                        setConnectionEventId(null);
                       }}
                       className="mt-4 rounded-lg border border-[#46556b] px-3 py-2 text-[10px] text-[#cad3df] hover:bg-[#192437]"
                     >
@@ -1034,7 +1125,8 @@ export function WorldPulseApp({
           <footer className="border-t border-[#273246] px-5 py-3 text-[9px] leading-4 text-[#68768a]">
             Country panels combine local top stories, country-specific search,
             and international reporting. Metadata refreshes every 10 minutes.
-            Importance is an estimate, not an objective fact.
+            Duplicate headlines about the same occurrence are grouped into one
+            event. Importance is an estimate, not an objective fact.
           </footer>
         </aside>
       </div>

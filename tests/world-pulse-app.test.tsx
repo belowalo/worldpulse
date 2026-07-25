@@ -12,7 +12,12 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-function TestMap({ countries, onSelect, statusLabel }: WorldMapProps) {
+function TestMap({
+  countries,
+  onSelect,
+  statusLabel,
+  linkEvents,
+}: WorldMapProps) {
   const japan = countryPulses.find((country) => country.iso2 === "JP");
   const egypt = countryPulses.find((country) => country.iso2 === "EG");
   return (
@@ -20,6 +25,9 @@ function TestMap({ countries, onSelect, statusLabel }: WorldMapProps) {
       <span>{statusLabel}</span>
       <span data-testid="countries-with-news">
         {countries.filter((country) => country.topEvent).length}
+      </span>
+      <span data-testid="link-event-ids">
+        {linkEvents?.map((event) => event.id).join(",") ?? ""}
       </span>
       <button type="button" onClick={() => japan && onSelect(japan)}>
         Select Japan on map
@@ -60,6 +68,152 @@ describe("WorldPulse interactions", () => {
       screen.getByRole("button", { name: "Select Japan on map" }),
     );
     expect(screen.getByRole("heading", { name: "Japan" })).toBeInTheDocument();
+  });
+
+  it("shows all country connections until a specific event is selected", async () => {
+    const tradeHeadline =
+      "Canada and Mexico agree a cross-border trade accord";
+    const countryArticles = [
+      {
+        id: "canada-mexico-trade",
+        title: tradeHeadline,
+        url: "https://publisher.example/canada-mexico-trade",
+        publisherName: "Test Publisher",
+        publisherUrl: "https://publisher.example/",
+        publishedAt: "2026-07-25T00:00:00.000Z",
+      },
+      {
+        id: "canada-us-wildfires",
+        title: "Canada and United States coordinate wildfire response",
+        url: "https://publisher.example/canada-us-wildfires",
+        publisherName: "Second Publisher",
+        publisherUrl: "https://publisher.example/",
+        publishedAt: "2026-07-24T23:00:00.000Z",
+      },
+    ];
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === "/countries.geojson") {
+        return Response.json({
+          features: [
+            { id: "124", properties: { name: "Canada" } },
+            { id: "484", properties: { name: "Mexico" } },
+            { id: "840", properties: { name: "United States" } },
+          ],
+        });
+      }
+      if (url === "/map-news-seed.json") {
+        return Response.json({
+          scope: "map",
+          generatedAt: "2026-07-25T00:00:00.000Z",
+          refreshAfterSeconds: 600,
+          provider: "Test map preload",
+          countries: [
+            {
+              countryName: "Canada",
+              generatedAt: "2026-07-25T00:00:00.000Z",
+              available: true,
+              articles: countryArticles,
+            },
+          ],
+        });
+      }
+      const countryName = url.includes("country=Canada") ? "Canada" : null;
+      return Response.json({
+        countryName,
+        scope: countryName ? "country" : "global",
+        generatedAt: "2026-07-25T00:00:00.000Z",
+        refreshAfterSeconds: 600,
+        provider: "Test live index",
+        articles: countryName ? countryArticles : [],
+      });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<WorldPulseApp MapComponent={TestMap} />);
+
+    await waitFor(() =>
+      expect(
+        screen
+          .getByTestId("link-event-ids")
+          .textContent?.split(",")
+          .filter(Boolean).length,
+      ).toBeGreaterThan(1),
+    );
+
+    fireEvent.click(
+      await screen.findByRole("heading", { name: tradeHeadline }),
+    );
+    expect(
+      screen.getByTestId("link-event-ids").textContent?.split(",").filter(Boolean),
+    ).toHaveLength(1);
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "Show all connections" }),
+    );
+    expect(
+      screen.getByTestId("link-event-ids").textContent?.split(",").filter(Boolean)
+        .length,
+    ).toBeGreaterThan(1);
+  });
+
+  it("keeps global connections hidden until an event is selected", async () => {
+    const headline = "Canada and Mexico agree a cross-border trade accord";
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === "/countries.geojson") {
+        return Response.json({
+          features: [
+            { id: "124", properties: { name: "Canada" } },
+            { id: "484", properties: { name: "Mexico" } },
+          ],
+        });
+      }
+      if (url === "/map-news-seed.json") {
+        return Response.json({
+          scope: "map",
+          generatedAt: "2026-07-25T00:00:00.000Z",
+          refreshAfterSeconds: 600,
+          provider: "Test map preload",
+          countries: [],
+        });
+      }
+      const countryName = url.includes("country=Canada") ? "Canada" : null;
+      return Response.json({
+        countryName,
+        scope: countryName ? "country" : "global",
+        generatedAt: "2026-07-25T00:00:00.000Z",
+        refreshAfterSeconds: 600,
+        provider: "Test live index",
+        articles: countryName
+          ? []
+          : [
+              {
+                id: "canada-mexico-trade",
+                title: headline,
+                url: "https://publisher.example/canada-mexico-trade",
+                publisherName: "Test Publisher",
+                publisherUrl: "https://publisher.example/",
+                publishedAt: "2026-07-25T00:00:00.000Z",
+              },
+            ],
+      });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<WorldPulseApp MapComponent={TestMap} />);
+    fireEvent.click(screen.getByRole("button", { name: "Global feed" }));
+
+    expect(screen.getByTestId("link-event-ids")).toBeEmptyDOMElement();
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Show connections" }),
+    );
+    expect(screen.getByTestId("link-event-ids")).not.toBeEmptyDOMElement();
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "Hide connections" }),
+    );
+    expect(screen.getByTestId("link-event-ids")).toBeEmptyDOMElement();
   });
 
   it("filters the visible events by search", () => {
