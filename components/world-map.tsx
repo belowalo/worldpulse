@@ -1,6 +1,7 @@
 "use client";
 
 import * as maplibregl from "maplibre-gl";
+import maplibreWorkerUrl from "maplibre-gl/dist/maplibre-gl-worker.mjs?url";
 import {
   type ExpressionSpecification,
   type Map as MapLibreMap,
@@ -8,18 +9,18 @@ import {
 } from "maplibre-gl";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { mapStyleForEvent } from "@/lib/scoring";
-import type { CountryPulse } from "@/lib/types";
+import type { CountryPulse, MapCountry } from "@/lib/types";
 
-interface WorldMapProps {
+export interface WorldMapProps {
   countries: CountryPulse[];
-  selectedIso2: string | null;
-  onSelect: (iso2: string) => void;
+  selectedMapId: string | null;
+  onSelect: (country: MapCountry) => void;
 }
 
 interface HoveredCountry {
   x: number;
   y: number;
-  country: CountryPulse;
+  country: MapCountry;
 }
 
 const SOURCE_ID = "world-countries";
@@ -27,9 +28,11 @@ const FILL_LAYER = "country-fill";
 const LINE_LAYER = "country-line";
 const SELECTED_LAYER = "selected-country";
 
+maplibregl.setWorkerUrl(maplibreWorkerUrl);
+
 export function WorldMap({
   countries,
-  selectedIso2,
+  selectedMapId,
   onSelect,
 }: WorldMapProps) {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -137,10 +140,19 @@ export function WorldMap({
       const feature = map.queryRenderedFeatures(event.point, {
         layers: [FILL_LAYER],
       })[0];
-      if (!feature?.id) return undefined;
-      return countriesRef.current.find(
+      if (feature?.id == null) return undefined;
+      const seededCountry = countriesRef.current.find(
         (country) => country.mapId === String(feature.id),
       );
+      if (seededCountry) return seededCountry;
+
+      const name = feature.properties?.name;
+      if (typeof name !== "string" || !name.trim()) return undefined;
+      return {
+        mapId: String(feature.id),
+        name,
+        events: [],
+      } satisfies MapCountry;
     };
 
     map.on("mousemove", FILL_LAYER, (event: MapMouseEvent) => {
@@ -158,7 +170,7 @@ export function WorldMap({
     });
     map.on("click", FILL_LAYER, (event: MapMouseEvent) => {
       const country = countryAt(event);
-      if (country) onSelectRef.current(country.iso2);
+      if (country) onSelectRef.current(country);
     });
 
     mapRef.current = map;
@@ -178,20 +190,17 @@ export function WorldMap({
   useEffect(() => {
     const map = mapRef.current;
     if (!map?.getLayer(SELECTED_LAYER)) return;
-    const mapId = countries.find(
-      (country) => country.iso2 === selectedIso2,
-    )?.mapId;
     map.setFilter(SELECTED_LAYER, [
       "==",
       ["to-string", ["id"]],
-      mapId ?? "__none__",
+      selectedMapId ?? "__none__",
     ]);
-  }, [countries, selectedIso2]);
+  }, [selectedMapId]);
 
   return (
     <div
       className="relative h-full min-h-[420px] w-full overflow-hidden bg-[#0b121d]"
-      aria-label="Interactive world news map. Use the country shortcuts below the map for keyboard access."
+      aria-label="Interactive world news map. Click or tap a country to open its news panel."
       role="region"
     >
       <div

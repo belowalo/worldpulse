@@ -28,7 +28,7 @@ The web app is at the repository root because the deployable Sites runtime expec
 - `lib/seed-data.ts` adapts deterministic seed events into country pulses.
 - `public/countries.geojson` is a local, deployment-safe country dataset derived from the ISC-licensed `geojson-world-map` package.
 
-The map canvas supports pointer navigation. A row of semantic country buttons provides an equivalent keyboard-accessible selection path for featured countries. Text labels, score labels, and a legend ensure that color is never the only signal.
+The map canvas supports pointer navigation and direct country selection across all 215 geometries in the bundled dataset. Countries without seeded news open an explicit no-news state instead of remaining inert. Text labels, score labels, and the category legend ensure that color is never the only signal.
 
 ## API boundaries
 

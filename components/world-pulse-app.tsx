@@ -1,8 +1,13 @@
 "use client";
 
 import dynamic from "next/dynamic";
-import { useState } from "react";
-import { CATEGORIES, type Category, type Event } from "@/lib/types";
+import { useState, type ComponentType } from "react";
+import {
+  CATEGORIES,
+  type Category,
+  type Event,
+  type MapCountry,
+} from "@/lib/types";
 import {
   countryPulses,
   defaultCountry,
@@ -10,6 +15,7 @@ import {
   flagEmoji,
 } from "@/lib/seed-data";
 import { categoryColor } from "@/lib/scoring";
+import type { WorldMapProps } from "./world-map";
 
 const WorldMap = dynamic(
   () => import("./world-map").then((module) => module.WorldMap),
@@ -235,9 +241,16 @@ function MethodologyModal({ onClose }: { onClose: () => void }) {
   );
 }
 
-export function WorldPulseApp() {
-  const [selectedIso2, setSelectedIso2] = useState<string | null>(
-    defaultCountry,
+interface WorldPulseAppProps {
+  MapComponent?: ComponentType<WorldMapProps>;
+}
+
+export function WorldPulseApp({
+  MapComponent = WorldMap,
+}: WorldPulseAppProps = {}) {
+  const [selectedCountry, setSelectedCountry] = useState<MapCountry>(
+    countryPulses.find((country) => country.iso2 === defaultCountry) ??
+      countryPulses[0],
   );
   const [globalView, setGlobalView] = useState(false);
   const [category, setCategory] = useState<"All" | Category>("All");
@@ -246,10 +259,7 @@ export function WorldPulseApp() {
   const [search, setSearch] = useState("");
   const [showMethodology, setShowMethodology] = useState(false);
 
-  const selectedCountry = countryPulses.find(
-    (country) => country.iso2 === selectedIso2,
-  );
-  const baseEvents = globalView ? events : selectedCountry?.events ?? [];
+  const baseEvents = globalView ? events : selectedCountry.events;
   const filteredEvents = (() => {
     const limitHours =
       timeRange === "24 hours" ? 24 : timeRange === "3 days" ? 72 : 168;
@@ -272,10 +282,15 @@ export function WorldPulseApp() {
     });
   })();
 
-  const handleSelect = (iso2: string) => {
-    setSelectedIso2(iso2);
+  const handleSelect = (country: MapCountry) => {
+    setSelectedCountry(country);
     setGlobalView(false);
   };
+  const hasActiveFilters =
+    category !== "All" ||
+    importance !== "All" ||
+    timeRange !== "7 days" ||
+    search.trim().length > 0;
 
   return (
     <main className="min-h-screen bg-[#080d15]">
@@ -317,9 +332,9 @@ export function WorldPulseApp() {
 
       <div className="grid min-h-[calc(100vh-4rem)] lg:grid-cols-[minmax(0,1fr)_420px]">
         <section className="relative min-h-[54vh] border-b border-[#222d3e] lg:h-[calc(100vh-4rem)] lg:border-b-0 lg:border-r">
-          <WorldMap
+          <MapComponent
             countries={countryPulses}
-            selectedIso2={selectedIso2}
+            selectedMapId={selectedCountry.mapId}
             onSelect={handleSelect}
           />
           <div className="absolute inset-x-4 bottom-4 z-10 rounded-xl border border-[#334055] bg-[#0d1522]/95 p-3 shadow-xl backdrop-blur-sm sm:left-auto sm:w-[min(620px,calc(100%-2rem))]">
@@ -345,23 +360,6 @@ export function WorldPulseApp() {
                 </div>
               ))}
             </div>
-            <div className="mt-3 flex gap-2 overflow-x-auto pt-2 scrollbar-thin">
-              {countryPulses.map((country) => (
-                <button
-                  key={country.iso2}
-                  type="button"
-                  onClick={() => handleSelect(country.iso2)}
-                  aria-pressed={selectedIso2 === country.iso2}
-                  className={`shrink-0 rounded-md border px-2.5 py-1.5 text-[9px] transition ${
-                    selectedIso2 === country.iso2
-                      ? "border-white bg-white text-[#101827]"
-                      : "border-[#344157] text-[#b8c2cf] hover:border-[#5f6e83]"
-                  }`}
-                >
-                  {country.name}
-                </button>
-              ))}
-            </div>
           </div>
         </section>
 
@@ -376,10 +374,12 @@ export function WorldPulseApp() {
                   <span className="text-2xl" aria-hidden="true">
                     {globalView
                       ? "🌐"
-                      : flagEmoji(selectedCountry?.iso2 ?? "CA")}
+                      : selectedCountry.iso2
+                        ? flagEmoji(selectedCountry.iso2)
+                        : "◎"}
                   </span>
                   <h2 className="text-xl font-semibold tracking-[-0.035em]">
-                    {globalView ? "Global events" : selectedCountry?.name}
+                    {globalView ? "Global events" : selectedCountry.name}
                   </h2>
                 </div>
                 <p className="mt-1 text-[10px] text-[#8794a6]">
@@ -451,22 +451,34 @@ export function WorldPulseApp() {
               <div className="grid min-h-60 place-items-center rounded-xl border border-dashed border-[#354157] p-8 text-center">
                 <div>
                   <div className="text-2xl text-[#59687d]">◎</div>
-                  <h3 className="mt-3 text-sm font-medium">No matching events</h3>
+                  <h3 className="mt-3 text-sm font-medium">
+                    {!globalView &&
+                    !selectedCountry.events.length &&
+                    !hasActiveFilters
+                      ? `No active news for ${selectedCountry.name}`
+                      : "No matching events"}
+                  </h3>
                   <p className="mt-2 text-xs leading-5 text-[#7f8da1]">
-                    Broaden the filters or try a different search term.
+                    {!globalView &&
+                    !selectedCountry.events.length &&
+                    !hasActiveFilters
+                      ? "Every mapped country is selectable. News coverage is not yet available for this country in the demo dataset."
+                      : "Broaden the filters or try a different search term."}
                   </p>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setCategory("All");
-                      setImportance("All");
-                      setTimeRange("7 days");
-                      setSearch("");
-                    }}
-                    className="mt-4 rounded-lg border border-[#46556b] px-3 py-2 text-[10px] text-[#cad3df] hover:bg-[#192437]"
-                  >
-                    Reset filters
-                  </button>
+                  {hasActiveFilters ? (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setCategory("All");
+                        setImportance("All");
+                        setTimeRange("7 days");
+                        setSearch("");
+                      }}
+                      className="mt-4 rounded-lg border border-[#46556b] px-3 py-2 text-[10px] text-[#cad3df] hover:bg-[#192437]"
+                    >
+                      Reset filters
+                    </button>
+                  ) : null}
                 </div>
               </div>
             )}

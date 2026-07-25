@@ -85,3 +85,13 @@ export interface CountryPulse extends Country {
   events: Event[];
   topEvent?: Event;
 }
+
+export interface MapCountry {
+  mapId: string;
+  name: string;
+  iso2?: string;
+  iso3?: string;
+  region?: string;
+  events: Event[];
+  topEvent?: Event;
+}
