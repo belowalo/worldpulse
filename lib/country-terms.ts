@@ -65,7 +65,7 @@ const COUNTRY_RELATED_TERMS: Record<string, string[]> = {
   "Czech Republic": ["Czech", "Czechia"],
   Denmark: ["Danish"],
   Ecuador: ["Ecuadorian"],
-  Egypt: ["Egyptian"],
+  Egypt: ["Egyptian", "مصر", "مصري", "مصرية", "المصري", "المصرية"],
   Estonia: ["Estonian"],
   Ethiopia: ["Ethiopian"],
   Finland: ["Finnish"],

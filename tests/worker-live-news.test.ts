@@ -13,6 +13,7 @@ import {
   countryCodeForName,
   googleNewsLocaleForCountry,
 } from "../lib/country-locale";
+import { countrySearchTerms } from "../lib/country-terms";
 
 const rssItem = `
   <rss><channel><item>
@@ -42,6 +43,15 @@ describe("worker live-news providers", () => {
       articleMatchesCountry(articles[0], ["Canada", "Canadian"]),
     ).toBe(true);
     expect(articleMatchesCountry(articles[0], ["Chad"])).toBe(false);
+  });
+
+  it("matches Egypt reporting written in Arabic", () => {
+    expect(
+      articleMatchesCountry(
+        { searchableText: "أهم الأخبار المحلية في مصر اليوم" },
+        countrySearchTerms("Egypt"),
+      ),
+    ).toBe(true);
   });
 
   it("parses Google RSS attribution without keeping the title suffix", () => {

@@ -14,6 +14,7 @@ afterEach(() => {
 
 function TestMap({ countries, onSelect, statusLabel }: WorldMapProps) {
   const japan = countryPulses.find((country) => country.iso2 === "JP");
+  const egypt = countryPulses.find((country) => country.iso2 === "EG");
   return (
     <>
       <span>{statusLabel}</span>
@@ -22,6 +23,9 @@ function TestMap({ countries, onSelect, statusLabel }: WorldMapProps) {
       </span>
       <button type="button" onClick={() => japan && onSelect(japan)}>
         Select Japan on map
+      </button>
+      <button type="button" onClick={() => egypt && onSelect(egypt)}>
+        Select Egypt on map
       </button>
       <button
         type="button"
@@ -157,6 +161,57 @@ describe("WorldPulse interactions", () => {
     expect(
       screen.getByRole("heading", { name: "Senegal" }),
     ).toBeInTheDocument();
+  });
+
+  it("opens Egypt by its numeric map id and renders Arabic reporting correctly", async () => {
+    const arabicHeadline = "مصر تعلن خطة جديدة لتطوير النقل العام";
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === "/countries.geojson") {
+        return Response.json({ features: [] });
+      }
+      const countryName = url.includes("country=Egypt")
+        ? "Egypt"
+        : url.includes("country=Canada")
+          ? "Canada"
+          : null;
+      return Response.json({
+        countryName,
+        scope: countryName ? "country" : "global",
+        generatedAt: "2026-07-25T00:00:00.000Z",
+        refreshAfterSeconds: 600,
+        provider: "Test live index",
+        articles:
+          countryName === "Egypt"
+            ? [
+                {
+                  id: "egypt-local",
+                  title: arabicHeadline,
+                  url: "https://publisher.example/egypt-local",
+                  publisherName: "صحيفة مصرية",
+                  publisherUrl: "https://publisher.example/",
+                  publishedAt: "2026-07-24T22:00:00.000Z",
+                },
+              ]
+            : [],
+      });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<WorldPulseApp MapComponent={TestMap} />);
+    fireEvent.click(
+      screen.getByRole("button", { name: "Select Egypt on map" }),
+    );
+
+    await waitFor(() =>
+      expect(fetchMock).toHaveBeenCalledWith(
+        "/api/live-news?country=Egypt&iso2=EG",
+      ),
+    );
+    expect(screen.getByRole("heading", { name: "Egypt" })).toBeInTheDocument();
+    expect(
+      await screen.findByRole("heading", { name: arabicHeadline }),
+    ).toHaveAttribute("dir", "auto");
   });
 
   it("preloads mapped countries before they are clicked", async () => {

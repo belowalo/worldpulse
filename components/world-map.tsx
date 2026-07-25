@@ -4,18 +4,25 @@ import * as maplibregl from "maplibre-gl";
 import maplibreWorkerUrl from "maplibre-gl/dist/maplibre-gl-worker.mjs?url";
 import {
   type ExpressionSpecification,
+  type GeoJSONSource,
   type Map as MapLibreMap,
   type MapMouseEvent,
 } from "maplibre-gl";
 import { useEffect, useMemo, useRef, useState } from "react";
+import {
+  buildEventLinkCollection,
+  countryCentersFromGeoJson,
+  type MapPosition,
+} from "@/lib/map-links";
 import { mapStyleForEvent } from "@/lib/scoring";
-import type { MapCountry } from "@/lib/types";
+import type { Event, MapCountry } from "@/lib/types";
 
 export interface WorldMapProps {
   countries: MapCountry[];
   selectedMapId: string | null;
   onSelect: (country: MapCountry) => void;
   statusLabel?: string;
+  linkEvents?: Event[];
 }
 
 interface HoveredCountry {
@@ -27,6 +34,9 @@ interface HoveredCountry {
 const SOURCE_ID = "world-countries";
 const FILL_LAYER = "country-fill";
 const LINE_LAYER = "country-line";
+const EVENT_LINK_SOURCE = "event-links";
+const EVENT_LINK_GLOW_LAYER = "event-link-glow";
+const EVENT_LINK_LAYER = "event-link-line";
 const SELECTED_LAYER = "selected-country";
 
 maplibregl.setWorkerUrl(maplibreWorkerUrl);
@@ -51,12 +61,16 @@ export function WorldMap({
   selectedMapId,
   onSelect,
   statusLabel = "Live feed · auto-refresh",
+  linkEvents = [],
 }: WorldMapProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<MapLibreMap | null>(null);
   const onSelectRef = useRef(onSelect);
   const countriesRef = useRef(countries);
   const selectedMapIdRef = useRef(selectedMapId);
+  const [countryCenters, setCountryCenters] = useState<
+    Record<string, MapPosition>
+  >({});
   const [hovered, setHovered] = useState<HoveredCountry | null>(null);
   useEffect(() => {
     onSelectRef.current = onSelect;
@@ -69,6 +83,32 @@ export function WorldMap({
   );
   const colorExpressionRef =
     useRef<ExpressionSpecification>(colorExpression);
+  const eventLinks = useMemo(
+    () =>
+      buildEventLinkCollection({
+        events: linkEvents,
+        countries,
+        selectedMapId,
+        centers: countryCenters,
+      }),
+    [countries, countryCenters, linkEvents, selectedMapId],
+  );
+  const eventLinksRef = useRef(eventLinks);
+
+  useEffect(() => {
+    let cancelled = false;
+    fetch("/countries.geojson")
+      .then((response) => response.json())
+      .then((collection) => {
+        if (!cancelled) setCountryCenters(countryCentersFromGeoJson(collection));
+      })
+      .catch(() => {
+        // Country fills and selection remain usable without the link overlay.
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   useEffect(() => {
     if (!containerRef.current || mapRef.current) return;
@@ -113,6 +153,11 @@ export function WorldMap({
         type: "geojson",
         data: "/countries.geojson",
         generateId: false,
+        promoteId: "name",
+      });
+      map.addSource(EVENT_LINK_SOURCE, {
+        type: "geojson",
+        data: eventLinksRef.current,
       });
       map.addLayer({
         id: FILL_LAYER,
@@ -131,6 +176,51 @@ export function WorldMap({
           "line-color": "#6f7d90",
           "line-opacity": 0.42,
           "line-width": 0.6,
+        },
+      });
+      map.addLayer({
+        id: EVENT_LINK_GLOW_LAYER,
+        type: "line",
+        source: EVENT_LINK_SOURCE,
+        layout: {
+          "line-cap": "round",
+          "line-join": "round",
+        },
+        paint: {
+          "line-blur": 3.5,
+          "line-color": ["get", "color"],
+          "line-opacity": 0.24,
+          "line-width": [
+            "interpolate",
+            ["linear"],
+            ["get", "importanceScore"],
+            0,
+            3,
+            100,
+            8,
+          ],
+        },
+      });
+      map.addLayer({
+        id: EVENT_LINK_LAYER,
+        type: "line",
+        source: EVENT_LINK_SOURCE,
+        layout: {
+          "line-cap": "round",
+          "line-join": "round",
+        },
+        paint: {
+          "line-color": ["get", "color"],
+          "line-opacity": 0.8,
+          "line-width": [
+            "interpolate",
+            ["linear"],
+            ["get", "importanceScore"],
+            0,
+            1,
+            100,
+            2.8,
+          ],
         },
       });
       map.addLayer({
@@ -210,6 +300,14 @@ export function WorldMap({
   }, [colorExpression]);
 
   useEffect(() => {
+    eventLinksRef.current = eventLinks;
+    const source = mapRef.current?.getSource(
+      EVENT_LINK_SOURCE,
+    ) as GeoJSONSource | null;
+    source?.setData(eventLinks);
+  }, [eventLinks]);
+
+  useEffect(() => {
     const map = mapRef.current;
     if (!map?.getLayer(SELECTED_LAYER)) return;
     const selectedCountryName = countries.find(
@@ -272,7 +370,7 @@ export function WorldMap({
           {hovered.country.topEvent ? (
             <>
               <p className="mt-2 text-xs leading-relaxed text-[#d4dbe5]">
-                {hovered.country.topEvent.headline}
+                <span dir="auto">{hovered.country.topEvent.headline}</span>
               </p>
               <p className="mt-2 font-mono text-[10px] uppercase tracking-[0.12em] text-[#8f9caf]">
                 {hovered.country.topEvent.category} ·{" "}

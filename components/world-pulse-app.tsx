@@ -12,6 +12,7 @@ import {
   articlesMentioningCountry,
   buildLiveEvents,
 } from "@/lib/live-news";
+import { countriesMentionedByEvent } from "@/lib/map-links";
 import { countryCodeForName } from "@/lib/country-locale";
 import {
   CATEGORIES,
@@ -114,10 +115,18 @@ function EventCard({ event }: { event: Event }) {
         </span>
         <ImportancePill event={event} />
       </div>
-      <h3 className="mt-3 text-lg font-semibold leading-snug tracking-[-0.025em] text-white">
+      <h3
+        dir="auto"
+        className="mt-3 break-words text-lg font-semibold leading-snug tracking-[-0.025em] text-white"
+      >
         {event.headline}
       </h3>
-      <p className="mt-2 text-sm leading-6 text-[#b5bfcd]">{event.summary}</p>
+      <p
+        dir="auto"
+        className="mt-2 break-words text-sm leading-6 text-[#b5bfcd]"
+      >
+        {event.summary}
+      </p>
       <p className="mt-2 text-[10px] leading-4 text-[#7f8da1]">
         Automated synopsis from feed metadata — verify details at the original
         sources.
@@ -141,7 +150,8 @@ function EventCard({ event }: { event: Event }) {
             href={article.originalUrl}
             target="_blank"
             rel="noreferrer"
-            className="rounded-md border border-[#344157] px-2.5 py-1.5 text-[10px] text-[#d4dbe5] transition hover:border-[#60708a] hover:bg-[#1a2537]"
+            dir="auto"
+            className="max-w-full break-words rounded-md border border-[#344157] px-2.5 py-1.5 text-[10px] text-[#d4dbe5] transition hover:border-[#60708a] hover:bg-[#1a2537]"
           >
             {article.source.publisherName} ↗
           </a>
@@ -645,7 +655,34 @@ export function WorldPulseApp({
           loading: fullCountryFeed?.loading ?? globalFeed.loading,
           error: fullCountryFeed?.error ?? globalFeed.error,
         };
-  const baseEvents = activeFeed.events;
+  const baseEvents = useMemo(
+    () =>
+      activeFeed.events.map((event) => {
+        const mentionedCountries = countriesMentionedByEvent(
+          event,
+          mapCountries,
+          globalView ? undefined : activeCountry,
+        );
+        if (mentionedCountries.length < 2) return event;
+        const affectedCountries = mentionedCountries.map(
+          (country) => country.iso2 ?? country.name,
+        );
+        return {
+          ...event,
+          geographicScope: "International" as const,
+          primaryCountry:
+            event.primaryCountry === "GLOBAL"
+              ? affectedCountries[0]
+              : event.primaryCountry,
+          affectedCountries,
+          scoringInput: {
+            ...event.scoringInput,
+            affectedCountryCount: affectedCountries.length,
+          },
+        };
+      }),
+    [activeCountry, activeFeed.events, globalView, mapCountries],
+  );
   const filteredEvents = (() => {
     const limitHours =
       timeRange === "24 hours" ? 24 : timeRange === "3 days" ? 72 : 168;
@@ -722,6 +759,7 @@ export function WorldPulseApp({
             countries={mapCountries}
             selectedMapId={selectedCountry.mapId}
             onSelect={handleSelect}
+            linkEvents={filteredEvents}
             statusLabel={
               mapPreload.total
                 ? mapPreload.loaded === mapPreload.total
@@ -739,13 +777,17 @@ export function WorldPulseApp({
             }
           />
           <div className="absolute inset-x-4 bottom-4 z-10 rounded-xl border border-[#334055] bg-[#0d1522]/95 p-3 shadow-xl backdrop-blur-sm sm:left-auto sm:w-[min(620px,calc(100%-2rem))]">
-            <div className="flex items-center justify-between">
+            <div className="flex flex-wrap items-center justify-between gap-2">
               <span className="font-mono text-[9px] uppercase tracking-[0.17em] text-[#8996a8]">
                 Category signal
               </span>
-              <span className="text-[9px] text-[#647286]">
-                Intensity = estimated importance
-              </span>
+              <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[9px] text-[#647286]">
+                <span>Intensity = estimated importance</span>
+                <span className="inline-flex items-center gap-1.5">
+                  <span className="h-2 w-5 rounded-[50%] border-t border-[#73e2cc]" />
+                  Curves = multi-country events
+                </span>
+              </div>
             </div>
             <div className="mt-2 flex flex-wrap gap-x-3 gap-y-2">
               {CATEGORIES.map((item) => (
