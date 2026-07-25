@@ -86,15 +86,25 @@ const formatTime = (value: string) =>
     timeZone: "America/Toronto",
   }).format(new Date(value));
 
-const hasCurrentWeekCoverage = (events: Event[]) => {
-  const reference = Date.now();
-  return events.some((event) => {
-    const publishedAt = Date.parse(event.lastUpdatedAt);
-    return (
-      Number.isFinite(publishedAt) &&
-      reference - publishedAt <= 168 * 3_600_000
+const mergeEventFeeds = (...feeds: Event[][]) => {
+  const seenHeadlines = new Set<string>();
+  return feeds
+    .flat()
+    .filter((event) => {
+      const headlineKey = event.headline
+        .normalize("NFKC")
+        .toLowerCase()
+        .replace(/[^\p{L}\p{N}]+/gu, " ")
+        .trim();
+      if (seenHeadlines.has(headlineKey)) return false;
+      seenHeadlines.add(headlineKey);
+      return true;
+    })
+    .sort(
+      (left, right) =>
+        right.importanceScore - left.importanceScore ||
+        Date.parse(right.lastUpdatedAt) - Date.parse(left.lastUpdatedAt),
     );
-  });
 };
 
 function ImportancePill({ event }: { event: Event }) {
@@ -610,14 +620,16 @@ export function WorldPulseApp({
         if (
           countryFeed &&
           !countryFeed.loading &&
-          !countryFeed.error &&
-          (hasCurrentWeekCoverage(countryFeed.events) ||
-            !preloadedFeed?.events.length)
+          !countryFeed.error
         ) {
+          const mergedEvents = mergeEventFeeds(
+            countryFeed.events,
+            preloadedFeed?.events ?? [],
+          );
           return {
             ...country,
-            events: countryFeed.events,
-            topEvent: countryFeed.events[0],
+            events: mergedEvents,
+            topEvent: mergedEvents[0],
           };
         }
         if (preloadedFeed?.events.length) {
@@ -654,13 +666,19 @@ export function WorldPulseApp({
     selectedCountry;
   const fullCountryFeed = countryFeeds[activeCountry.name];
   const preloadedCountryFeed = preloadedCountryFeeds[activeCountry.name];
+  const combinedCountryFeed =
+    fullCountryFeed && !fullCountryFeed.error
+      ? {
+          ...fullCountryFeed,
+          events: mergeEventFeeds(
+            fullCountryFeed.events,
+            preloadedCountryFeed?.events ?? [],
+          ),
+        }
+      : preloadedCountryFeed ?? fullCountryFeed;
   const activeFeed = globalView
     ? globalFeed
-    : fullCountryFeed &&
-        (hasCurrentWeekCoverage(fullCountryFeed.events) ||
-          (!fullCountryFeed.loading && !preloadedCountryFeed?.events.length))
-      ? fullCountryFeed
-      : preloadedCountryFeed ?? {
+    : combinedCountryFeed ?? {
           events: activeCountry.events,
           updatedAt: globalFeed.updatedAt,
           provider: globalFeed.provider,
