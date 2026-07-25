@@ -95,3 +95,21 @@ export interface MapCountry {
   events: Event[];
   topEvent?: Event;
 }
+
+export interface LiveArticle {
+  id: string;
+  title: string;
+  url: string;
+  publisherName: string;
+  publisherUrl: string;
+  publishedAt: string;
+}
+
+export interface LiveNewsPayload {
+  countryName: string | null;
+  scope: "country" | "global";
+  generatedAt: string;
+  refreshAfterSeconds: number;
+  provider: string;
+  articles: LiveArticle[];
+}

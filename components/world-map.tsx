@@ -9,12 +9,13 @@ import {
 } from "maplibre-gl";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { mapStyleForEvent } from "@/lib/scoring";
-import type { CountryPulse, MapCountry } from "@/lib/types";
+import type { MapCountry } from "@/lib/types";
 
 export interface WorldMapProps {
-  countries: CountryPulse[];
+  countries: MapCountry[];
   selectedMapId: string | null;
   onSelect: (country: MapCountry) => void;
+  statusLabel?: string;
 }
 
 interface HoveredCountry {
@@ -34,6 +35,7 @@ export function WorldMap({
   countries,
   selectedMapId,
   onSelect,
+  statusLabel = "Live feed · auto-refresh",
 }: WorldMapProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<MapLibreMap | null>(null);
@@ -141,10 +143,10 @@ export function WorldMap({
         layers: [FILL_LAYER],
       })[0];
       if (feature?.id == null) return undefined;
-      const seededCountry = countriesRef.current.find(
+      const indexedCountry = countriesRef.current.find(
         (country) => country.mapId === String(feature.id),
       );
-      if (seededCountry) return seededCountry;
+      if (indexedCountry) return indexedCountry;
 
       const name = feature.properties?.name;
       if (typeof name !== "string" || !name.trim()) return undefined;
@@ -225,7 +227,7 @@ export function WorldMap({
         </p>
       </div>
       <div className="pointer-events-none absolute right-4 top-4 rounded-full border border-[#354258] bg-[#101827]/90 px-3 py-1.5 font-mono text-[10px] uppercase tracking-[0.16em] text-[#aab5c5]">
-        Seeded demo · Jul 24
+        {statusLabel}
       </div>
 
       {hovered ? (
@@ -255,7 +257,9 @@ export function WorldMap({
               </p>
             </>
           ) : (
-            <p className="mt-2 text-xs text-[#8f9caf]">No active news data</p>
+            <p className="mt-2 text-xs text-[#8f9caf]">
+              Click to load current reporting
+            </p>
           )}
         </div>
       ) : null}

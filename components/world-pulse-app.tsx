@@ -1,17 +1,27 @@
 "use client";
 
 import dynamic from "next/dynamic";
-import { useState, type ComponentType } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useState,
+  type ComponentType,
+} from "react";
+import {
+  articlesMentioningCountry,
+  buildLiveEvents,
+} from "@/lib/live-news";
 import {
   CATEGORIES,
   type Category,
   type Event,
+  type LiveNewsPayload,
   type MapCountry,
 } from "@/lib/types";
 import {
   countryPulses,
   defaultCountry,
-  events,
   flagEmoji,
 } from "@/lib/seed-data";
 import { categoryColor } from "@/lib/scoring";
@@ -36,6 +46,33 @@ const WorldMap = dynamic(
 
 type ImportanceFilter = "All" | "Major" | "Significant" | "Developing" | "Routine";
 type TimeFilter = "24 hours" | "3 days" | "7 days";
+
+interface FeedState {
+  events: Event[];
+  updatedAt: string | null;
+  provider: string | null;
+  loading: boolean;
+  error: string | null;
+}
+
+const EMPTY_FEED: FeedState = {
+  events: [],
+  updatedAt: null,
+  provider: null,
+  loading: false,
+  error: null,
+};
+
+const countryMetadata = countryPulses.map(
+  (country): MapCountry => ({
+    ...country,
+    events: [],
+    topEvent: undefined,
+  }),
+);
+const initialCountry =
+  countryMetadata.find((country) => country.iso2 === defaultCountry) ??
+  countryMetadata[0];
 
 const formatTime = (value: string) =>
   new Intl.DateTimeFormat("en", {
@@ -80,8 +117,8 @@ function EventCard({ event }: { event: Event }) {
       </h3>
       <p className="mt-2 text-sm leading-6 text-[#b5bfcd]">{event.summary}</p>
       <p className="mt-2 text-[10px] leading-4 text-[#7f8da1]">
-        AI-assisted synopsis of attributed reporting — verify details at the
-        original sources.
+        Automated synopsis from feed metadata — verify details at the original
+        sources.
       </p>
       <div className="mt-4 grid grid-cols-3 gap-3">
         <Metric label="Scope" value={event.geographicScope} />
@@ -235,7 +272,8 @@ function MethodologyModal({ onClose }: { onClose: () => void }) {
           Coverage is uneven. Countries with less digital reporting or fewer
           accessible sources may appear less active. Publication volume alone
           is never treated as importance, and political summaries use neutral
-          wording. All demo events are realistic fictional seed data.
+          wording. Live headlines and publisher links come from public RSS
+          metadata; WorldPulse does not reproduce article bodies.
         </p>
       </section>
     </div>
@@ -244,15 +282,23 @@ function MethodologyModal({ onClose }: { onClose: () => void }) {
 
 interface WorldPulseAppProps {
   MapComponent?: ComponentType<WorldMapProps>;
+  liveUpdates?: boolean;
 }
 
 export function WorldPulseApp({
   MapComponent = WorldMap,
+  liveUpdates = true,
 }: WorldPulseAppProps = {}) {
-  const [selectedCountry, setSelectedCountry] = useState<MapCountry>(
-    countryPulses.find((country) => country.iso2 === defaultCountry) ??
-      countryPulses[0],
+  const [selectedCountry, setSelectedCountry] =
+    useState<MapCountry>(initialCountry);
+  const [countryDirectory, setCountryDirectory] =
+    useState<MapCountry[]>(countryMetadata);
+  const [countryFeeds, setCountryFeeds] = useState<Record<string, FeedState>>(
+    {},
   );
+  const [globalPayload, setGlobalPayload] =
+    useState<LiveNewsPayload | null>(null);
+  const [globalFeed, setGlobalFeed] = useState<FeedState>(EMPTY_FEED);
   const [globalView, setGlobalView] = useState(false);
   const [category, setCategory] = useState<"All" | Category>("All");
   const [importance, setImportance] = useState<ImportanceFilter>("All");
@@ -260,11 +306,168 @@ export function WorldPulseApp({
   const [search, setSearch] = useState("");
   const [showMethodology, setShowMethodology] = useState(false);
 
-  const baseEvents = globalView ? events : selectedCountry.events;
+  const fetchCountryNews = useCallback(async (country: MapCountry) => {
+    setCountryFeeds((current) => ({
+      ...current,
+      [country.mapId]: {
+        ...(current[country.mapId] ?? EMPTY_FEED),
+        loading: true,
+        error: null,
+      },
+    }));
+    try {
+      const response = await fetch(
+        `/api/live-news?country=${encodeURIComponent(country.name)}`,
+      );
+      if (!response.ok) throw new Error("Live reporting is temporarily unavailable.");
+      const payload = (await response.json()) as LiveNewsPayload;
+      const events = buildLiveEvents(payload, country);
+      setCountryFeeds((current) => ({
+        ...current,
+        [country.mapId]: {
+          events,
+          updatedAt: payload.generatedAt,
+          provider: payload.provider,
+          loading: false,
+          error: null,
+        },
+      }));
+    } catch (error) {
+      setCountryFeeds((current) => ({
+        ...current,
+        [country.mapId]: {
+          ...(current[country.mapId] ?? EMPTY_FEED),
+          loading: false,
+          error:
+            error instanceof Error
+              ? error.message
+              : "Live reporting is temporarily unavailable.",
+        },
+      }));
+    }
+  }, []);
+
+  const fetchGlobalNews = useCallback(async () => {
+    setGlobalFeed((current) => ({
+      ...current,
+      loading: true,
+      error: null,
+    }));
+    try {
+      const response = await fetch("/api/live-news?scope=global");
+      if (!response.ok) throw new Error("The global live feed is temporarily unavailable.");
+      const payload = (await response.json()) as LiveNewsPayload;
+      setGlobalPayload(payload);
+      setGlobalFeed({
+        events: buildLiveEvents(payload, null),
+        updatedAt: payload.generatedAt,
+        provider: payload.provider,
+        loading: false,
+        error: null,
+      });
+    } catch (error) {
+      setGlobalFeed((current) => ({
+        ...current,
+        loading: false,
+        error:
+          error instanceof Error
+            ? error.message
+            : "The global live feed is temporarily unavailable.",
+      }));
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!liveUpdates) return;
+    let cancelled = false;
+    fetch("/countries.geojson")
+      .then((response) => response.json())
+      .then((value) => {
+        const geojson = value as {
+          features?: Array<{
+            id?: string | number;
+            properties?: { name?: string };
+          }>;
+        };
+        if (cancelled || !geojson.features) return;
+        const metadataById = new Map(
+          countryMetadata.map((country) => [country.mapId, country]),
+        );
+        const directory = geojson.features.flatMap((feature) => {
+          const mapId = String(feature.id ?? "");
+          const name = feature.properties?.name?.trim();
+          if (!mapId || !name) return [];
+          const metadata = metadataById.get(mapId);
+          return [
+            metadata ?? {
+              mapId,
+              name,
+              events: [],
+            },
+          ];
+        });
+        setCountryDirectory(directory);
+      })
+      .catch(() => {
+        // The map remains fully usable with its own GeoJSON fallback.
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [liveUpdates]);
+
+  useEffect(() => {
+    if (!liveUpdates) return;
+    void fetchGlobalNews();
+    void fetchCountryNews(initialCountry);
+  }, [fetchCountryNews, fetchGlobalNews, liveUpdates]);
+
+  useEffect(() => {
+    if (!liveUpdates) return;
+    const refreshTimer = window.setInterval(() => {
+      void fetchGlobalNews();
+      void fetchCountryNews(selectedCountry);
+    }, 600_000);
+    return () => window.clearInterval(refreshTimer);
+  }, [fetchCountryNews, fetchGlobalNews, liveUpdates, selectedCountry]);
+
+  const mapCountries = useMemo(
+    () =>
+      countryDirectory.map((country): MapCountry => {
+        const focusedFeed = countryFeeds[country.mapId];
+        if (focusedFeed) {
+          return {
+            ...country,
+            events: focusedFeed.events,
+            topEvent: focusedFeed.events[0],
+          };
+        }
+        if (!globalPayload) return country;
+        const matchingArticles = articlesMentioningCountry(
+          globalPayload,
+          country.name,
+        );
+        if (!matchingArticles.length) return country;
+        const events = buildLiveEvents(
+          { ...globalPayload, articles: matchingArticles },
+          country,
+        );
+        return { ...country, events, topEvent: events[0] };
+      }),
+    [countryDirectory, countryFeeds, globalPayload],
+  );
+  const activeCountry =
+    mapCountries.find((country) => country.mapId === selectedCountry.mapId) ??
+    selectedCountry;
+  const activeFeed = globalView
+    ? globalFeed
+    : countryFeeds[selectedCountry.mapId] ?? EMPTY_FEED;
+  const baseEvents = globalView ? globalFeed.events : activeCountry.events;
   const filteredEvents = (() => {
     const limitHours =
       timeRange === "24 hours" ? 24 : timeRange === "3 days" ? 72 : 168;
-    const reference = Date.parse("2026-07-24T20:00:00.000Z");
+    const reference =
+      Date.parse(activeFeed.updatedAt ?? "") || Date.now();
     return baseEvents.filter((event) => {
       const matchesCategory = category === "All" || event.category === category;
       const matchesImportance =
@@ -286,6 +489,7 @@ export function WorldPulseApp({
   const handleSelect = (country: MapCountry) => {
     setSelectedCountry(country);
     setGlobalView(false);
+    if (liveUpdates) void fetchCountryNews(country);
   };
   const hasActiveFilters =
     category !== "All" ||
@@ -305,7 +509,7 @@ export function WorldPulseApp({
               WorldPulse
             </div>
             <div className="font-mono text-[8px] uppercase tracking-[0.19em] text-[#7f8da1]">
-              Global signal desk
+              Live global signal desk
             </div>
           </div>
         </div>
@@ -334,9 +538,14 @@ export function WorldPulseApp({
       <div className="grid min-h-[calc(100vh-4rem)] lg:grid-cols-[minmax(0,1fr)_420px]">
         <section className="relative min-h-[54vh] border-b border-[#222d3e] lg:h-[calc(100vh-4rem)] lg:border-b-0 lg:border-r">
           <MapComponent
-            countries={countryPulses}
+            countries={mapCountries}
             selectedMapId={selectedCountry.mapId}
             onSelect={handleSelect}
+            statusLabel={
+              globalFeed.loading
+                ? "Refreshing live feed…"
+                : "Live · auto-refresh 10 min"
+            }
           />
           <div className="absolute inset-x-4 bottom-4 z-10 rounded-xl border border-[#334055] bg-[#0d1522]/95 p-3 shadow-xl backdrop-blur-sm sm:left-auto sm:w-[min(620px,calc(100%-2rem))]">
             <div className="flex items-center justify-between">
@@ -375,18 +584,20 @@ export function WorldPulseApp({
                   <span className="text-2xl" aria-hidden="true">
                     {globalView
                       ? "🌐"
-                      : selectedCountry.iso2
-                        ? flagEmoji(selectedCountry.iso2)
+                      : activeCountry.iso2
+                        ? flagEmoji(activeCountry.iso2)
                         : "◎"}
                   </span>
                   <h2 className="text-xl font-semibold tracking-[-0.035em]">
-                    {globalView ? "Global events" : selectedCountry.name}
+                    {globalView ? "Global events" : activeCountry.name}
                   </h2>
                 </div>
                 <p className="mt-1 text-[10px] text-[#8794a6]">
                   {filteredEvents.length} active{" "}
                   {filteredEvents.length === 1 ? "event" : "events"} · Updated
-                  Jul 24, 4:00 PM EDT
+                  {activeFeed.updatedAt
+                    ? ` ${formatTime(activeFeed.updatedAt)}`
+                    : " when the live feed syncs"}
                 </p>
               </div>
               <div className="rounded-lg bg-[#182234] px-3 py-2 text-center">
@@ -397,6 +608,29 @@ export function WorldPulseApp({
                   top score
                 </div>
               </div>
+            </div>
+            <div className="mt-3 flex items-center justify-between gap-3">
+              <span className="font-mono text-[8px] uppercase tracking-[0.13em] text-[#6f7e92]">
+                {activeFeed.loading
+                  ? "Syncing current reporting…"
+                  : activeFeed.error
+                    ? "Live sync interrupted"
+                    : activeFeed.provider
+                      ? `${activeFeed.provider} · multiple publishers`
+                      : "Live feed ready"}
+              </span>
+              <button
+                type="button"
+                onClick={() =>
+                  globalView
+                    ? void fetchGlobalNews()
+                    : void fetchCountryNews(activeCountry)
+                }
+                disabled={activeFeed.loading || !liveUpdates}
+                className="rounded-md border border-[#354359] px-2.5 py-1.5 text-[9px] text-[#aeb9c7] transition hover:border-[#64748b] hover:text-white disabled:cursor-wait disabled:opacity-50"
+              >
+                Refresh
+              </button>
             </div>
 
             <div className="mt-4 grid grid-cols-3 gap-2">
@@ -444,7 +678,48 @@ export function WorldPulseApp({
           </div>
 
           <div className="flex-1 overflow-y-auto px-5 py-5 scrollbar-thin">
-            {filteredEvents.length ? (
+            {activeFeed.loading && !baseEvents.length ? (
+              <div
+                className="space-y-5"
+                aria-label="Loading current reporting"
+                aria-busy="true"
+              >
+                {[0, 1, 2].map((item) => (
+                  <div
+                    key={item}
+                    className="animate-pulse border-b border-[#273246] pb-5"
+                  >
+                    <div className="h-2 w-28 rounded bg-[#263247]" />
+                    <div className="mt-4 h-5 w-4/5 rounded bg-[#263247]" />
+                    <div className="mt-3 h-3 w-full rounded bg-[#1d293b]" />
+                    <div className="mt-2 h-3 w-2/3 rounded bg-[#1d293b]" />
+                  </div>
+                ))}
+              </div>
+            ) : activeFeed.error && !baseEvents.length ? (
+              <div className="grid min-h-60 place-items-center rounded-xl border border-dashed border-[#6b3b48] p-8 text-center">
+                <div>
+                  <div className="text-2xl text-[#d36b7b]">!</div>
+                  <h3 className="mt-3 text-sm font-medium">
+                    Live feed unavailable
+                  </h3>
+                  <p className="mt-2 text-xs leading-5 text-[#8f9caf]">
+                    {activeFeed.error}
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      globalView
+                        ? void fetchGlobalNews()
+                        : void fetchCountryNews(activeCountry)
+                    }
+                    className="mt-4 rounded-lg border border-[#46556b] px-3 py-2 text-[10px] text-[#cad3df] hover:bg-[#192437]"
+                  >
+                    Try again
+                  </button>
+                </div>
+              </div>
+            ) : filteredEvents.length ? (
               filteredEvents.map((event) => (
                 <EventCard key={event.id} event={event} />
               ))
@@ -453,17 +728,17 @@ export function WorldPulseApp({
                 <div>
                   <div className="text-2xl text-[#59687d]">◎</div>
                   <h3 className="mt-3 text-sm font-medium">
-                    {!globalView &&
-                    !selectedCountry.events.length &&
-                    !hasActiveFilters
-                      ? `No active news for ${selectedCountry.name}`
+                    {!globalView && !baseEvents.length && !hasActiveFilters
+                      ? `No indexed news for ${activeCountry.name}`
+                      : globalView && !baseEvents.length && !hasActiveFilters
+                        ? "No live global events"
                       : "No matching events"}
                   </h3>
                   <p className="mt-2 text-xs leading-5 text-[#7f8da1]">
-                    {!globalView &&
-                    !selectedCountry.events.length &&
-                    !hasActiveFilters
-                      ? "Every mapped country is selectable. News coverage is not yet available for this country in the demo dataset."
+                    {!globalView && !baseEvents.length && !hasActiveFilters
+                      ? "No matching headlines were indexed in the current three-day window. This country will refresh automatically."
+                      : globalView && !baseEvents.length && !hasActiveFilters
+                        ? "The global feed will refresh automatically."
                       : "Broaden the filters or try a different search term."}
                   </p>
                   {hasActiveFilters ? (
@@ -485,8 +760,9 @@ export function WorldPulseApp({
             )}
           </div>
           <footer className="border-t border-[#273246] px-5 py-3 text-[9px] leading-4 text-[#68768a]">
-            Importance is an estimate, not an objective fact. Uneven digital
-            coverage can make some countries appear less active.
+            Live metadata refreshes every 10 minutes. Importance is an estimate,
+            not an objective fact. Uneven digital coverage can make some
+            countries appear less active.
           </footer>
         </aside>
       </div>

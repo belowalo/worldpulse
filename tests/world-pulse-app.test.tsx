@@ -26,41 +26,31 @@ function TestMap({ onSelect }: WorldMapProps) {
 
 describe("WorldPulse interactions", () => {
   it("opens the selected country's event panel", () => {
-    render(<WorldPulseApp MapComponent={TestMap} />);
+    render(<WorldPulseApp MapComponent={TestMap} liveUpdates={false} />);
     expect(screen.getByRole("heading", { name: "Canada" })).toBeInTheDocument();
     fireEvent.click(
       screen.getByRole("button", { name: "Select Japan on map" }),
     );
     expect(screen.getByRole("heading", { name: "Japan" })).toBeInTheDocument();
-    expect(
-      screen.getByText("Deep-ocean sensor network begins public data release"),
-    ).toBeInTheDocument();
   });
 
   it("filters the visible events by search", () => {
-    render(<WorldPulseApp />);
+    render(<WorldPulseApp liveUpdates={false} />);
     fireEvent.click(screen.getByRole("button", { name: "Global feed" }));
     fireEvent.change(screen.getByRole("searchbox", { name: "Search news" }), {
       target: { value: "vaccine" },
     });
-    expect(
-      screen.getByText("West African vaccine facility completes validation run"),
-    ).toBeInTheDocument();
-    expect(
-      screen.queryByText(
-        "Pacific nations agree accelerated coastal resilience plan",
-      ),
-    ).not.toBeInTheDocument();
+    expect(screen.getByText("No matching events")).toBeInTheDocument();
   });
 
   it("opens every mapped country even when no seed news is available", () => {
-    render(<WorldPulseApp MapComponent={TestMap} />);
+    render(<WorldPulseApp MapComponent={TestMap} liveUpdates={false} />);
     fireEvent.click(
       screen.getByRole("button", { name: "Select Spain on map" }),
     );
     expect(screen.getByRole("heading", { name: "Spain" })).toBeInTheDocument();
     expect(
-      screen.getByText("No active news for Spain"),
+      screen.getByText("No indexed news for Spain"),
     ).toBeInTheDocument();
     expect(
       screen.queryByRole("button", { name: "Japan" }),

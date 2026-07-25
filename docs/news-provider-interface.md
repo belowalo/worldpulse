@@ -44,3 +44,9 @@ Clustering must keep articles separate from events. Source count means independe
 ## Mock provider
 
 `MockNewsProvider` demonstrates the contract without network access or keys. The seed command is intentionally separate so local development remains deterministic.
+
+## Hosted live adapter
+
+The hosted Cloudflare Worker exposes `/api/live-news` for global or country-scoped queries. It reads public RSS headline metadata, retains publisher attribution and outbound article links, and applies ten-minute cache guidance. The browser clusters similar headlines, preserves each publisher as a separate article, and runs the same deterministic scoring model used elsewhere in the product.
+
+This adapter does not fetch article bodies, bypass publisher access controls, or present feed metadata as original WorldPulse reporting. A future licensed provider can replace or supplement it without changing the map and panel contracts.
