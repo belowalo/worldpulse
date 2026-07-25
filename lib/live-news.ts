@@ -88,11 +88,13 @@ const CATEGORY_TERMS: Array<[Category, string[]]> = [
     [
       "championship",
       "culture",
+      "entertainment",
       "festival",
       "film",
       "football",
       "music",
       "olympic",
+      "award",
       "sport",
     ],
   ],
@@ -279,9 +281,26 @@ function articleSimilarity(left: LiveArticle, right: LiveArticle) {
 }
 
 export function classifyLiveHeadline(title: string): Category {
-  const normalized = ` ${title.toLowerCase()} `;
+  const normalized = title.normalize("NFKC").toLowerCase();
+  const tokens = new Set(textTokens(normalized));
   for (const [category, terms] of CATEGORY_TERMS) {
-    if (terms.some((term) => normalized.includes(term))) return category;
+    if (
+      terms.some((term) => {
+        const trimmedTerm = term.trim();
+        if (!trimmedTerm.includes(" ")) {
+          return tokens.has(stemToken(trimmedTerm));
+        }
+        const pattern = trimmedTerm
+          .replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
+          .replace(/\s+/g, "\\s+");
+        return new RegExp(
+          `(^|[^\\p{L}\\p{N}])${pattern}([^\\p{L}\\p{N}]|$)`,
+          "iu",
+        ).test(normalized);
+      })
+    ) {
+      return category;
+    }
   }
   return "Other";
 }

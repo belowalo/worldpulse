@@ -191,6 +191,97 @@ describe("worker live-news providers", () => {
     expect(unresolved).toEqual([]);
   });
 
+  it("preloads a batch of country headlines in one map request", async () => {
+    vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const requestedUrls: string[] = [];
+    const googleItem = `
+      <rss><channel><item>
+        <title>Current local headline - Local Desk</title>
+        <description>Current local reporting.</description>
+        <link>https://news.google.com/rss/articles/local-map-story</link>
+        <guid>local-map-story</guid>
+        <pubDate>Fri, 24 Jul 2026 21:00:00 GMT</pubDate>
+        <source url="https://local.example/">Local Desk</source>
+      </item></channel></rss>
+    `;
+    const fetchMock = vi.fn(async (input: URL | RequestInfo) => {
+      requestedUrls.push(String(input));
+      return new Response(googleItem, { status: 200 });
+    });
+
+    const response = await handleLiveNews(
+      new Request(
+        "https://worldpulse.test/api/live-news?scope=map&countries=Senegal%7CJapan",
+      ),
+      fetchMock as typeof fetch,
+    );
+    const payload = (await response.json()) as {
+      scope: string;
+      countries: Array<{
+        countryName: string;
+        available: boolean;
+        articles: unknown[];
+      }>;
+    };
+
+    expect(response.status).toBe(200);
+    expect(payload.scope).toBe("map");
+    expect(payload.countries).toHaveLength(2);
+    expect(payload.countries.every((country) => country.available)).toBe(true);
+    expect(payload.countries.every((country) => country.articles.length === 1)).toBe(
+      true,
+    );
+    expect(
+      requestedUrls.some(
+        (url) => url.includes("gl=SN") && url.includes("ceid=SN%3Afr"),
+      ),
+    ).toBe(true);
+    expect(
+      requestedUrls.some(
+        (url) => url.includes("gl=JP") && url.includes("ceid=JP%3Aja"),
+      ),
+    ).toBe(true);
+  });
+
+  it("falls back to international search when a local country edition fails", async () => {
+    vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const requestedUrls: string[] = [];
+    const googleItem = `
+      <rss><channel><item>
+        <title>São Tomé current affairs - Regional Desk</title>
+        <description>Current reporting from São Tomé and Principe.</description>
+        <link>https://news.google.com/rss/articles/sao-tome-story</link>
+        <guid>sao-tome-story</guid>
+        <pubDate>Fri, 24 Jul 2026 21:00:00 GMT</pubDate>
+        <source url="https://regional.example/">Regional Desk</source>
+      </item></channel></rss>
+    `;
+    const fetchMock = vi.fn(async (input: URL | RequestInfo) => {
+      const url = String(input);
+      requestedUrls.push(url);
+      return url.includes("gl=ST")
+        ? new Response("Unavailable", { status: 503 })
+        : new Response(googleItem, { status: 200 });
+    });
+
+    const response = await handleLiveNews(
+      new Request(
+        "https://worldpulse.test/api/live-news?scope=map&countries=S%C3%A3o%20Tom%C3%A9%20and%20Principe",
+      ),
+      fetchMock as typeof fetch,
+    );
+    const payload = (await response.json()) as {
+      countries: Array<{ available: boolean; articles: unknown[] }>;
+    };
+
+    expect(payload.countries[0]).toMatchObject({
+      available: true,
+      articles: [expect.any(Object)],
+    });
+    expect(requestedUrls.some((url) => url.includes("gl=ST"))).toBe(true);
+    expect(requestedUrls.some((url) => url.includes("gl=US"))).toBe(true);
+  });
+
   it("returns an explicit outage only when every provider fails", async () => {
     vi.spyOn(console, "warn").mockImplementation(() => undefined);
     const fetchMock = vi.fn(async () => new Response("Unavailable", { status: 503 }));

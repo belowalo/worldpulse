@@ -44,4 +44,8 @@ describe("impact scoring", () => {
       mapStyleForEvent("Politics", 90).fillColor,
     );
   });
+
+  it("gives countries without a current headline a visible neutral color", () => {
+    expect(mapStyleForEvent().fillColor).toBe("#24444b");
+  });
 });

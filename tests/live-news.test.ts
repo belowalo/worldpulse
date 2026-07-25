@@ -41,6 +41,14 @@ describe("live news normalization", () => {
     expect(classifyLiveHeadline("Wildfire response expands")).toBe(
       "Environment",
     );
+    expect(
+      classifyLiveHeadline(
+        "「MUSIC AWARDS JAPAN 2026 アニソンスペシャル」放送決定！",
+      ),
+    ).toBe("Culture and sports");
+    expect(classifyLiveHeadline("Government announces new tariffs")).toBe(
+      "Economy",
+    );
   });
 
   it("clusters related reporting and preserves publisher links", () => {

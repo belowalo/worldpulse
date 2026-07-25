@@ -46,7 +46,10 @@ type FetchImplementation = typeof fetch;
 const MAX_PROVIDER_BYTES = 1_500_000;
 const MAX_COUNTRY_ARTICLES = 180;
 const MAX_GLOBAL_ARTICLES = 700;
+const MAX_MAP_BATCH_COUNTRIES = 40;
+const MAX_MAP_ARTICLES_PER_COUNTRY = 8;
 const CACHE_SECONDS = 300;
+const VALID_COUNTRY_NAME = /^[\p{L}\p{M}\d .,'’()&-]+$/u;
 
 function decodeXml(value: string) {
   return value
@@ -420,6 +423,50 @@ function providersForRequest(
   ];
 }
 
+async function fetchMapCountry(
+  requestedCountry: string,
+  fetchImpl: FetchImplementation,
+) {
+  const countryName = canonicalCountryName(requestedCountry);
+  const terms = countrySearchTerms(requestedCountry);
+  const googleProviders = countryGoogleProviders(countryName, "");
+  let result = await fetchProvider(
+    googleProviders[1],
+    "country",
+    countryName,
+    terms,
+    fetchImpl,
+  );
+  if (!result.ok || !result.articles.length) {
+    result = await fetchProvider(
+      GDELT_PROVIDER,
+      "country",
+      countryName,
+      terms,
+      fetchImpl,
+    );
+  }
+  if (!result.ok || !result.articles.length) {
+    const retryJitter = 200 + Number.parseInt(stableId(countryName), 36) % 500;
+    await new Promise((resolve) => setTimeout(resolve, retryJitter));
+    result = await fetchProvider(
+      googleProviders[2],
+      "country",
+      countryName,
+      terms,
+      fetchImpl,
+    );
+  }
+  return {
+    countryName: requestedCountry,
+    generatedAt: new Date().toISOString(),
+    available: result.ok,
+    articles: result.ok
+      ? mergeArticles([result], MAX_MAP_ARTICLES_PER_COUNTRY)
+      : [],
+  };
+}
+
 export function articleMatchesCountry(
   article: Pick<CandidateArticle, "searchableText">,
   terms: string[],
@@ -515,12 +562,12 @@ function mergeArticles(results: ProviderResult[], limit: number) {
     }));
 }
 
-function json(data: unknown, status = 200) {
+function json(data: unknown, status = 200, cacheable = true) {
   return Response.json(data, {
     status,
     headers: {
       "Cache-Control":
-        status === 200
+        status === 200 && cacheable
           ? `public, max-age=60, s-maxage=${CACHE_SECONDS}, stale-while-revalidate=86400`
           : "no-store",
       "Content-Type": "application/json; charset=utf-8",
@@ -537,7 +584,51 @@ export async function handleLiveNews(
   }
 
   const url = new URL(request.url);
-  const scope = url.searchParams.get("scope") === "global" ? "global" : "country";
+  const requestedScope = url.searchParams.get("scope");
+  if (requestedScope === "map") {
+    const requestedCountries = [
+      ...new Set(
+        (url.searchParams.get("countries") ?? "")
+          .split("|")
+          .map((country) => country.trim())
+          .filter(Boolean),
+      ),
+    ];
+    if (
+      !requestedCountries.length ||
+      requestedCountries.length > MAX_MAP_BATCH_COUNTRIES ||
+      requestedCountries.some(
+        (country) =>
+          country.length > 80 || !VALID_COUNTRY_NAME.test(country),
+      )
+    ) {
+      return json(
+        {
+          error: `Provide between 1 and ${MAX_MAP_BATCH_COUNTRIES} valid country names.`,
+        },
+        400,
+      );
+    }
+    const generatedAt = new Date().toISOString();
+    const countries = await Promise.all(
+      requestedCountries.map((country) =>
+        fetchMapCountry(country, fetchImpl),
+      ),
+    );
+    return json(
+      {
+        scope: "map",
+        generatedAt,
+        refreshAfterSeconds: CACHE_SECONDS,
+        provider: "Local news country preload",
+        countries,
+      },
+      200,
+      countries.every((country) => country.available),
+    );
+  }
+
+  const scope = requestedScope === "global" ? "global" : "country";
   const requestedCountry = url.searchParams.get("country")?.trim() ?? "";
   const requestedRegion =
     url.searchParams.get("iso2")?.trim().toUpperCase() ?? "";
@@ -545,7 +636,7 @@ export async function handleLiveNews(
     scope === "country" &&
     (!requestedCountry ||
       requestedCountry.length > 80 ||
-      !/^[\p{L}\p{M}\d .,'’()&-]+$/u.test(requestedCountry))
+      !VALID_COUNTRY_NAME.test(requestedCountry))
   ) {
     return json({ error: "A valid country name is required." }, 400);
   }

@@ -94,7 +94,7 @@ export function mapStyleForEvent(
   category?: Category,
   importanceScore = 0,
 ): { fillColor: string; fillOpacity: number } {
-  if (!category) return { fillColor: "#354052", fillOpacity: 0.72 };
+  if (!category) return { fillColor: "#24444b", fillOpacity: 0.82 };
   const intensity = 0.34 + clamp(importanceScore) * 0.0062;
   return {
     fillColor: mixHex(CATEGORY_COLORS[category], "#263246", intensity),

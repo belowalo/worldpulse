@@ -120,3 +120,18 @@ export interface LiveNewsPayload {
   degraded?: boolean;
   articles: LiveArticle[];
 }
+
+export interface MapNewsCountryPayload {
+  countryName: string;
+  generatedAt: string;
+  available: boolean;
+  articles: LiveArticle[];
+}
+
+export interface MapNewsPayload {
+  scope: "map";
+  generatedAt: string;
+  refreshAfterSeconds: number;
+  provider: string;
+  countries: MapNewsCountryPayload[];
+}

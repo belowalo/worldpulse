@@ -10,10 +10,14 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-function TestMap({ onSelect }: WorldMapProps) {
+function TestMap({ countries, onSelect, statusLabel }: WorldMapProps) {
   const japan = countryPulses.find((country) => country.iso2 === "JP");
   return (
     <>
+      <span>{statusLabel}</span>
+      <span data-testid="countries-with-news">
+        {countries.filter((country) => country.topEvent).length}
+      </span>
       <button type="button" onClick={() => japan && onSelect(japan)}>
         Select Japan on map
       </button>
@@ -151,5 +155,86 @@ describe("WorldPulse interactions", () => {
     expect(
       screen.getByRole("heading", { name: "Senegal" }),
     ).toBeInTheDocument();
+  });
+
+  it("preloads mapped countries before they are clicked", async () => {
+    const mapArticle = {
+      id: "senegal-music",
+      title: "MUSIC AWARDS SENEGAL 2026 announced",
+      url: "https://local.example/senegal-music",
+      publisherName: "Local Culture Desk",
+      publisherUrl: "https://local.example/",
+      publishedAt: "2026-07-24T21:00:00.000Z",
+    };
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === "/countries.geojson") {
+        return Response.json({
+          features: [
+            {
+              id: "124",
+              properties: { name: "Canada" },
+            },
+            {
+              id: "country-57",
+              properties: { name: "Senegal" },
+            },
+          ],
+        });
+      }
+      if (url.includes("scope=map")) {
+        return Response.json({
+          scope: "map",
+          generatedAt: "2026-07-25T00:00:00.000Z",
+          refreshAfterSeconds: 600,
+          provider: "Test map preload",
+          countries: [
+            {
+              countryName: "Canada",
+              generatedAt: "2026-07-25T00:00:00.000Z",
+              available: true,
+              articles: [{ ...mapArticle, id: "canada", title: "Canada music festival opens" }],
+            },
+            {
+              countryName: "Senegal",
+              generatedAt: "2026-07-25T00:00:00.000Z",
+              available: true,
+              articles: [mapArticle],
+            },
+          ],
+        });
+      }
+      const countryName = url.includes("country=Senegal")
+        ? "Senegal"
+        : url.includes("country=Canada")
+          ? "Canada"
+          : null;
+      return Response.json({
+        countryName,
+        scope: countryName ? "country" : "global",
+        generatedAt: "2026-07-25T00:00:00.000Z",
+        refreshAfterSeconds: 600,
+        provider: "Test live index",
+        articles: countryName === "Senegal" ? [mapArticle] : [],
+      });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<WorldPulseApp MapComponent={TestMap} />);
+
+    await waitFor(() =>
+      expect(
+        screen.getByText("2/2 countries preloaded"),
+      ).toBeInTheDocument(),
+    );
+    expect(screen.getByTestId("countries-with-news")).toHaveTextContent("2");
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "Select Senegal on map" }),
+    );
+    expect(
+      await screen.findByText("MUSIC AWARDS SENEGAL 2026 announced"),
+    ).toBeInTheDocument();
+    expect(screen.getAllByText("Culture and sports").length).toBeGreaterThan(0);
   });
 });

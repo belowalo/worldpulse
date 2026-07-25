@@ -58,7 +58,7 @@ export function WorldMap({
         ).fillColor,
       );
     }
-    expression.push("#354052");
+    expression.push("#24444b");
     return expression as ExpressionSpecification;
   }, [countries]);
 
@@ -258,7 +258,7 @@ export function WorldMap({
             </>
           ) : (
             <p className="mt-2 text-xs text-[#8f9caf]">
-              Click to load current reporting
+              No matching headline in the preloaded index.
             </p>
           )}
         </div>
