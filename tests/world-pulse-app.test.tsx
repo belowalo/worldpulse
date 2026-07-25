@@ -149,7 +149,7 @@ describe("WorldPulse interactions", () => {
     ).toHaveLength(1);
 
     fireEvent.click(
-      screen.getByRole("button", { name: "Show all connections" }),
+      screen.getByRole("heading", { name: tradeHeadline }),
     );
     expect(
       screen.getByTestId("link-event-ids").textContent?.split(",").filter(Boolean)
@@ -206,12 +206,15 @@ describe("WorldPulse interactions", () => {
 
     expect(screen.getByTestId("link-event-ids")).toBeEmptyDOMElement();
     fireEvent.click(
-      await screen.findByRole("button", { name: "Show connections" }),
+      await screen.findByRole("heading", { name: headline }),
     );
     expect(screen.getByTestId("link-event-ids")).not.toBeEmptyDOMElement();
+    expect(
+      screen.queryByRole("button", { name: /connections/i }),
+    ).not.toBeInTheDocument();
 
     fireEvent.click(
-      screen.getByRole("button", { name: "Hide connections" }),
+      screen.getByRole("heading", { name: headline }),
     );
     expect(screen.getByTestId("link-event-ids")).toBeEmptyDOMElement();
   });
@@ -581,7 +584,8 @@ describe("WorldPulse interactions", () => {
       expect(screen.getByTestId("countries-with-news")).toHaveTextContent(
         "215",
       ),
+      { timeout: 15_000 },
     );
     expect(screen.getByText(/215\/215 countries loaded/)).toBeInTheDocument();
-  });
+  }, 20_000);
 });

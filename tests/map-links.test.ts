@@ -6,6 +6,10 @@ import {
   countriesMentionedByEvent,
   countryCentersFromGeoJson,
 } from "@/lib/map-links";
+import {
+  countrySearchTerms,
+  textMatchesCountry,
+} from "@/lib/country-terms";
 import type { Event, MapCountry } from "@/lib/types";
 
 const countries: MapCountry[] = [
@@ -13,6 +17,7 @@ const countries: MapCountry[] = [
   { mapId: "608", name: "Philippines", iso2: "PH", events: [] },
   { mapId: "818", name: "Egypt", iso2: "EG", events: [] },
   { mapId: "840", name: "United States", iso2: "US", events: [] },
+  { mapId: "364", name: "Iran", iso2: "IR", events: [] },
 ];
 
 const makeEvent = (headline: string, primaryCountry = "CN") =>
@@ -60,12 +65,48 @@ describe("multi-country map links", () => {
     ).toEqual(["China", "Philippines"]);
   });
 
+  it("treats uppercase US as a country without matching lowercase us", () => {
+    const terms = countrySearchTerms("United States");
+    expect(
+      textMatchesCountry("US expands attacks on Iran", terms),
+    ).toBe(true);
+    expect(
+      textMatchesCountry("Join us for the latest briefing", terms),
+    ).toBe(false);
+
+    const event = makeEvent(
+      "US expands Iran attacks as Trump warns Tehran",
+      "GLOBAL",
+    );
+    expect(
+      countriesMentionedByEvent(event, countries).map(
+        (country) => country.name,
+      ),
+    ).toEqual(["United States", "Iran"]);
+
+    const links = buildEventLinkCollection({
+      events: [event],
+      countries,
+      selectedMapId: null,
+      centers: {
+        "United States": [-98, 39],
+        Iran: [53, 32],
+      },
+    });
+    expect(links.features).toHaveLength(1);
+    expect(links.features[0].properties).toMatchObject({
+      from: "United States",
+      to: "Iran",
+    });
+  });
+
   it("builds a curved link only when at least two countries are involved", () => {
     const centers = {
       China: [104, 35] as [number, number],
       Philippines: [122, 13] as [number, number],
       Egypt: [30, 27] as [number, number],
       "United States": [-98, 39] as [number, number],
+      Iran: [53, 32] as [number, number],
     };
     const international = buildEventLinkCollection({
       events: [

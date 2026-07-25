@@ -124,12 +124,10 @@ function ImportancePill({ event }: { event: Event }) {
 function EventCard({
   event,
   connectionFocused,
-  connectionActionLabel,
   onConnectionFocus,
 }: {
   event: Event;
   connectionFocused: boolean;
-  connectionActionLabel: string;
   onConnectionFocus: () => void;
 }) {
   const [expanded, setExpanded] = useState(false);
@@ -154,6 +152,26 @@ function EventCard({
             }
           : undefined
       }
+      onKeyDown={
+        hasConnections
+          ? (keyEvent) => {
+              if (
+                keyEvent.target !== keyEvent.currentTarget ||
+                (keyEvent.key !== "Enter" && keyEvent.key !== " ")
+              ) {
+                return;
+              }
+              keyEvent.preventDefault();
+              onConnectionFocus();
+            }
+          : undefined
+      }
+      tabIndex={hasConnections ? 0 : undefined}
+      aria-label={
+        hasConnections
+          ? `${event.headline}. Press Enter to toggle this event's map connections.`
+          : undefined
+      }
     >
       <div className="flex flex-wrap items-center gap-2">
         <span
@@ -165,20 +183,6 @@ function EventCard({
           {event.category}
         </span>
         <ImportancePill event={event} />
-        {hasConnections ? (
-          <button
-            type="button"
-            aria-pressed={connectionFocused}
-            onClick={onConnectionFocus}
-            className={`ml-auto rounded-full border px-2.5 py-1 font-mono text-[8px] uppercase tracking-[0.11em] transition ${
-              connectionFocused
-                ? "border-[#73e2cc] bg-[#17413b] text-[#c3fff4]"
-                : "border-[#3a4a61] text-[#91a2b7] hover:border-[#60728d] hover:text-white"
-            }`}
-          >
-            {connectionActionLabel}
-          </button>
-        ) : null}
       </div>
       <h3
         dir="auto"
@@ -1071,13 +1075,6 @@ export function WorldPulseApp({
                   key={event.id}
                   event={event}
                   connectionFocused={connectionEventId === event.id}
-                  connectionActionLabel={
-                    connectionEventId === event.id
-                      ? globalView
-                        ? "Hide connections"
-                        : "Show all connections"
-                      : "Show connections"
-                  }
                   onConnectionFocus={() =>
                     setConnectionEventId((current) =>
                       current === event.id ? null : event.id,

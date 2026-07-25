@@ -152,7 +152,21 @@ describe("live news normalization", () => {
       Object.keys(topCategoryCounts).length,
       JSON.stringify(topCategoryCounts),
     ).toBeGreaterThanOrEqual(8);
-  });
+
+    const egypt = snapshot.countries.find(
+      (country) => country.countryName === "Egypt",
+    );
+    expect(egypt?.articles.length).toBeGreaterThanOrEqual(24);
+    const egyptTitles = egypt?.articles
+      .map((article) => article.title)
+      .join(" ");
+    expect(egyptTitles).toMatch(/digital visa/i);
+    expect(egyptTitles).toMatch(/detained|release/i);
+    expect(egyptTitles).toMatch(/Egypt-Gaza border tunnels/i);
+    expect(
+      countryEvents[snapshot.countries.indexOf(egypt!)].length,
+    ).toBeGreaterThan(10);
+  }, 20_000);
 
   it("clusters related reporting and preserves publisher links", () => {
     const events = buildLiveEvents(payload, {

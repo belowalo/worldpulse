@@ -143,8 +143,8 @@ const COUNTRY_RELATED_TERMS: Record<string, string[]> = {
   Uganda: ["Ugandan"],
   Ukraine: ["Ukrainian"],
   "United Arab Emirates": ["Emirati", "UAE"],
-  "United Kingdom": ["Britain", "British", "U.K."],
-  "United States": ["American", "U.S.", "USA"],
+  "United Kingdom": ["Britain", "British", "U.K.", "UK"],
+  "United States": ["American", "U.S.", "USA", "US"],
   Uruguay: ["Uruguayan"],
   Venezuela: ["Venezuelan"],
   Vietnam: ["Vietnamese"],
@@ -173,10 +173,11 @@ function escapeRegExp(value: string) {
 }
 
 export function textMatchesCountry(text: string, terms: string[]) {
-  return terms.some((term) =>
-    new RegExp(
+  return terms.some((term) => {
+    const caseSensitiveAcronym = /^[A-Z]{2,3}$/.test(term);
+    return new RegExp(
       `(^|[^\\p{L}\\p{N}])${escapeRegExp(term)}([^\\p{L}\\p{N}]|$)`,
-      "iu",
-    ).test(text),
-  );
+      caseSensitiveAcronym ? "u" : "iu",
+    ).test(text);
+  });
 }

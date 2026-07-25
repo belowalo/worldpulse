@@ -4,6 +4,7 @@ import { resolve } from "node:path";
 const projectRoot = resolve(import.meta.dirname, "..");
 const baseUrl = process.env.WORLDPULSE_SEED_ORIGIN ?? "http://localhost:4318";
 const seedBatchSize = 5;
+const maxArticlesPerCountry = 32;
 const geojson = JSON.parse(
   await readFile(resolve(projectRoot, "public/countries.geojson"), "utf8"),
 );
@@ -66,7 +67,7 @@ const countries = countryNames.map((countryName) => {
     countryName,
     generatedAt: result?.generatedAt ?? generatedAt,
     available: Boolean(result?.articles?.length),
-    articles: (result?.articles ?? []).slice(0, 4),
+    articles: (result?.articles ?? []).slice(0, maxArticlesPerCountry),
   };
 });
 const output = {

@@ -47,7 +47,7 @@ const MAX_PROVIDER_BYTES = 1_500_000;
 const MAX_COUNTRY_ARTICLES = 180;
 const MAX_GLOBAL_ARTICLES = 700;
 const MAX_MAP_BATCH_COUNTRIES = 40;
-const MAX_MAP_ARTICLES_PER_COUNTRY = 8;
+const MAX_MAP_ARTICLES_PER_COUNTRY = 32;
 const CACHE_SECONDS = 300;
 const VALID_COUNTRY_NAME = /^[\p{L}\p{M}\d .,'’()&-]+$/u;
 
@@ -375,7 +375,12 @@ const GOOGLE_WORLD_PROVIDER = googleNewsProvider("Google News · World", () => {
 function countryGoogleProviders(countryName: string, requestedRegion: string) {
   const locale = googleNewsLocaleForCountry(countryName, requestedRegion);
   const terms = countrySearchTerms(countryName).slice(0, 6);
-  const query = `${terms.map((term) => `"${term}"`).join(" OR ")} when:7d`;
+  const broadQuery = `${terms
+    .map((term) => `"${term}"`)
+    .join(" OR ")} when:7d`;
+  const currentQuery = `"${countryName}" news when:3d`;
+  const latestQuery = `"${countryName}" latest when:3d`;
+  const rightsQuery = `"${countryName}" human rights when:7d`;
 
   return [
     googleNewsProvider(
@@ -391,7 +396,7 @@ function countryGoogleProviders(countryName: string, requestedRegion: string) {
     ),
     googleNewsProvider("Google News · Local country search", () => {
       const url = new URL("https://news.google.com/rss/search");
-      url.searchParams.set("q", query);
+      url.searchParams.set("q", broadQuery);
       url.searchParams.set("hl", locale.hl);
       url.searchParams.set("gl", locale.region);
       url.searchParams.set("ceid", locale.ceid);
@@ -399,7 +404,31 @@ function countryGoogleProviders(countryName: string, requestedRegion: string) {
     }),
     googleNewsProvider("Google News · International country search", () => {
       const url = new URL("https://news.google.com/rss/search");
-      url.searchParams.set("q", query);
+      url.searchParams.set("q", broadQuery);
+      url.searchParams.set("hl", "en-US");
+      url.searchParams.set("gl", "US");
+      url.searchParams.set("ceid", "US:en");
+      return url;
+    }),
+    googleNewsProvider("Google News · Current country news", () => {
+      const url = new URL("https://news.google.com/rss/search");
+      url.searchParams.set("q", currentQuery);
+      url.searchParams.set("hl", "en-US");
+      url.searchParams.set("gl", "US");
+      url.searchParams.set("ceid", "US:en");
+      return url;
+    }),
+    googleNewsProvider("Google News · Latest country search", () => {
+      const url = new URL("https://news.google.com/rss/search");
+      url.searchParams.set("q", latestQuery);
+      url.searchParams.set("hl", "en-US");
+      url.searchParams.set("gl", "US");
+      url.searchParams.set("ceid", "US:en");
+      return url;
+    }),
+    googleNewsProvider("Google News · Country rights search", () => {
+      const url = new URL("https://news.google.com/rss/search");
+      url.searchParams.set("q", rightsQuery);
       url.searchParams.set("hl", "en-US");
       url.searchParams.set("gl", "US");
       url.searchParams.set("ceid", "US:en");
@@ -430,40 +459,45 @@ async function fetchMapCountry(
   const countryName = canonicalCountryName(requestedCountry);
   const terms = countrySearchTerms(requestedCountry);
   const googleProviders = countryGoogleProviders(countryName, "");
-  let result = await fetchProvider(
+  const preloadProviders = [
     googleProviders[1],
-    "country",
-    countryName,
-    terms,
-    fetchImpl,
+    googleProviders[3],
+    googleProviders[4],
+    googleProviders[5],
+  ];
+  const results = await Promise.all(
+    preloadProviders.map((provider) =>
+      fetchProvider(
+        provider,
+        "country",
+        countryName,
+        terms,
+        fetchImpl,
+      ),
+    ),
   );
-  if (!result.ok || !result.articles.length) {
-    result = await fetchProvider(
-      GDELT_PROVIDER,
-      "country",
-      countryName,
-      terms,
-      fetchImpl,
+  if (!results.some((result) => result.ok && result.articles.length)) {
+    results.push(
+      await fetchProvider(
+        GDELT_PROVIDER,
+        "country",
+        countryName,
+        terms,
+        fetchImpl,
+      ),
     );
   }
-  if (!result.ok || !result.articles.length) {
-    const retryJitter = 200 + Number.parseInt(stableId(countryName), 36) % 500;
-    await new Promise((resolve) => setTimeout(resolve, retryJitter));
-    result = await fetchProvider(
-      googleProviders[2],
-      "country",
-      countryName,
-      terms,
-      fetchImpl,
-    );
-  }
+  const successful = results.filter(
+    (result) => result.ok && result.articles.length,
+  );
   return {
     countryName: requestedCountry,
     generatedAt: new Date().toISOString(),
-    available: result.ok,
-    articles: result.ok
-      ? mergeArticles([result], MAX_MAP_ARTICLES_PER_COUNTRY)
-      : [],
+    available: successful.length > 0,
+    articles: mergeRankedArticles(
+      successful,
+      MAX_MAP_ARTICLES_PER_COUNTRY,
+    ),
   };
 }
 
@@ -560,6 +594,47 @@ function mergeArticles(results: ProviderResult[], limit: number) {
       publisherUrl: article.publisherUrl,
       publishedAt: article.publishedAt,
     }));
+}
+
+function mergeRankedArticles(results: ProviderResult[], limit: number) {
+  const seenUrls = new Set<string>();
+  const seenTitles = new Set<string>();
+  const articles: FeedArticle[] = [];
+  const maxDepth = Math.max(
+    0,
+    ...results.map((result) => result.articles.length),
+  );
+
+  for (
+    let depth = 0;
+    depth < maxDepth && articles.length < limit;
+    depth += 1
+  ) {
+    for (const result of results) {
+      const article = result.articles[depth];
+      if (!article) continue;
+      const urlKey = canonicalArticleKey(article);
+      const titleKey = article.title
+        .toLowerCase()
+        .replace(/[^\p{L}\p{N}]+/gu, " ")
+        .trim();
+      if (seenUrls.has(urlKey) || seenTitles.has(titleKey)) continue;
+      seenUrls.add(urlKey);
+      seenTitles.add(titleKey);
+      articles.push({
+        id: article.id,
+        title: article.title,
+        description: article.description,
+        url: article.url,
+        publisherName: article.publisherName,
+        publisherUrl: article.publisherUrl,
+        publishedAt: article.publishedAt,
+      });
+      if (articles.length === limit) break;
+    }
+  }
+
+  return articles;
 }
 
 function json(data: unknown, status = 200, cacheable = true) {

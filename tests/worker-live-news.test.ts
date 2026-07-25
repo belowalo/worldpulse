@@ -282,6 +282,86 @@ describe("worker live-news providers", () => {
     ).toBe(true);
   });
 
+  it("mixes local, current, latest, and rights reporting in country preloads", async () => {
+    vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const requestedUrls: string[] = [];
+    const feed = (id: string, title: string, publisher: string) => `
+      <rss><channel><item>
+        <title>${title} - ${publisher}</title>
+        <description>Current reporting from Egypt.</description>
+        <link>https://news.google.com/rss/articles/${id}</link>
+        <guid>${id}</guid>
+        <pubDate>Fri, 24 Jul 2026 21:00:00 GMT</pubDate>
+        <source url="https://${id}.example/">${publisher}</source>
+      </item></channel></rss>
+    `;
+    const fetchMock = vi.fn(async (input: URL | RequestInfo) => {
+      const url = String(input);
+      requestedUrls.push(url);
+      const parsed = new URL(url);
+      const query = parsed.searchParams.get("q") ?? "";
+      if (query.includes("human rights")) {
+        return new Response(
+          feed(
+            "egypt-rights",
+            "Egypt urged to release detained Gen Z activists",
+            "Rights Monitor",
+          ),
+        );
+      }
+      if (query.includes("latest")) {
+        return new Response(
+          feed(
+            "egypt-visa",
+            "Egypt launches a digital visa-on-arrival system",
+            "Travel Desk",
+          ),
+        );
+      }
+      if (query.includes("news")) {
+        return new Response(
+          feed(
+            "egypt-tunnels",
+            "Egypt-Gaza border tunnel mapping draws scrutiny",
+            "Regional Desk",
+          ),
+        );
+      }
+      return new Response(
+        feed(
+          "egypt-local",
+          "Egypt announces a new local infrastructure project",
+          "Local Desk",
+        ),
+      );
+    });
+
+    const response = await handleLiveNews(
+      new Request(
+        "https://worldpulse.test/api/live-news?scope=map&countries=Egypt",
+      ),
+      fetchMock as typeof fetch,
+    );
+    const payload = (await response.json()) as {
+      countries: Array<{
+        articles: Array<{ title: string }>;
+      }>;
+    };
+    const titles = payload.countries[0].articles.map(
+      (article) => article.title,
+    );
+
+    expect(titles).toEqual(
+      expect.arrayContaining([
+        "Egypt announces a new local infrastructure project",
+        "Egypt-Gaza border tunnel mapping draws scrutiny",
+        "Egypt launches a digital visa-on-arrival system",
+        "Egypt urged to release detained Gen Z activists",
+      ]),
+    );
+    expect(requestedUrls).toHaveLength(4);
+  });
+
   it("falls back to international search when a local country edition fails", async () => {
     vi.spyOn(console, "warn").mockImplementation(() => undefined);
     const requestedUrls: string[] = [];
