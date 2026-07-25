@@ -97,7 +97,6 @@ describe("worker live-news providers", () => {
 
     const response = await handleLiveNews(
       new Request("https://worldpulse.test/api/live-news?country=Canada"),
-      undefined,
       fetchMock as typeof fetch,
     );
     const payload = (await response.json()) as {
@@ -118,7 +117,6 @@ describe("worker live-news providers", () => {
 
     const response = await handleLiveNews(
       new Request("https://worldpulse.test/api/live-news?country=Canada"),
-      undefined,
       fetchMock as typeof fetch,
     );
 

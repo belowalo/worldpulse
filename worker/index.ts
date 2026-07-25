@@ -31,7 +31,7 @@ const worker = {
     const url = new URL(request.url);
 
     if (url.pathname === "/api/live-news") {
-      return handleLiveNews(request, ctx);
+      return handleLiveNews(request);
     }
 
     if (url.pathname === "/_vinext/image") {

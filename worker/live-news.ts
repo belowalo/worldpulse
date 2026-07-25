@@ -33,10 +33,6 @@ interface NewsProvider {
   parse(body: string): CandidateArticle[];
 }
 
-interface WaitUntilContext {
-  waitUntil(promise: Promise<unknown>): void;
-}
-
 type FetchImplementation = typeof fetch;
 
 const MAX_PROVIDER_BYTES = 1_500_000;
@@ -515,14 +511,8 @@ function json(data: unknown, status = 200) {
   });
 }
 
-function edgeCache() {
-  if (typeof caches === "undefined") return null;
-  return (caches as CacheStorage & { default?: Cache }).default ?? null;
-}
-
 export async function handleLiveNews(
   request: Request,
-  ctx?: WaitUntilContext,
   fetchImpl: FetchImplementation = fetch,
 ) {
   if (request.method !== "GET") {
@@ -540,11 +530,6 @@ export async function handleLiveNews(
   ) {
     return json({ error: "A valid country name is required." }, 400);
   }
-
-  const cache = edgeCache();
-  const cacheKey = new Request(url.toString(), { method: "GET" });
-  const cached = await cache?.match(cacheKey);
-  if (cached) return cached;
 
   const countryName =
     scope === "country"
@@ -575,7 +560,7 @@ export async function handleLiveNews(
     status: result.ok ? "ok" : "failed",
     articleCount: result.articles.length,
   }));
-  const response = json({
+  return json({
     countryName: scope === "country" ? requestedCountry : null,
     scope,
     generatedAt: new Date().toISOString(),
@@ -585,9 +570,4 @@ export async function handleLiveNews(
     degraded: successful.length < PROVIDERS.length,
     articles: mergeArticles(successful),
   });
-
-  if (cache && ctx) {
-    ctx.waitUntil(cache.put(cacheKey, response.clone()));
-  }
-  return response;
 }
