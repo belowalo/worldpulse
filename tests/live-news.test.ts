@@ -64,6 +64,14 @@ describe("live news normalization", () => {
         "Canada marks Gordie Howe bridge opening after trade war deepens",
       ),
     ).toBe("Economy");
+    expect(
+      classifyLiveHeadline(
+        "China, Philippine coastguard vessels clash in South China Sea",
+      ),
+    ).toBe("Conflict and security");
+    expect(
+      classifyLiveHeadline("Rebel uprising grows into a nationwide revolution"),
+    ).toBe("Conflict and security");
   });
 
   it.each([
