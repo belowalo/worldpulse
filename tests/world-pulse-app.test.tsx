@@ -199,6 +199,10 @@ describe("WorldPulse interactions", () => {
     vi.stubGlobal("fetch", fetchMock);
 
     render(<WorldPulseApp MapComponent={TestMap} />);
+    fireEvent.click(screen.getByRole("button", { name: "Global feed" }));
+    fireEvent.change(screen.getByRole("searchbox", { name: "Search news" }), {
+      target: { value: "unrelated search" },
+    });
     fireEvent.click(
       screen.getByRole("button", { name: "Select Egypt on map" }),
     );
@@ -212,6 +216,9 @@ describe("WorldPulse interactions", () => {
     expect(
       await screen.findByRole("heading", { name: arabicHeadline }),
     ).toHaveAttribute("dir", "auto");
+    expect(screen.getByRole("searchbox", { name: "Search news" })).toHaveValue(
+      "",
+    );
   });
 
   it("preloads mapped countries before they are clicked", async () => {

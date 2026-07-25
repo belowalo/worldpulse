@@ -708,6 +708,10 @@ export function WorldPulseApp({
   const handleSelect = (country: MapCountry) => {
     setSelectedCountry(country);
     setGlobalView(false);
+    setCategory("All");
+    setImportance("All");
+    setTimeRange("7 days");
+    setSearch("");
   };
   const hasActiveFilters =
     category !== "All" ||
