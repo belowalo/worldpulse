@@ -111,5 +111,11 @@ export interface LiveNewsPayload {
   generatedAt: string;
   refreshAfterSeconds: number;
   provider: string;
+  providers?: Array<{
+    name: string;
+    status: "ok" | "failed";
+    articleCount: number;
+  }>;
+  degraded?: boolean;
   articles: LiveArticle[];
 }
