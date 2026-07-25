@@ -221,6 +221,89 @@ describe("WorldPulse interactions", () => {
     );
   });
 
+  it("keeps Egypt's fresh preload when a deeper live query is stale", async () => {
+    const currentEgyptHeadline = "مصر تعلن خطة حديثة للنقل العام";
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === "/countries.geojson") {
+        return Response.json({
+          features: [
+            { id: "124", properties: { name: "Canada" } },
+            { id: 818, properties: { name: "Egypt" } },
+          ],
+        });
+      }
+      if (url === "/map-news-seed.json") {
+        return Response.json({
+          scope: "map",
+          generatedAt: "2026-07-25T00:00:00.000Z",
+          refreshAfterSeconds: 600,
+          provider: "Test map preload",
+          countries: [
+            {
+              countryName: "Canada",
+              generatedAt: "2026-07-25T00:00:00.000Z",
+              available: true,
+              articles: [],
+            },
+            {
+              countryName: "Egypt",
+              generatedAt: "2026-07-25T00:00:00.000Z",
+              available: true,
+              articles: [
+                {
+                  id: "egypt-current",
+                  title: currentEgyptHeadline,
+                  url: "https://publisher.example/egypt-current",
+                  publisherName: "صحيفة مصرية",
+                  publisherUrl: "https://publisher.example/",
+                  publishedAt: "2026-07-24T22:00:00.000Z",
+                },
+              ],
+            },
+          ],
+        });
+      }
+      const countryName = url.includes("country=Egypt")
+        ? "Egypt"
+        : url.includes("country=Canada")
+          ? "Canada"
+          : null;
+      return Response.json({
+        countryName,
+        scope: countryName ? "country" : "global",
+        generatedAt: "2026-07-25T00:00:00.000Z",
+        refreshAfterSeconds: 600,
+        provider: "Test live index",
+        articles:
+          countryName === "Egypt"
+            ? [
+                {
+                  id: "egypt-stale",
+                  title: "An old Egyptian archive feature",
+                  url: "https://publisher.example/egypt-stale",
+                  publisherName: "Archive",
+                  publisherUrl: "https://publisher.example/",
+                  publishedAt: "2026-06-01T00:00:00.000Z",
+                },
+              ]
+            : [],
+      });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<WorldPulseApp MapComponent={TestMap} />);
+    await screen.findByText(/2\/2 countries loaded/);
+    fireEvent.click(
+      screen.getByRole("button", { name: "Select Egypt on map" }),
+    );
+
+    expect(await screen.findByText(currentEgyptHeadline)).toBeInTheDocument();
+    expect(
+      screen.queryByText("An old Egyptian archive feature"),
+    ).not.toBeInTheDocument();
+  });
+
   it("preloads mapped countries before they are clicked", async () => {
     const mapArticle = {
       id: "senegal-music",

@@ -86,6 +86,17 @@ const formatTime = (value: string) =>
     timeZone: "America/Toronto",
   }).format(new Date(value));
 
+const hasCurrentWeekCoverage = (events: Event[]) => {
+  const reference = Date.now();
+  return events.some((event) => {
+    const publishedAt = Date.parse(event.lastUpdatedAt);
+    return (
+      Number.isFinite(publishedAt) &&
+      reference - publishedAt <= 168 * 3_600_000
+    );
+  });
+};
+
 function ImportancePill({ event }: { event: Event }) {
   return (
     <span
@@ -600,7 +611,8 @@ export function WorldPulseApp({
           countryFeed &&
           !countryFeed.loading &&
           !countryFeed.error &&
-          (countryFeed.events.length || !preloadedFeed?.events.length)
+          (hasCurrentWeekCoverage(countryFeed.events) ||
+            !preloadedFeed?.events.length)
         ) {
           return {
             ...country,
@@ -645,7 +657,7 @@ export function WorldPulseApp({
   const activeFeed = globalView
     ? globalFeed
     : fullCountryFeed &&
-        (fullCountryFeed.events.length ||
+        (hasCurrentWeekCoverage(fullCountryFeed.events) ||
           (!fullCountryFeed.loading && !preloadedCountryFeed?.events.length))
       ? fullCountryFeed
       : preloadedCountryFeed ?? {
