@@ -1,6 +1,13 @@
+import {
+  canonicalCountryName,
+  countrySearchTerms,
+  textMatchesCountry,
+} from "../lib/country-terms";
+
 export interface FeedArticle {
   id: string;
   title: string;
+  description?: string;
   url: string;
   publisherName: string;
   publisherUrl: string;
@@ -36,76 +43,9 @@ interface NewsProvider {
 type FetchImplementation = typeof fetch;
 
 const MAX_PROVIDER_BYTES = 1_500_000;
-const MAX_ARTICLES = 60;
+const MAX_COUNTRY_ARTICLES = 80;
+const MAX_GLOBAL_ARTICLES = 700;
 const CACHE_SECONDS = 300;
-
-const COUNTRY_QUERY_ALIASES: Record<string, string> = {
-  Aland: "Åland Islands",
-  "Antigua and Barb.": "Antigua and Barbuda",
-  "Bosnia and Herz.": "Bosnia and Herzegovina",
-  "Br. Indian Ocean Ter.": "British Indian Ocean Territory",
-  "Central African Rep.": "Central African Republic",
-  "Czech Rep.": "Czech Republic",
-  "Dem. Rep. Congo": "Democratic Republic of the Congo",
-  "Dem. Rep. Korea": "North Korea",
-  "Dominican Rep.": "Dominican Republic",
-  "Eq. Guinea": "Equatorial Guinea",
-  "Faeroe Is.": "Faroe Islands",
-  "Falkland Is.": "Falkland Islands",
-  "Fr. Polynesia": "French Polynesia",
-  Korea: "South Korea",
-  "N. Cyprus": "Northern Cyprus",
-  "N. Mariana Is.": "Northern Mariana Islands",
-  "S. Sudan": "South Sudan",
-  "Solomon Is.": "Solomon Islands",
-  "St. Vin. and Gren.": "Saint Vincent and the Grenadines",
-  Swaziland: "Eswatini",
-  "Turks and Caicos Is.": "Turks and Caicos Islands",
-  "U.S. Virgin Is.": "U.S. Virgin Islands",
-  "W. Sahara": "Western Sahara",
-};
-
-const COUNTRY_RELATED_TERMS: Record<string, string[]> = {
-  Australia: ["Australian"],
-  Austria: ["Austrian"],
-  Belgium: ["Belgian"],
-  Brazil: ["Brazilian"],
-  Canada: ["Canadian"],
-  China: ["Chinese"],
-  Denmark: ["Danish"],
-  Egypt: ["Egyptian"],
-  Finland: ["Finnish"],
-  France: ["French"],
-  Germany: ["German"],
-  Greece: ["Greek"],
-  India: ["Indian"],
-  Indonesia: ["Indonesian"],
-  Iran: ["Iranian"],
-  Iraq: ["Iraqi"],
-  Ireland: ["Irish"],
-  Israel: ["Israeli"],
-  Italy: ["Italian"],
-  Japan: ["Japanese"],
-  Mexico: ["Mexican"],
-  Netherlands: ["Dutch"],
-  "New Zealand": ["New Zealander"],
-  Norway: ["Norwegian"],
-  Pakistan: ["Pakistani"],
-  Philippines: ["Philippine", "Filipino"],
-  Poland: ["Polish"],
-  Portugal: ["Portuguese"],
-  Russia: ["Russian"],
-  Spain: ["Spanish"],
-  Sweden: ["Swedish"],
-  Switzerland: ["Swiss"],
-  Syria: ["Syrian"],
-  Thailand: ["Thai"],
-  Turkey: ["Turkish", "Türkiye"],
-  Ukraine: ["Ukrainian"],
-  "United Kingdom": ["Britain", "British", "U.K."],
-  "United States": ["American", "U.S."],
-  Vietnam: ["Vietnamese"],
-};
 
 function decodeXml(value: string) {
   return value
@@ -193,15 +133,17 @@ function buildCandidate(
 ): CandidateArticle | null {
   const safeUrl = safeHttpUrl(url);
   const cleanTitle = stripMarkup(title);
+  const cleanDescription = stripMarkup(description).slice(0, 500);
   if (!cleanTitle || !safeUrl) return null;
   return {
     id: stableId(id || safeUrl),
     title: cleanTitle,
+    description: cleanDescription || undefined,
     url: safeUrl,
     publisherName: stripMarkup(publisherName) || "Independent publisher",
     publisherUrl: safeHttpUrl(publisherUrl) || new URL(safeUrl).origin,
     publishedAt: safeIsoDate(publishedAt),
-    searchableText: `${cleanTitle} ${stripMarkup(description)}`.trim(),
+    searchableText: `${cleanTitle} ${cleanDescription}`.trim(),
   };
 }
 
@@ -307,6 +249,36 @@ const PROVIDERS: NewsProvider[] = [
     "https://feeds.bbci.co.uk/news/world/rss.xml",
   ),
   fixedRssProvider(
+    "BBC News",
+    "https://www.bbc.com/news/world/africa",
+    "https://feeds.bbci.co.uk/news/world/africa/rss.xml",
+  ),
+  fixedRssProvider(
+    "BBC News",
+    "https://www.bbc.com/news/world/asia",
+    "https://feeds.bbci.co.uk/news/world/asia/rss.xml",
+  ),
+  fixedRssProvider(
+    "BBC News",
+    "https://www.bbc.com/news/world/europe",
+    "https://feeds.bbci.co.uk/news/world/europe/rss.xml",
+  ),
+  fixedRssProvider(
+    "BBC News",
+    "https://www.bbc.com/news/world/latin_america",
+    "https://feeds.bbci.co.uk/news/world/latin_america/rss.xml",
+  ),
+  fixedRssProvider(
+    "BBC News",
+    "https://www.bbc.com/news/world/middle_east",
+    "https://feeds.bbci.co.uk/news/world/middle_east/rss.xml",
+  ),
+  fixedRssProvider(
+    "BBC News",
+    "https://www.bbc.com/news/world/us_and_canada",
+    "https://feeds.bbci.co.uk/news/world/us_and_canada/rss.xml",
+  ),
+  fixedRssProvider(
     "NPR",
     "https://www.npr.org/sections/world/",
     "https://feeds.npr.org/1004/rss.xml",
@@ -340,6 +312,11 @@ const PROVIDERS: NewsProvider[] = [
     "Sky News",
     "https://news.sky.com/world",
     "https://feeds.skynews.com/feeds/rss/world.xml",
+  ),
+  fixedRssProvider(
+    "UN News",
+    "https://news.un.org/",
+    "https://news.un.org/feed/subscribe/en/news/all/rss.xml",
   ),
   {
     name: "GDELT",
@@ -385,30 +362,11 @@ const PROVIDERS: NewsProvider[] = [
   },
 ];
 
-function countryTerms(requestedCountry: string, canonicalCountry: string) {
-  return [
-    requestedCountry,
-    canonicalCountry,
-    ...(COUNTRY_RELATED_TERMS[canonicalCountry] ?? []),
-  ]
-    .map((term) => term.trim())
-    .filter((term, index, terms) => term && terms.indexOf(term) === index);
-}
-
-function escapeRegExp(value: string) {
-  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-}
-
 export function articleMatchesCountry(
   article: Pick<CandidateArticle, "searchableText">,
   terms: string[],
 ) {
-  return terms.some((term) =>
-    new RegExp(
-      `(^|[^\\p{L}\\p{N}])${escapeRegExp(term)}([^\\p{L}\\p{N}]|$)`,
-      "iu",
-    ).test(article.searchableText),
-  );
+  return textMatchesCountry(article.searchableText, terms);
 }
 
 async function fetchProvider(
@@ -467,7 +425,7 @@ async function fetchProvider(
   }
 }
 
-function mergeArticles(results: ProviderResult[]) {
+function mergeArticles(results: ProviderResult[], limit: number) {
   const seenUrls = new Set<string>();
   const seenTitles = new Set<string>();
   return results
@@ -487,10 +445,11 @@ function mergeArticles(results: ProviderResult[]) {
       seenTitles.add(titleKey);
       return true;
     })
-    .slice(0, MAX_ARTICLES)
+    .slice(0, limit)
     .map((article) => ({
       id: article.id,
       title: article.title,
+      description: article.description,
       url: article.url,
       publisherName: article.publisherName,
       publisherUrl: article.publisherUrl,
@@ -532,12 +491,10 @@ export async function handleLiveNews(
   }
 
   const countryName =
-    scope === "country"
-      ? COUNTRY_QUERY_ALIASES[requestedCountry] ?? requestedCountry
-      : null;
+    scope === "country" ? canonicalCountryName(requestedCountry) : null;
   const terms =
     scope === "country" && countryName
-      ? countryTerms(requestedCountry, countryName)
+      ? countrySearchTerms(requestedCountry)
       : [];
   const results = await Promise.all(
     PROVIDERS.map((provider) =>
@@ -568,6 +525,9 @@ export async function handleLiveNews(
     provider: `WorldPulse live index · ${successful.length} feeds`,
     providers: diagnostics,
     degraded: successful.length < PROVIDERS.length,
-    articles: mergeArticles(successful),
+    articles: mergeArticles(
+      successful,
+      scope === "global" ? MAX_GLOBAL_ARTICLES : MAX_COUNTRY_ARTICLES,
+    ),
   });
 }

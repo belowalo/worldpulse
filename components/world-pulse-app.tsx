@@ -125,7 +125,11 @@ function EventCard({ event }: { event: Event }) {
         <Metric label="Updated" value={formatTime(event.lastUpdatedAt)} />
         <Metric
           label="Sources"
-          value={`${event.articles.length} independent`}
+          value={
+            event.scoringInput.independentSourceCount > event.articles.length
+              ? `${event.articles.length} shown · ${event.scoringInput.independentSourceCount} total`
+              : `${event.articles.length} independent`
+          }
         />
       </div>
       <div className="mt-4 flex flex-wrap items-center gap-2">
@@ -293,9 +297,6 @@ export function WorldPulseApp({
     useState<MapCountry>(initialCountry);
   const [countryDirectory, setCountryDirectory] =
     useState<MapCountry[]>(countryMetadata);
-  const [countryFeeds, setCountryFeeds] = useState<Record<string, FeedState>>(
-    {},
-  );
   const [globalPayload, setGlobalPayload] =
     useState<LiveNewsPayload | null>(null);
   const [globalFeed, setGlobalFeed] = useState<FeedState>(EMPTY_FEED);
@@ -305,47 +306,6 @@ export function WorldPulseApp({
   const [timeRange, setTimeRange] = useState<TimeFilter>("7 days");
   const [search, setSearch] = useState("");
   const [showMethodology, setShowMethodology] = useState(false);
-
-  const fetchCountryNews = useCallback(async (country: MapCountry) => {
-    setCountryFeeds((current) => ({
-      ...current,
-      [country.mapId]: {
-        ...(current[country.mapId] ?? EMPTY_FEED),
-        loading: true,
-        error: null,
-      },
-    }));
-    try {
-      const response = await fetch(
-        `/api/live-news?country=${encodeURIComponent(country.name)}`,
-      );
-      if (!response.ok) throw new Error("Live reporting is temporarily unavailable.");
-      const payload = (await response.json()) as LiveNewsPayload;
-      const events = buildLiveEvents(payload, country);
-      setCountryFeeds((current) => ({
-        ...current,
-        [country.mapId]: {
-          events,
-          updatedAt: payload.generatedAt,
-          provider: payload.provider,
-          loading: false,
-          error: null,
-        },
-      }));
-    } catch (error) {
-      setCountryFeeds((current) => ({
-        ...current,
-        [country.mapId]: {
-          ...(current[country.mapId] ?? EMPTY_FEED),
-          loading: false,
-          error:
-            error instanceof Error
-              ? error.message
-              : "Live reporting is temporarily unavailable.",
-        },
-      }));
-    }
-  }, []);
 
   const fetchGlobalNews = useCallback(async () => {
     setGlobalFeed((current) => ({
@@ -419,29 +379,19 @@ export function WorldPulseApp({
   useEffect(() => {
     if (!liveUpdates) return;
     void fetchGlobalNews();
-    void fetchCountryNews(initialCountry);
-  }, [fetchCountryNews, fetchGlobalNews, liveUpdates]);
+  }, [fetchGlobalNews, liveUpdates]);
 
   useEffect(() => {
     if (!liveUpdates) return;
     const refreshTimer = window.setInterval(() => {
       void fetchGlobalNews();
-      void fetchCountryNews(selectedCountry);
     }, 600_000);
     return () => window.clearInterval(refreshTimer);
-  }, [fetchCountryNews, fetchGlobalNews, liveUpdates, selectedCountry]);
+  }, [fetchGlobalNews, liveUpdates]);
 
   const mapCountries = useMemo(
     () =>
       countryDirectory.map((country): MapCountry => {
-        const focusedFeed = countryFeeds[country.mapId];
-        if (focusedFeed) {
-          return {
-            ...country,
-            events: focusedFeed.events,
-            topEvent: focusedFeed.events[0],
-          };
-        }
         if (!globalPayload) return country;
         const matchingArticles = articlesMentioningCountry(
           globalPayload,
@@ -454,14 +404,12 @@ export function WorldPulseApp({
         );
         return { ...country, events, topEvent: events[0] };
       }),
-    [countryDirectory, countryFeeds, globalPayload],
+    [countryDirectory, globalPayload],
   );
   const activeCountry =
     mapCountries.find((country) => country.mapId === selectedCountry.mapId) ??
     selectedCountry;
-  const activeFeed = globalView
-    ? globalFeed
-    : countryFeeds[selectedCountry.mapId] ?? EMPTY_FEED;
+  const activeFeed = globalFeed;
   const baseEvents = globalView ? globalFeed.events : activeCountry.events;
   const filteredEvents = (() => {
     const limitHours =
@@ -489,7 +437,6 @@ export function WorldPulseApp({
   const handleSelect = (country: MapCountry) => {
     setSelectedCountry(country);
     setGlobalView(false);
-    if (liveUpdates) void fetchCountryNews(country);
   };
   const hasActiveFilters =
     category !== "All" ||
@@ -621,11 +568,7 @@ export function WorldPulseApp({
               </span>
               <button
                 type="button"
-                onClick={() =>
-                  globalView
-                    ? void fetchGlobalNews()
-                    : void fetchCountryNews(activeCountry)
-                }
+                onClick={() => void fetchGlobalNews()}
                 disabled={activeFeed.loading || !liveUpdates}
                 className="rounded-md border border-[#354359] px-2.5 py-1.5 text-[9px] text-[#aeb9c7] transition hover:border-[#64748b] hover:text-white disabled:cursor-wait disabled:opacity-50"
               >
@@ -708,11 +651,7 @@ export function WorldPulseApp({
                   </p>
                   <button
                     type="button"
-                    onClick={() =>
-                      globalView
-                        ? void fetchGlobalNews()
-                        : void fetchCountryNews(activeCountry)
-                    }
+                    onClick={() => void fetchGlobalNews()}
                     className="mt-4 rounded-lg border border-[#46556b] px-3 py-2 text-[10px] text-[#cad3df] hover:bg-[#192437]"
                   >
                     Try again

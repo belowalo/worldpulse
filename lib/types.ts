@@ -99,6 +99,7 @@ export interface MapCountry {
 export interface LiveArticle {
   id: string;
   title: string;
+  description?: string;
   url: string;
   publisherName: string;
   publisherUrl: string;

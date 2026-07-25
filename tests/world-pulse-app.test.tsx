@@ -1,9 +1,14 @@
-import { fireEvent, render, screen } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { WorldPulseApp } from "@/components/world-pulse-app";
 import type { WorldMapProps } from "@/components/world-map";
 import { countryPulses } from "@/lib/seed-data";
+
+afterEach(() => {
+  vi.restoreAllMocks();
+  vi.unstubAllGlobals();
+});
 
 function TestMap({ onSelect }: WorldMapProps) {
   const japan = countryPulses.find((country) => country.iso2 === "JP");
@@ -55,5 +60,33 @@ describe("WorldPulse interactions", () => {
     expect(
       screen.queryByRole("button", { name: "Japan" }),
     ).not.toBeInTheDocument();
+  });
+
+  it("loads one global index without requesting every country at startup", async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === "/countries.geojson") {
+        return Response.json({ features: [] });
+      }
+      return Response.json({
+        countryName: null,
+        scope: "global",
+        generatedAt: "2026-07-25T00:00:00.000Z",
+        refreshAfterSeconds: 600,
+        provider: "Test global index",
+        articles: [],
+      });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<WorldPulseApp MapComponent={TestMap} />);
+
+    await waitFor(() =>
+      expect(fetchMock).toHaveBeenCalledWith("/api/live-news?scope=global"),
+    );
+    const requestedUrls = fetchMock.mock.calls.map(([input]) => String(input));
+    expect(
+      requestedUrls.some((url) => url.includes("/api/live-news?country=")),
+    ).toBe(false);
   });
 });

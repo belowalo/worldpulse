@@ -58,4 +58,60 @@ describe("live news normalization", () => {
     expect(articlesMentioningCountry(payload, "Canada")).toHaveLength(2);
     expect(articlesMentioningCountry(payload, "Japan")).toHaveLength(0);
   });
+
+  it("matches countries mentioned in feed descriptions", () => {
+    const descriptionOnly: LiveNewsPayload = {
+      ...payload,
+      articles: [
+        {
+          id: "description-only",
+          title: "Parliament approves the emergency package",
+          description: "Canadian lawmakers backed the measure late Thursday.",
+          url: "https://example.com/description-only",
+          publisherName: "Example News",
+          publisherUrl: "https://example.com",
+          publishedAt: "2026-07-24T21:00:00.000Z",
+        },
+      ],
+    };
+
+    expect(articlesMentioningCountry(descriptionOnly, "Canada")).toHaveLength(
+      1,
+    );
+  });
+
+  it("groups differently worded coverage and exposes the first four sources", () => {
+    const headlines = [
+      "US launches fresh strikes on Iranian military sites",
+      "American attacks hit Iran military facilities overnight",
+      "Iran military sites hit by fresh US attack",
+      "Fresh attacks target Iranian military facilities",
+      "US attack targets Iran military sites",
+      "Iranian military facilities struck in US attacks",
+    ];
+    const multiSource: LiveNewsPayload = {
+      ...payload,
+      countryName: "United States",
+      articles: headlines.map((title, index) => ({
+        id: `source-${index}`,
+        title,
+        description:
+          "The latest attack involved military facilities in Iran and the United States.",
+        url: `https://publisher${index}.example/story`,
+        publisherName: `Publisher ${index + 1}`,
+        publisherUrl: `https://publisher${index}.example`,
+        publishedAt: `2026-07-24T${String(23 - index).padStart(2, "0")}:00:00.000Z`,
+      })),
+    };
+
+    const events = buildLiveEvents(multiSource, {
+      name: "United States",
+      iso2: "US",
+    });
+
+    expect(events).toHaveLength(1);
+    expect(events[0].articles).toHaveLength(4);
+    expect(events[0].scoringInput.independentSourceCount).toBe(6);
+    expect(events[0].summary).toContain("6 independent publishers");
+  });
 });
