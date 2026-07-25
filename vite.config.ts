@@ -1,4 +1,6 @@
 import vinext from "vinext";
+import { copyFileSync, mkdirSync } from "node:fs";
+import { resolve } from "node:path";
 import { defineConfig } from "vite";
 import hostingConfig from "./.openai/hosting.json";
 import { sites } from "./build/sites-vite-plugin";
@@ -10,6 +12,20 @@ const { d1, r2 } = hostingConfig;
 
 // macOS Seatbelt blocks FSEvents, so Codex previews need polling for HMR.
 const isCodexSeatbeltSandbox = process.env.CODEX_SANDBOX === "seatbelt";
+
+function mapLibreWorkerDependencies() {
+  return {
+    name: "worldpulse-maplibre-worker-dependencies",
+    closeBundle() {
+      const assetsDirectory = resolve("dist/client/assets");
+      mkdirSync(assetsDirectory, { recursive: true });
+      copyFileSync(
+        resolve("node_modules/maplibre-gl/dist/maplibre-gl-shared.mjs"),
+        resolve(assetsDirectory, "maplibre-gl-shared.mjs"),
+      );
+    },
+  };
+}
 
 const localBindingConfig = {
   main: "./worker/index.ts",
@@ -53,6 +69,7 @@ export default defineConfig(async () => {
     plugins: [
       vinext(),
       sites(),
+      mapLibreWorkerDependencies(),
       cloudflare({
         viteEnvironment: { name: "rsc", childEnvironments: ["ssr"] },
         config: localBindingConfig,
