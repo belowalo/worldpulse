@@ -59,6 +59,11 @@ describe("live news normalization", () => {
         "Trump issues 50% tariffs on Canada ahead of Gordie Howe Bridge opening",
       ),
     ).toBe("Economy");
+    expect(
+      classifyLiveHeadline(
+        "Canada marks Gordie Howe bridge opening after trade war deepens",
+      ),
+    ).toBe("Economy");
   });
 
   it.each([
