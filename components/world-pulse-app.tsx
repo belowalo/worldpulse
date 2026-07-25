@@ -312,6 +312,7 @@ export function WorldPulseApp({
     Record<string, FeedState>
   >({});
   const [countryDirectoryReady, setCountryDirectoryReady] = useState(false);
+  const [mapSeedReady, setMapSeedReady] = useState(false);
   const [mapPreload, setMapPreload] = useState({
     loading: false,
     loaded: 0,
@@ -409,12 +410,16 @@ export function WorldPulseApp({
     ) {
       batches.push(countries.slice(index, index + MAP_PRELOAD_BATCH_SIZE));
     }
-    setMapPreload({
+    setMapPreload((current) => ({
       loading: true,
-      loaded: 0,
+      loaded:
+        current.total === countries.length &&
+        current.loaded === current.total
+          ? current.loaded
+          : 0,
       total: countries.length,
       failedBatches: 0,
-    });
+    }));
 
     const loadBatch = async (batch: MapCountry[]) => {
         try {
@@ -444,7 +449,13 @@ export function WorldPulseApp({
             const next = { ...current };
             for (const countryPayload of payload.countries) {
               const country = countriesByName.get(countryPayload.countryName);
-              if (!country) continue;
+              if (
+                !country ||
+                !countryPayload.available ||
+                !countryPayload.articles.length
+              ) {
+                continue;
+              }
               const livePayload: LiveNewsPayload = {
                 countryName: countryPayload.countryName,
                 scope: "country",
@@ -458,9 +469,7 @@ export function WorldPulseApp({
                 updatedAt: countryPayload.generatedAt,
                 provider: `${payload.provider} · ready before click`,
                 loading: false,
-                error: countryPayload.available
-                  ? null
-                  : "No local preload response.",
+                error: null,
               };
             }
             return next;
@@ -543,7 +552,74 @@ export function WorldPulseApp({
   }, [fetchGlobalNews, liveUpdates]);
 
   useEffect(() => {
-    if (!liveUpdates || !countryDirectoryReady || !countryDirectory.length) {
+    if (!liveUpdates || !countryDirectoryReady) return;
+    if (!countryDirectory.length) {
+      setMapSeedReady(true);
+      return;
+    }
+
+    let cancelled = false;
+    fetch("/map-news-seed.json")
+      .then((response) => {
+        if (!response.ok) throw new Error("Map snapshot unavailable.");
+        return response.json() as Promise<MapNewsPayload>;
+      })
+      .then((payload) => {
+        if (cancelled) return;
+        const countriesByName = new Map(
+          countryDirectory.map((country) => [country.name, country]),
+        );
+        const nextFeeds: Record<string, FeedState> = {};
+        let indexedCountries = 0;
+
+        for (const countryPayload of payload.countries) {
+          const country = countriesByName.get(countryPayload.countryName);
+          if (!country) continue;
+          indexedCountries += 1;
+          const livePayload: LiveNewsPayload = {
+            countryName: countryPayload.countryName,
+            scope: "country",
+            generatedAt: countryPayload.generatedAt,
+            refreshAfterSeconds: payload.refreshAfterSeconds,
+            provider: payload.provider,
+            articles: countryPayload.articles,
+          };
+          nextFeeds[country.name] = {
+            events: buildLiveEvents(livePayload, country),
+            updatedAt: countryPayload.generatedAt,
+            provider: `${payload.provider} · ready before click`,
+            loading: false,
+            error: null,
+          };
+        }
+
+        setPreloadedCountryFeeds(nextFeeds);
+        setMapPreload({
+          loading: false,
+          loaded: indexedCountries,
+          total: countryDirectory.length,
+          failedBatches: 0,
+        });
+      })
+      .catch(() => {
+        // The live batched preload below remains as the network fallback.
+      })
+      .finally(() => {
+        if (!cancelled) setMapSeedReady(true);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [countryDirectory, countryDirectoryReady, liveUpdates]);
+
+  useEffect(() => {
+    if (
+      !liveUpdates ||
+      !countryDirectoryReady ||
+      !mapSeedReady ||
+      !countryDirectory.length
+    ) {
       return;
     }
     void fetchMapPreload(countryDirectory);
@@ -552,6 +628,7 @@ export function WorldPulseApp({
     countryDirectoryReady,
     fetchMapPreload,
     liveUpdates,
+    mapSeedReady,
   ]);
 
   useEffect(() => {
@@ -564,7 +641,7 @@ export function WorldPulseApp({
     const refreshTimer = window.setInterval(() => {
       void fetchGlobalNews();
       void fetchCountryNews(selectedCountry);
-      if (countryDirectoryReady) {
+      if (countryDirectoryReady && mapSeedReady) {
         void fetchMapPreload(countryDirectory);
       }
     }, 600_000);
@@ -576,6 +653,7 @@ export function WorldPulseApp({
     fetchGlobalNews,
     fetchMapPreload,
     liveUpdates,
+    mapSeedReady,
     selectedCountry,
   ]);
 
@@ -723,7 +801,10 @@ export function WorldPulseApp({
             onSelect={handleSelect}
             statusLabel={
               mapPreload.loading
-                ? `Preloading ${mapPreload.loaded}/${mapPreload.total} countries…`
+                ? mapPreload.total &&
+                  mapPreload.loaded === mapPreload.total
+                  ? `${mapPreload.loaded}/${mapPreload.total} countries preloaded · refreshing`
+                  : `Preloading ${mapPreload.loaded}/${mapPreload.total} countries…`
                 : mapPreload.total
                   ? mapPreload.loaded === mapPreload.total
                     ? `${mapPreload.loaded}/${mapPreload.total} countries preloaded`

@@ -191,6 +191,35 @@ describe("worker live-news providers", () => {
     expect(unresolved).toEqual([]);
   });
 
+  it("ships a preloaded headline index for every mapped country", () => {
+    const geojson = JSON.parse(
+      readFileSync(resolve("public/countries.geojson"), "utf8"),
+    ) as { features: Array<{ properties: { name: string } }> };
+    const snapshot = JSON.parse(
+      readFileSync(resolve("public/map-news-seed.json"), "utf8"),
+    ) as {
+      countries: Array<{
+        countryName: string;
+        available: boolean;
+        articles: unknown[];
+      }>;
+    };
+    const mapCountries = geojson.features.map(
+      (feature) => feature.properties.name,
+    );
+    const snapshotCountries = snapshot.countries.map(
+      (country) => country.countryName,
+    );
+
+    expect(snapshotCountries).toEqual(mapCountries);
+    expect(new Set(snapshotCountries).size).toBe(mapCountries.length);
+    expect(
+      snapshot.countries.every(
+        (country) => country.available && country.articles.length > 0,
+      ),
+    ).toBe(true);
+  });
+
   it("preloads a batch of country headlines in one map request", async () => {
     vi.spyOn(console, "warn").mockImplementation(() => undefined);
     const requestedUrls: string[] = [];

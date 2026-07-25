@@ -182,7 +182,7 @@ describe("WorldPulse interactions", () => {
           ],
         });
       }
-      if (url.includes("scope=map")) {
+      if (url === "/map-news-seed.json" || url.includes("scope=map")) {
         return Response.json({
           scope: "map",
           generatedAt: "2026-07-25T00:00:00.000Z",

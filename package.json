@@ -11,6 +11,7 @@
     "start": "vinext start",
     "test": "vitest run",
     "test:watch": "vitest",
+    "generate:map-seed": "node scripts/generate-map-news-seed.mjs",
     "typecheck": "tsc --noEmit",
     "lint": "eslint . --ignore-pattern dist --ignore-pattern outputs --ignore-pattern .next --ignore-pattern apps/api/.venv"
   },
