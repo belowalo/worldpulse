@@ -5,6 +5,7 @@ import {
   useCallback,
   useEffect,
   useMemo,
+  useRef,
   useState,
   type ComponentType,
 } from "react";
@@ -65,8 +66,8 @@ const EMPTY_FEED: FeedState = {
   error: null,
 };
 
-const MAP_PRELOAD_BATCH_SIZE = 20;
-const MAP_PRELOAD_CONCURRENCY = 3;
+const MAP_PRELOAD_BATCH_SIZE = 5;
+const MAP_PRELOAD_CONCURRENCY = 1;
 
 const countryMetadata = countryPulses.map(
   (country): MapCountry => ({
@@ -278,6 +279,13 @@ function MethodologyModal({ onClose }: { onClose: () => void }) {
           ))}
         </div>
         <p className="mt-5 text-xs leading-5 text-[#8996a8]">
+          Every displayed headline and publisher link comes from a real public
+          news feed. A recent feed snapshot makes all countries available
+          immediately, then a rate-limited live sweep refreshes every country
+          automatically without waiting for a click. WorldPulse never invents
+          headlines or sources.
+        </p>
+        <p className="mt-3 text-xs leading-5 text-[#8996a8]">
           Coverage is uneven. Countries with less digital reporting or fewer
           accessible sources may appear less active. Publication volume alone
           is never treated as importance, and political summaries use neutral
@@ -313,10 +321,13 @@ export function WorldPulseApp({
   >({});
   const [countryDirectoryReady, setCountryDirectoryReady] = useState(false);
   const [mapSeedReady, setMapSeedReady] = useState(false);
+  const mapRefreshInFlightRef = useRef(false);
+  const preloadedCountryNamesRef = useRef(new Set<string>());
   const [mapPreload, setMapPreload] = useState({
     loading: false,
     loaded: 0,
     total: 0,
+    refreshed: 0,
     failedBatches: 0,
   });
   const [globalView, setGlobalView] = useState(false);
@@ -402,6 +413,8 @@ export function WorldPulseApp({
   }, []);
 
   const fetchMapPreload = useCallback(async (countries: MapCountry[]) => {
+    if (mapRefreshInFlightRef.current) return;
+    mapRefreshInFlightRef.current = true;
     const batches: MapCountry[][] = [];
     for (
       let index = 0;
@@ -418,6 +431,7 @@ export function WorldPulseApp({
           ? current.loaded
           : 0,
       total: countries.length,
+      refreshed: 0,
       failedBatches: 0,
     }));
 
@@ -439,8 +453,8 @@ export function WorldPulseApp({
           }
           if (!response) throw new Error("Map preload failed.");
           const payload = (await response.json()) as MapNewsPayload;
-          const availableCountries = payload.countries.filter(
-            (country) => country.available,
+          const refreshedCountries = payload.countries.filter(
+            (country) => country.available && country.articles.length,
           ).length;
           const countriesByName = new Map(
             batch.map((country) => [country.name, country]),
@@ -456,6 +470,7 @@ export function WorldPulseApp({
               ) {
                 continue;
               }
+              preloadedCountryNamesRef.current.add(country.name);
               const livePayload: LiveNewsPayload = {
                 countryName: countryPayload.countryName,
                 scope: "country",
@@ -476,9 +491,10 @@ export function WorldPulseApp({
           });
           setMapPreload((current) => ({
             ...current,
-            loaded: Math.min(
+            loaded: preloadedCountryNamesRef.current.size,
+            refreshed: Math.min(
               current.total,
-              current.loaded + availableCountries,
+              current.refreshed + refreshedCountries,
             ),
           }));
         } catch {
@@ -501,6 +517,7 @@ export function WorldPulseApp({
         },
       ),
     );
+    mapRefreshInFlightRef.current = false;
     setMapPreload((current) => ({ ...current, loading: false }));
   }, []);
 
@@ -593,11 +610,13 @@ export function WorldPulseApp({
           };
         }
 
+        preloadedCountryNamesRef.current = new Set(Object.keys(nextFeeds));
         setPreloadedCountryFeeds(nextFeeds);
         setMapPreload({
           loading: false,
           loaded: indexedCountries,
           total: countryDirectory.length,
+          refreshed: 0,
           failedBatches: 0,
         });
       })
@@ -725,8 +744,7 @@ export function WorldPulseApp({
   const filteredEvents = (() => {
     const limitHours =
       timeRange === "24 hours" ? 24 : timeRange === "3 days" ? 72 : 168;
-    const reference =
-      Date.parse(activeFeed.updatedAt ?? "") || Date.now();
+    const reference = Date.now();
     return baseEvents.filter((event) => {
       const matchesCategory = category === "All" || event.category === category;
       const matchesImportance =
@@ -801,13 +819,14 @@ export function WorldPulseApp({
             onSelect={handleSelect}
             statusLabel={
               mapPreload.loading
-                ? mapPreload.total &&
-                  mapPreload.loaded === mapPreload.total
-                  ? `${mapPreload.loaded}/${mapPreload.total} countries preloaded · refreshing`
-                  : `Preloading ${mapPreload.loaded}/${mapPreload.total} countries…`
+                ? `${mapPreload.loaded}/${mapPreload.total} loaded · live refresh ${mapPreload.refreshed}/${mapPreload.total}`
                 : mapPreload.total
                   ? mapPreload.loaded === mapPreload.total
-                    ? `${mapPreload.loaded}/${mapPreload.total} countries preloaded`
+                    ? `${mapPreload.loaded}/${mapPreload.total} countries loaded${
+                        mapPreload.refreshed
+                          ? ` · ${mapPreload.refreshed} refreshed now`
+                          : ""
+                      }`
                     : `${mapPreload.loaded}/${mapPreload.total} countries ready · refresh retries`
                   : globalFeed.loading
                 ? "Refreshing live feed…"
@@ -823,7 +842,7 @@ export function WorldPulseApp({
                 Intensity = estimated importance
               </span>
             </div>
-            <div className="mt-2 flex gap-x-3 gap-y-2 overflow-x-auto pb-1 scrollbar-thin">
+            <div className="mt-2 flex flex-wrap gap-x-3 gap-y-2">
               {CATEGORIES.map((item) => (
                 <div
                   key={item}

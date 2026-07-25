@@ -1,5 +1,7 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 
 import { WorldPulseApp } from "@/components/world-pulse-app";
 import type { WorldMapProps } from "@/components/world-map";
@@ -224,7 +226,7 @@ describe("WorldPulse interactions", () => {
 
     await waitFor(() =>
       expect(
-        screen.getByText("2/2 countries preloaded"),
+        screen.getByText(/2\/2 countries loaded/),
       ).toBeInTheDocument(),
     );
     expect(screen.getByTestId("countries-with-news")).toHaveTextContent("2");
@@ -235,6 +237,43 @@ describe("WorldPulse interactions", () => {
     expect(
       await screen.findByText("MUSIC AWARDS SENEGAL 2026 announced"),
     ).toBeInTheDocument();
-    expect(screen.getAllByText("Culture and sports").length).toBeGreaterThan(0);
+    expect(
+      screen.getAllByText("Culture and entertainment").length,
+    ).toBeGreaterThan(0);
+  });
+
+  it("gives every real map country a categorized top event before a click", async () => {
+    const geojson = JSON.parse(
+      readFileSync(resolve("public/countries.geojson"), "utf8"),
+    );
+    const mapSnapshot = JSON.parse(
+      readFileSync(resolve("public/map-news-seed.json"), "utf8"),
+    );
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === "/countries.geojson") return Response.json(geojson);
+      if (url === "/map-news-seed.json" || url.includes("scope=map")) {
+        return Response.json(mapSnapshot);
+      }
+      const countryName = url.includes("country=Canada") ? "Canada" : null;
+      return Response.json({
+        countryName,
+        scope: countryName ? "country" : "global",
+        generatedAt: mapSnapshot.generatedAt,
+        refreshAfterSeconds: 600,
+        provider: "Test live index",
+        articles: [],
+      });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<WorldPulseApp MapComponent={TestMap} />);
+
+    await waitFor(() =>
+      expect(screen.getByTestId("countries-with-news")).toHaveTextContent(
+        "215",
+      ),
+    );
+    expect(screen.getByText(/215\/215 countries loaded/)).toBeInTheDocument();
   });
 });

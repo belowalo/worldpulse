@@ -14,14 +14,21 @@ const WEIGHTS = {
 } as const;
 
 const CATEGORY_COLORS: Record<Category, string> = {
-  Politics: "#9a7cff",
-  Economy: "#4c9dff",
-  "Conflict and security": "#ff5d6c",
-  Environment: "#48c78e",
-  Health: "#ff9b55",
-  "Science and technology": "#3ed5e5",
-  "Culture and sports": "#f1cf57",
-  Other: "#8b95a6",
+  Politics: "#a78bfa",
+  Economy: "#3b82f6",
+  "Conflict and security": "#fb4d5f",
+  "Crime and justice": "#f97316",
+  Environment: "#22c55e",
+  "Weather and disasters": "#f59e0b",
+  Health: "#ec4899",
+  "Science and technology": "#06b6d4",
+  "Society and education": "#818cf8",
+  "Travel and transport": "#14b8a6",
+  "Culture and entertainment": "#d946ef",
+  Sports: "#84cc16",
+  "Food and agriculture": "#facc15",
+  "Local affairs": "#38bdf8",
+  Other: "#94a3b8",
 };
 
 const clamp = (value: number, min = 0, max = 100) =>
@@ -95,10 +102,10 @@ export function mapStyleForEvent(
   importanceScore = 0,
 ): { fillColor: string; fillOpacity: number } {
   if (!category) return { fillColor: "#24444b", fillOpacity: 0.82 };
-  const intensity = 0.34 + clamp(importanceScore) * 0.0062;
+  const intensity = 0.72 + clamp(importanceScore) * 0.0028;
   return {
-    fillColor: mixHex(CATEGORY_COLORS[category], "#263246", intensity),
-    fillOpacity: 0.88,
+    fillColor: mixHex(CATEGORY_COLORS[category], "#182333", intensity),
+    fillOpacity: 0.94,
   };
 }
 

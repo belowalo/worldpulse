@@ -3,6 +3,7 @@ import { resolve } from "node:path";
 
 const projectRoot = resolve(import.meta.dirname, "..");
 const baseUrl = process.env.WORLDPULSE_SEED_ORIGIN ?? "http://localhost:4318";
+const seedBatchSize = 5;
 const geojson = JSON.parse(
   await readFile(resolve(projectRoot, "public/countries.geojson"), "utf8"),
 );
@@ -29,8 +30,8 @@ async function fetchCountries(names) {
 }
 
 const countryResults = new Map();
-for (let index = 0; index < countryNames.length; index += 20) {
-  const batch = countryNames.slice(index, index + 20);
+for (let index = 0; index < countryNames.length; index += seedBatchSize) {
+  const batch = countryNames.slice(index, index + seedBatchSize);
   const results = await fetchCountries(batch);
   for (const result of results) countryResults.set(result.countryName, result);
   await wait(250);
@@ -49,13 +50,22 @@ for (const countryName of countryNames) {
   }
 }
 
+const missingCountries = countryNames.filter(
+  (countryName) => !countryResults.get(countryName)?.articles?.length,
+);
+if (missingCountries.length) {
+  throw new Error(
+    `Refusing to publish an incomplete map snapshot. Missing real headlines for: ${missingCountries.join(", ")}`,
+  );
+}
+
 const generatedAt = new Date().toISOString();
 const countries = countryNames.map((countryName) => {
   const result = countryResults.get(countryName);
   return {
     countryName,
     generatedAt: result?.generatedAt ?? generatedAt,
-    available: true,
+    available: Boolean(result?.articles?.length),
     articles: (result?.articles ?? []).slice(0, 4),
   };
 });

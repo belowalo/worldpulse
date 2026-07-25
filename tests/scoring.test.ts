@@ -1,9 +1,11 @@
 import { describe, expect, it } from "vitest";
 import {
   calculateImportance,
+  categoryColor,
   importanceLabel,
   mapStyleForEvent,
 } from "@/lib/scoring";
+import { CATEGORIES } from "@/lib/types";
 
 describe("impact scoring", () => {
   it("handles missing values safely", () => {
@@ -47,5 +49,15 @@ describe("impact scoring", () => {
 
   it("gives countries without a current headline a visible neutral color", () => {
     expect(mapStyleForEvent().fillColor).toBe("#24444b");
+  });
+
+  it("assigns every category a distinct, visible map color", () => {
+    const colors = CATEGORIES.map((category) => categoryColor(category));
+    const mapColors = CATEGORIES.map(
+      (category) => mapStyleForEvent(category, 50).fillColor,
+    );
+
+    expect(new Set(colors).size).toBe(CATEGORIES.length);
+    expect(new Set(mapColors).size).toBe(CATEGORIES.length);
   });
 });

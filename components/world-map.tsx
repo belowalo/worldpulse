@@ -31,6 +31,21 @@ const SELECTED_LAYER = "selected-country";
 
 maplibregl.setWorkerUrl(maplibreWorkerUrl);
 
+function buildCountryColorExpression(countries: MapCountry[]) {
+  const expression: unknown[] = ["match", ["get", "name"]];
+  for (const country of countries) {
+    expression.push(
+      country.name,
+      mapStyleForEvent(
+        country.topEvent?.category,
+        country.topEvent?.importanceScore,
+      ).fillColor,
+    );
+  }
+  expression.push("#24444b");
+  return expression as ExpressionSpecification;
+}
+
 export function WorldMap({
   countries,
   selectedMapId,
@@ -41,26 +56,19 @@ export function WorldMap({
   const mapRef = useRef<MapLibreMap | null>(null);
   const onSelectRef = useRef(onSelect);
   const countriesRef = useRef(countries);
+  const selectedMapIdRef = useRef(selectedMapId);
   const [hovered, setHovered] = useState<HoveredCountry | null>(null);
   useEffect(() => {
     onSelectRef.current = onSelect;
     countriesRef.current = countries;
-  }, [countries, onSelect]);
-
-  const colorExpression = useMemo(() => {
-    const expression: unknown[] = ["match", ["to-string", ["id"]]];
-    for (const country of countries) {
-      expression.push(
-        country.mapId,
-        mapStyleForEvent(
-          country.topEvent?.category,
-          country.topEvent?.importanceScore,
-        ).fillColor,
-      );
-    }
-    expression.push("#24444b");
-    return expression as ExpressionSpecification;
-  }, [countries]);
+    selectedMapIdRef.current = selectedMapId;
+  }, [countries, onSelect, selectedMapId]);
+  const colorExpression = useMemo(
+    () => buildCountryColorExpression(countries),
+    [countries],
+  );
+  const colorExpressionRef =
+    useRef<ExpressionSpecification>(colorExpression);
 
   useEffect(() => {
     if (!containerRef.current || mapRef.current) return;
@@ -111,8 +119,8 @@ export function WorldMap({
         type: "fill",
         source: SOURCE_ID,
         paint: {
-          "fill-color": colorExpression,
-          "fill-opacity": 0.9,
+          "fill-color": colorExpressionRef.current,
+          "fill-opacity": 0.94,
         },
       });
       map.addLayer({
@@ -129,7 +137,13 @@ export function WorldMap({
         id: SELECTED_LAYER,
         type: "line",
         source: SOURCE_ID,
-        filter: ["==", ["to-string", ["id"]], "__none__"],
+        filter: [
+          "==",
+          ["get", "name"],
+          countriesRef.current.find(
+            (country) => country.mapId === selectedMapIdRef.current,
+          )?.name ?? "__none__",
+        ],
         paint: {
           "line-color": "#ffffff",
           "line-width": 2.4,
@@ -142,16 +156,21 @@ export function WorldMap({
       const feature = map.queryRenderedFeatures(event.point, {
         layers: [FILL_LAYER],
       })[0];
-      if (feature?.id == null) return undefined;
+      if (!feature) return undefined;
+      const name =
+        typeof feature.properties?.name === "string"
+          ? feature.properties.name.trim()
+          : "";
       const indexedCountry = countriesRef.current.find(
-        (country) => country.mapId === String(feature.id),
+        (country) =>
+          (name && country.name === name) ||
+          (feature.id != null && country.mapId === String(feature.id)),
       );
       if (indexedCountry) return indexedCountry;
 
-      const name = feature.properties?.name;
-      if (typeof name !== "string" || !name.trim()) return undefined;
+      if (!name) return undefined;
       return {
-        mapId: String(feature.id),
+        mapId: feature.id == null ? `map-${name}` : String(feature.id),
         name,
         events: [],
       } satisfies MapCountry;
@@ -181,9 +200,10 @@ export function WorldMap({
       map.remove();
       mapRef.current = null;
     };
-  }, [colorExpression]);
+  }, []);
 
   useEffect(() => {
+    colorExpressionRef.current = colorExpression;
     const map = mapRef.current;
     if (!map?.getLayer(FILL_LAYER)) return;
     map.setPaintProperty(FILL_LAYER, "fill-color", colorExpression);
@@ -192,12 +212,15 @@ export function WorldMap({
   useEffect(() => {
     const map = mapRef.current;
     if (!map?.getLayer(SELECTED_LAYER)) return;
+    const selectedCountryName = countries.find(
+      (country) => country.mapId === selectedMapId,
+    )?.name;
     map.setFilter(SELECTED_LAYER, [
       "==",
-      ["to-string", ["id"]],
-      selectedMapId ?? "__none__",
+      ["get", "name"],
+      selectedCountryName ?? "__none__",
     ]);
-  }, [selectedMapId]);
+  }, [countries, selectedMapId]);
 
   return (
     <div

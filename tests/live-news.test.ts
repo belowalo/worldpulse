@@ -1,11 +1,16 @@
 import { describe, expect, it } from "vitest";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 
 import {
   articlesMentioningCountry,
   buildLiveEvents,
   classifyLiveHeadline,
 } from "@/lib/live-news";
-import type { LiveNewsPayload } from "@/lib/types";
+import type {
+  LiveNewsPayload,
+  MapNewsPayload,
+} from "@/lib/types";
 
 const payload: LiveNewsPayload = {
   countryName: "Canada",
@@ -39,16 +44,101 @@ describe("live news normalization", () => {
       "Politics",
     );
     expect(classifyLiveHeadline("Wildfire response expands")).toBe(
-      "Environment",
+      "Weather and disasters",
     );
     expect(
       classifyLiveHeadline(
         "「MUSIC AWARDS JAPAN 2026 アニソンスペシャル」放送決定！",
       ),
-    ).toBe("Culture and sports");
+    ).toBe("Culture and entertainment");
     expect(classifyLiveHeadline("Government announces new tariffs")).toBe(
       "Economy",
     );
+    expect(
+      classifyLiveHeadline(
+        "Trump issues 50% tariffs on Canada ahead of Gordie Howe Bridge opening",
+      ),
+    ).toBe("Economy");
+  });
+
+  it.each([
+    ["Court convicts former mayor in corruption trial", "Crime and justice"],
+    ["Powerful earthquake triggers tsunami evacuation", "Weather and disasters"],
+    ["Hospital launches new cancer vaccine trial", "Health"],
+    ["University students win expanded education rights", "Society and education"],
+    ["Airline adds flights after airport rail opening", "Travel and transport"],
+    ["National football team reaches World Cup final", "Sports"],
+    ["Film festival announces its music award winners", "Culture and entertainment"],
+    ["Researchers launch an artificial intelligence satellite", "Science and technology"],
+    ["Forest conservation plan cuts carbon emissions", "Environment"],
+    ["Oddly shaped garden bench becomes neighborhood curiosity", "Other"],
+  ] as const)("classifies %s as %s", (headline, expected) => {
+    expect(classifyLiveHeadline(headline)).toBe(expected);
+  });
+
+  it("keeps Other as a narrow fallback in the real preloaded index", () => {
+    const snapshot = JSON.parse(
+      readFileSync(resolve("public/map-news-seed.json"), "utf8"),
+    ) as MapNewsPayload;
+    const titles = snapshot.countries.flatMap((country) =>
+      country.articles.map((article) => article.title),
+    );
+    const otherCount = titles.filter(
+      (title) => classifyLiveHeadline(title) === "Other",
+    ).length;
+    const categoryCounts = titles.reduce<Record<string, number>>(
+      (counts, title) => {
+        const category = classifyLiveHeadline(title);
+        counts[category] = (counts[category] ?? 0) + 1;
+        return counts;
+      },
+      {},
+    );
+    const largestCategoryCount = Math.max(...Object.values(categoryCounts));
+
+    expect(
+      otherCount / titles.length,
+      `${otherCount} of ${titles.length} current headlines fell back to Other`,
+    ).toBeLessThan(0.25);
+    expect(
+      Object.keys(categoryCounts).length,
+      JSON.stringify(categoryCounts),
+    ).toBeGreaterThanOrEqual(12);
+    expect(
+      largestCategoryCount / titles.length,
+      JSON.stringify(categoryCounts),
+    ).toBeLessThan(0.55);
+
+    const countryEvents = snapshot.countries.map((country) =>
+      buildLiveEvents(
+        {
+          countryName: country.countryName,
+          scope: "country",
+          generatedAt: country.generatedAt,
+          refreshAfterSeconds: snapshot.refreshAfterSeconds,
+          provider: snapshot.provider,
+          articles: country.articles,
+        },
+        { name: country.countryName },
+      ),
+    );
+    const topCategoryCounts = countryEvents.reduce<Record<string, number>>(
+      (counts, events) => {
+        const category = events[0]?.category ?? "Missing";
+        counts[category] = (counts[category] ?? 0) + 1;
+        return counts;
+      },
+      {},
+    );
+
+    expect(
+      countryEvents.every((events) => events.length > 0),
+      JSON.stringify(topCategoryCounts),
+    ).toBe(true);
+    expect(
+      Object.keys(topCategoryCounts).length,
+      JSON.stringify(topCategoryCounts),
+    ).toBeGreaterThanOrEqual(8);
   });
 
   it("clusters related reporting and preserves publisher links", () => {

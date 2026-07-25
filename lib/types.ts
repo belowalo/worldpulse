@@ -2,10 +2,17 @@ export const CATEGORIES = [
   "Politics",
   "Economy",
   "Conflict and security",
+  "Crime and justice",
   "Environment",
+  "Weather and disasters",
   "Health",
   "Science and technology",
-  "Culture and sports",
+  "Society and education",
+  "Travel and transport",
+  "Culture and entertainment",
+  "Sports",
+  "Food and agriculture",
+  "Local affairs",
   "Other",
 ] as const;
 
