@@ -276,12 +276,21 @@ describe("WorldPulse interactions", () => {
         refreshAfterSeconds: 600,
         provider: "Test live index",
         articles:
-          countryName === "Egypt"
+          countryName === "Egypt" || countryName === null
             ? [
                 {
-                  id: "egypt-stale",
-                  title: "An old Egyptian archive feature",
-                  url: "https://publisher.example/egypt-stale",
+                  id:
+                    countryName === "Egypt"
+                      ? "egypt-stale"
+                      : "egypt-global-stale",
+                  title:
+                    countryName === "Egypt"
+                      ? "An old Egyptian archive feature"
+                      : "Egypt archive retrospective",
+                  url:
+                    countryName === "Egypt"
+                      ? "https://publisher.example/egypt-stale"
+                      : "https://publisher.example/egypt-global-stale",
                   publisherName: "Archive",
                   publisherUrl: "https://publisher.example/",
                   publishedAt: "2026-06-01T00:00:00.000Z",

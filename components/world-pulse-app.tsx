@@ -578,10 +578,19 @@ export function WorldPulseApp({
       };
     }
 
-    setPreloadedCountryFeeds((current) => ({
-      ...current,
-      ...liveFeeds,
-    }));
+    setPreloadedCountryFeeds((current) => {
+      const next = { ...current };
+      for (const [countryName, liveFeed] of Object.entries(liveFeeds)) {
+        next[countryName] = {
+          ...liveFeed,
+          events: mergeEventFeeds(
+            liveFeed.events,
+            current[countryName]?.events ?? [],
+          ),
+        };
+      }
+      return next;
+    });
     setMapPreload((current) => ({
       ...current,
       refreshed: Object.keys(liveFeeds).length,
