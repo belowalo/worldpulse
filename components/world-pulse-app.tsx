@@ -5,7 +5,6 @@ import {
   useCallback,
   useEffect,
   useMemo,
-  useRef,
   useState,
   type ComponentType,
 } from "react";
@@ -65,9 +64,6 @@ const EMPTY_FEED: FeedState = {
   loading: false,
   error: null,
 };
-
-const MAP_PRELOAD_BATCH_SIZE = 5;
-const MAP_PRELOAD_CONCURRENCY = 1;
 
 const countryMetadata = countryPulses.map(
   (country): MapCountry => ({
@@ -281,9 +277,10 @@ function MethodologyModal({ onClose }: { onClose: () => void }) {
         <p className="mt-5 text-xs leading-5 text-[#8996a8]">
           Every displayed headline and publisher link comes from a real public
           news feed. A recent feed snapshot makes all countries available
-          immediately, then a rate-limited live sweep refreshes every country
-          automatically without waiting for a click. WorldPulse never invents
-          headlines or sources.
+          immediately, then a live world-news index refreshes matching country
+          feeds automatically without waiting for a click. Opening a country
+          also runs a deeper local and international search. WorldPulse never
+          invents headlines or sources.
         </p>
         <p className="mt-3 text-xs leading-5 text-[#8996a8]">
           Coverage is uneven. Countries with less digital reporting or fewer
@@ -320,15 +317,11 @@ export function WorldPulseApp({
     Record<string, FeedState>
   >({});
   const [countryDirectoryReady, setCountryDirectoryReady] = useState(false);
-  const [mapSeedReady, setMapSeedReady] = useState(false);
-  const mapRefreshInFlightRef = useRef(false);
-  const preloadedCountryNamesRef = useRef(new Set<string>());
+  const [mapSnapshotReady, setMapSnapshotReady] = useState(false);
   const [mapPreload, setMapPreload] = useState({
-    loading: false,
     loaded: 0,
     total: 0,
     refreshed: 0,
-    failedBatches: 0,
   });
   const [globalView, setGlobalView] = useState(false);
   const [category, setCategory] = useState<"All" | Category>("All");
@@ -412,115 +405,6 @@ export function WorldPulseApp({
     }
   }, []);
 
-  const fetchMapPreload = useCallback(async (countries: MapCountry[]) => {
-    if (mapRefreshInFlightRef.current) return;
-    mapRefreshInFlightRef.current = true;
-    const batches: MapCountry[][] = [];
-    for (
-      let index = 0;
-      index < countries.length;
-      index += MAP_PRELOAD_BATCH_SIZE
-    ) {
-      batches.push(countries.slice(index, index + MAP_PRELOAD_BATCH_SIZE));
-    }
-    setMapPreload((current) => ({
-      loading: true,
-      loaded:
-        current.total === countries.length &&
-        current.loaded === current.total
-          ? current.loaded
-          : 0,
-      total: countries.length,
-      refreshed: 0,
-      failedBatches: 0,
-    }));
-
-    const loadBatch = async (batch: MapCountry[]) => {
-        try {
-          const parameters = new URLSearchParams({
-            scope: "map",
-            countries: batch.map((country) => country.name).join("|"),
-          });
-          let response: Response | null = null;
-          for (let attempt = 0; attempt < 2; attempt += 1) {
-            const candidate = await fetch(
-              `/api/live-news?${parameters.toString()}`,
-            );
-            if (candidate.ok) {
-              response = candidate;
-              break;
-            }
-          }
-          if (!response) throw new Error("Map preload failed.");
-          const payload = (await response.json()) as MapNewsPayload;
-          const refreshedCountries = payload.countries.filter(
-            (country) => country.available && country.articles.length,
-          ).length;
-          const countriesByName = new Map(
-            batch.map((country) => [country.name, country]),
-          );
-          setPreloadedCountryFeeds((current) => {
-            const next = { ...current };
-            for (const countryPayload of payload.countries) {
-              const country = countriesByName.get(countryPayload.countryName);
-              if (
-                !country ||
-                !countryPayload.available ||
-                !countryPayload.articles.length
-              ) {
-                continue;
-              }
-              preloadedCountryNamesRef.current.add(country.name);
-              const livePayload: LiveNewsPayload = {
-                countryName: countryPayload.countryName,
-                scope: "country",
-                generatedAt: countryPayload.generatedAt,
-                refreshAfterSeconds: payload.refreshAfterSeconds,
-                provider: payload.provider,
-                articles: countryPayload.articles,
-              };
-              next[country.name] = {
-                events: buildLiveEvents(livePayload, country),
-                updatedAt: countryPayload.generatedAt,
-                provider: `${payload.provider} · ready before click`,
-                loading: false,
-                error: null,
-              };
-            }
-            return next;
-          });
-          setMapPreload((current) => ({
-            ...current,
-            loaded: preloadedCountryNamesRef.current.size,
-            refreshed: Math.min(
-              current.total,
-              current.refreshed + refreshedCountries,
-            ),
-          }));
-        } catch {
-          setMapPreload((current) => ({
-            ...current,
-            failedBatches: current.failedBatches + 1,
-          }));
-        }
-    };
-    let nextBatch = 0;
-    await Promise.all(
-      Array.from(
-        { length: Math.min(MAP_PRELOAD_CONCURRENCY, batches.length) },
-        async () => {
-          while (nextBatch < batches.length) {
-            const batchIndex = nextBatch;
-            nextBatch += 1;
-            await loadBatch(batches[batchIndex]);
-          }
-        },
-      ),
-    );
-    mapRefreshInFlightRef.current = false;
-    setMapPreload((current) => ({ ...current, loading: false }));
-  }, []);
-
   useEffect(() => {
     if (!liveUpdates) return;
     let cancelled = false;
@@ -571,7 +455,7 @@ export function WorldPulseApp({
   useEffect(() => {
     if (!liveUpdates || !countryDirectoryReady) return;
     if (!countryDirectory.length) {
-      setMapSeedReady(true);
+      setMapSnapshotReady(true);
       return;
     }
 
@@ -610,21 +494,18 @@ export function WorldPulseApp({
           };
         }
 
-        preloadedCountryNamesRef.current = new Set(Object.keys(nextFeeds));
         setPreloadedCountryFeeds(nextFeeds);
         setMapPreload({
-          loading: false,
           loaded: indexedCountries,
           total: countryDirectory.length,
           refreshed: 0,
-          failedBatches: 0,
         });
       })
       .catch(() => {
-        // The live batched preload below remains as the network fallback.
+        // The live world index below remains as the network fallback.
       })
       .finally(() => {
-        if (!cancelled) setMapSeedReady(true);
+        if (!cancelled) setMapSnapshotReady(true);
       });
 
     return () => {
@@ -635,19 +516,50 @@ export function WorldPulseApp({
   useEffect(() => {
     if (
       !liveUpdates ||
-      !countryDirectoryReady ||
-      !mapSeedReady ||
+      !mapSnapshotReady ||
+      !globalPayload ||
       !countryDirectory.length
     ) {
       return;
     }
-    void fetchMapPreload(countryDirectory);
+
+    const liveFeeds: Record<string, FeedState> = {};
+    for (const country of countryDirectory) {
+      const matchingArticles = articlesMentioningCountry(
+        globalPayload,
+        country.name,
+      );
+      if (!matchingArticles.length) continue;
+      const countryPayload: LiveNewsPayload = {
+        ...globalPayload,
+        countryName: country.name,
+        scope: "country",
+        articles: matchingArticles,
+      };
+      const events = buildLiveEvents(countryPayload, country);
+      if (!events.length) continue;
+      liveFeeds[country.name] = {
+        events,
+        updatedAt: globalPayload.generatedAt,
+        provider: `${globalPayload.provider} · automatic world sweep`,
+        loading: false,
+        error: null,
+      };
+    }
+
+    setPreloadedCountryFeeds((current) => ({
+      ...current,
+      ...liveFeeds,
+    }));
+    setMapPreload((current) => ({
+      ...current,
+      refreshed: Object.keys(liveFeeds).length,
+    }));
   }, [
     countryDirectory,
-    countryDirectoryReady,
-    fetchMapPreload,
+    globalPayload,
     liveUpdates,
-    mapSeedReady,
+    mapSnapshotReady,
   ]);
 
   useEffect(() => {
@@ -660,19 +572,12 @@ export function WorldPulseApp({
     const refreshTimer = window.setInterval(() => {
       void fetchGlobalNews();
       void fetchCountryNews(selectedCountry);
-      if (countryDirectoryReady && mapSeedReady) {
-        void fetchMapPreload(countryDirectory);
-      }
     }, 600_000);
     return () => window.clearInterval(refreshTimer);
   }, [
-    countryDirectory,
-    countryDirectoryReady,
     fetchCountryNews,
     fetchGlobalNews,
-    fetchMapPreload,
     liveUpdates,
-    mapSeedReady,
     selectedCountry,
   ]);
 
@@ -818,17 +723,17 @@ export function WorldPulseApp({
             selectedMapId={selectedCountry.mapId}
             onSelect={handleSelect}
             statusLabel={
-              mapPreload.loading
-                ? `${mapPreload.loaded}/${mapPreload.total} loaded · live refresh ${mapPreload.refreshed}/${mapPreload.total}`
-                : mapPreload.total
-                  ? mapPreload.loaded === mapPreload.total
-                    ? `${mapPreload.loaded}/${mapPreload.total} countries loaded${
-                        mapPreload.refreshed
-                          ? ` · ${mapPreload.refreshed} refreshed now`
+              mapPreload.total
+                ? mapPreload.loaded === mapPreload.total
+                  ? `${mapPreload.loaded}/${mapPreload.total} countries loaded${
+                      globalFeed.loading
+                        ? " · syncing live"
+                        : mapPreload.refreshed
+                          ? ` · ${mapPreload.refreshed} live-updated`
                           : ""
-                      }`
-                    : `${mapPreload.loaded}/${mapPreload.total} countries ready · refresh retries`
-                  : globalFeed.loading
+                    }`
+                  : `${mapPreload.loaded}/${mapPreload.total} countries ready`
+                : globalFeed.loading
                 ? "Refreshing live feed…"
                 : "Live · auto-refresh 10 min"
             }
