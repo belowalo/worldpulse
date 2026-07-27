@@ -408,6 +408,9 @@ export function WorldMap({
       })
         .setLngLat(center)
         .addTo(map);
+      element.setAttribute("aria-hidden", "true");
+      element.setAttribute("role", "presentation");
+      element.tabIndex = -1;
       if (window.getComputedStyle(element).backgroundImage === "none") {
         element.className = "";
         element.textContent = "🏳️";
