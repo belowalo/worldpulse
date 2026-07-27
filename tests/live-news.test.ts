@@ -245,6 +245,19 @@ describe("live news normalization", () => {
     expect(events[0].summary).toContain("6 independent publishers");
   });
 
+  it("uses the same event identity in country and global feeds", () => {
+    const countryEvent = buildLiveEvents(payload, {
+      name: "Canada",
+      iso2: "CA",
+    })[0];
+    const globalEvent = buildLiveEvents(
+      { ...payload, countryName: null, scope: "global" },
+      null,
+    )[0];
+
+    expect(countryEvent.id).toBe(globalEvent.id);
+  });
+
   it("merges an event-specific search and ranks five distinct publishers", () => {
     const [event] = buildLiveEvents(
       { ...payload, articles: [payload.articles[0]] },
@@ -266,6 +279,14 @@ describe("live news normalization", () => {
             publishedAt: `2026-07-24T${20 - index}:00:00.000Z`,
           }),
         ),
+        {
+          id: "duplicate-bbc-feed",
+          title: "Western Canada wildfire response expands again",
+          url: "https://bbc.example/duplicate",
+          publisherName: "BBC",
+          publisherUrl: "https://bbc.example/different-feed",
+          publishedAt: "2026-07-24T19:30:00.000Z",
+        },
       ],
     });
 
@@ -277,6 +298,16 @@ describe("live news normalization", () => {
         expanded.articles.map((article) => article.source.publisherName),
       ).size,
     ).toBe(5);
+    expect(
+      expanded.articles.filter((article) =>
+        article.source.publisherName.toLowerCase().startsWith("bbc"),
+      ),
+    ).toHaveLength(1);
+    expect(
+      expanded.articles.map((article) => article.source.publisherName),
+    ).toEqual(
+      expect.arrayContaining(["Reuters", "Associated Press", "BBC News"]),
+    );
   });
 
   it("builds a Ground News publisher mix and excludes unrated outlets", () => {
@@ -307,5 +338,44 @@ describe("live news normalization", () => {
         distribution.percentages.center +
         distribution.percentages.right,
     ).toBe(100);
+  });
+
+  it("counts publisher aliases once in the Ground News mix", () => {
+    const [event] = buildLiveEvents(payload, {
+      name: "Canada",
+      iso2: "CA",
+    });
+    const template = event.articles[0];
+    const distribution = biasDistributionForArticles([
+      ...event.articles,
+      {
+        ...template,
+        id: "bbc-primary",
+        source: {
+          ...template.source,
+          id: "bbc-primary",
+          publisherName: "BBC News",
+          url: "https://bbc.com/",
+        },
+      },
+      {
+        ...template,
+        id: "bbc-alias",
+        source: {
+          ...template.source,
+          id: "bbc-alias",
+          publisherName: "BBC",
+          url: "https://bbc.co.uk/",
+        },
+      },
+    ]);
+
+    expect(distribution).toMatchObject({
+      left: 1,
+      center: 2,
+      right: 0,
+      rated: 3,
+      total: 3,
+    });
   });
 });

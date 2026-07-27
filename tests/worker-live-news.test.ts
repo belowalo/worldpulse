@@ -478,6 +478,87 @@ describe("worker live-news providers", () => {
     ).toBe(true);
   });
 
+  it("finds rewritten coverage of a heatwave instead of requiring the same headline", async () => {
+    const requestedQueries: string[] = [];
+    const item = (
+      id: string,
+      title: string,
+      description: string,
+      publisher: string,
+    ) => `
+      <item>
+        <title>${title} - ${publisher}</title>
+        <description>${description}</description>
+        <link>https://news.google.com/rss/articles/${id}</link>
+        <guid>${id}</guid>
+        <pubDate>Sat, 25 Jul 2026 21:00:00 GMT</pubDate>
+        <source url="https://${id}.example/">${publisher}</source>
+      </item>
+    `;
+    const exactFeed = `<rss><channel>${item(
+      "guardian",
+      "‘Extraordinarily hot’: US heatwave stretches on with millions still under warnings",
+      "Millions in the United States remain under heat warnings.",
+      "The Guardian",
+    )}</channel></rss>`;
+    const relatedFeed = `<rss><channel>
+      ${item("abc", "Sizzling US temperatures put more than 100 million people under heat alerts", "Dangerous heat warnings cover much of the United States.", "ABC News")}
+      ${item("ap", "Heat dome expands across the central United States, creating dangerous conditions for millions", "The US heat wave is putting millions at risk.", "AP News")}
+      ${item("nbc", "Dangerous heat grips the US as millions face warnings", "A heat dome is bringing extreme temperatures.", "NBC News")}
+      ${item("fox", "Heat alerts spread as scorching temperatures cover the United States", "Millions face an extended heat warning.", "FOX Weather")}
+      ${item("usatoday", "Extreme heat forecast across central US", "Millions of Americans are under weather warnings.", "USA Today")}
+      ${item("unrelated", "Japan launches a lunar research mission", "A spacecraft entered orbit.", "Science Desk")}
+    </channel></rss>`;
+    const fetchMock = vi.fn(async (input: URL | RequestInfo) => {
+      const query = new URL(String(input)).searchParams.get("q") ?? "";
+      requestedQueries.push(query);
+      return new Response(
+        query.startsWith('"Extraordinarily hot') ? exactFeed : relatedFeed,
+        { status: 200 },
+      );
+    });
+
+    const response = await handleLiveNews(
+      new Request(
+        "https://worldpulse.test/api/live-news?scope=event&country=United%20States&iso2=US&headline=" +
+          encodeURIComponent(
+            "‘Extraordinarily hot’: US heatwave stretches on with millions still under warnings",
+          ),
+      ),
+      fetchMock as typeof fetch,
+    );
+    const result = (await response.json()) as {
+      articles: Array<{ publisherName: string; title: string }>;
+    };
+
+    expect(response.status).toBe(200);
+    expect(new Set(result.articles.map((article) => article.publisherName)).size)
+      .toBeGreaterThanOrEqual(5);
+    expect(
+      result.articles.some((article) => article.publisherName === "AP News"),
+    ).toBe(true);
+    expect(
+      result.articles.some((article) => article.title.includes("lunar")),
+    ).toBe(false);
+    expect(
+      requestedQueries.some(
+        (query) =>
+          query.includes('"United States"') &&
+          query.includes("heat") &&
+          !query.includes('"heat"'),
+      ),
+    ).toBe(true);
+    expect(
+      articleMatchesEvent(
+        {
+          searchableText:
+            "Heat dome expands across the central United States, creating dangerous conditions for millions",
+        },
+        "‘Extraordinarily hot’: US heatwave stretches on with millions still under warnings",
+      ),
+    ).toBe(true);
+  });
+
   it("returns an explicit outage only when every provider fails", async () => {
     vi.spyOn(console, "warn").mockImplementation(() => undefined);
     const fetchMock = vi.fn(async () => new Response("Unavailable", { status: 503 }));

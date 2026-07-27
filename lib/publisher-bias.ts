@@ -147,19 +147,29 @@ const GROUND_RATINGS: Array<{
   },
 ];
 
-function normalizePublisher(value: string) {
-  return value
+const PUBLISHER_ALIASES = new Map<string, string>([
+  ["abc news breaking news latest news and videos", "abc news"],
+  ["ap news", "associated press"],
+  ["associated press news", "associated press"],
+  ["bbc", "bbc news"],
+  ["dw", "deutsche welle"],
+  ["the wall street journal", "wall street journal"],
+]);
+
+export function canonicalPublisherKey(value: string) {
+  const normalized = value
     .normalize("NFKC")
     .toLowerCase()
     .replace(/&/g, " and ")
     .replace(/[^\p{L}\p{N}]+/gu, " ")
     .trim();
+  return PUBLISHER_ALIASES.get(normalized) ?? normalized;
 }
 
 export function publisherBiasRating(
   publisherName: string,
 ): PublisherBiasRating | null {
-  const normalized = normalizePublisher(publisherName);
+  const normalized = canonicalPublisherKey(publisherName);
   const match = GROUND_RATINGS.find(({ aliases }) =>
     aliases.some(
       (alias) =>
@@ -176,9 +186,7 @@ export function biasDistributionForArticles(
 ): BiasDistribution {
   const distinctPublishers = new Map<string, string>();
   for (const article of articles) {
-    const key = normalizePublisher(
-      article.source.url || article.source.publisherName,
-    );
+    const key = canonicalPublisherKey(article.source.publisherName);
     if (!distinctPublishers.has(key)) {
       distinctPublishers.set(key, article.source.publisherName);
     }

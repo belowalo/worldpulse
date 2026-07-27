@@ -1,4 +1,5 @@
 import { calculateImportance } from "./scoring";
+import { canonicalPublisherKey } from "./publisher-bias";
 import {
   countrySearchTerms,
   textMatchesCountry,
@@ -581,18 +582,26 @@ const CATEGORY_TIE_PRIORITY: Category[] = [
 const PROMINENT_PUBLISHERS = new Map<string, number>([
   ["reuters", 96],
   ["associated press", 95],
+  ["agence france-presse", 94],
   ["bbc", 91],
+  ["new york times", 90],
+  ["washington post", 89],
   ["the guardian", 87],
+  ["nbc news", 87],
+  ["cbs news", 86],
   ["al jazeera", 86],
   ["cnn", 85],
   ["deutsche welle", 84],
+  ["usa today", 84],
   ["france 24", 83],
   ["cbc", 82],
   ["abc news", 82],
+  ["newsweek", 81],
   ["npr", 81],
   ["un news", 81],
   ["euronews", 80],
   ["sky news", 80],
+  ["fox weather", 79],
 ]);
 
 const STOP_WORDS = new Set([
@@ -783,7 +792,7 @@ export function classifyLiveHeadline(title: string): Category {
 }
 
 export function publisherProminence(name: string) {
-  const normalized = name.toLowerCase();
+  const normalized = canonicalPublisherKey(name);
   for (const [publisher, score] of PROMINENT_PUBLISHERS) {
     if (normalized.includes(publisher)) return score;
   }
@@ -798,7 +807,9 @@ function articleAgeHours(article: LiveArticle, reference: number) {
 
 function createSource(article: LiveArticle): NewsSource {
   return {
-    id: `live-source-${stableId(article.publisherUrl || article.publisherName)}`,
+    id: `live-source-${stableId(
+      canonicalPublisherKey(article.publisherName),
+    )}`,
     publisherName: article.publisherName,
     url: article.publisherUrl,
     country: "Unknown",
@@ -886,9 +897,7 @@ export function buildLiveEvents(
         .slice(0, 5);
       const representative = representativeArticle(cluster);
       const headline = representative?.title ?? "Current report";
-      const eventId = `live-event-${stableId(
-        `${primaryCountry}:${headline.toLowerCase()}`,
-      )}`;
+      const eventId = `live-event-${stableId(headline.toLowerCase())}`;
       const articles = visibleSourceArticles
         .map((article, index): Article => {
           const source = createSource(article);
@@ -924,7 +933,7 @@ export function buildLiveEvents(
       const scoring = calculateImportance({
         independentSourceCount: sources.size,
         sourceCountryCount: sources.size ? 1 : 0,
-        affectedCountryCount: country ? 1 : 2,
+        affectedCountryCount: 1,
         countrySignificance: country ? 55 : 60,
         publisherProminence: averageProminence,
         ageHours: youngestAge,
@@ -961,7 +970,7 @@ export function buildLiveEvents(
         scoringInput: {
           independentSourceCount: sources.size,
           sourceCountryCount: sources.size ? 1 : 0,
-          affectedCountryCount: country ? 1 : 2,
+          affectedCountryCount: 1,
           countrySignificance: country ? 55 : 60,
           publisherProminence: averageProminence,
           ageHours: youngestAge,
@@ -983,8 +992,10 @@ export function enrichEventWithCoverage(
   payload: LiveNewsPayload,
 ): Event {
   const combined = new Map<string, Article>();
-  for (const article of event.articles) {
-    combined.set(article.source.id, article);
+  if (!payload.articles.length) {
+    for (const article of event.articles) {
+      combined.set(article.source.id, article);
+    }
   }
   for (const liveArticle of payload.articles) {
     const source = createSource(liveArticle);

@@ -5,6 +5,7 @@ import {
   useCallback,
   useEffect,
   useMemo,
+  useRef,
   useState,
   type ComponentType,
 } from "react";
@@ -32,7 +33,7 @@ import {
   defaultCountry,
   flagEmoji,
 } from "@/lib/seed-data";
-import { categoryColor } from "@/lib/scoring";
+import { calculateImportance, categoryColor } from "@/lib/scoring";
 import type { WorldMapProps } from "./world-map";
 
 const WorldMap = dynamic(
@@ -64,7 +65,7 @@ interface FeedState {
 }
 
 interface CoverageState {
-  event?: Event;
+  payload?: LiveNewsPayload;
   loading: boolean;
   error: string | null;
 }
@@ -139,6 +140,7 @@ function EventCard({
   coverageError,
   coverageExpanded,
   onActivate,
+  onVisible,
 }: {
   event: Event;
   connectionFocused: boolean;
@@ -146,13 +148,33 @@ function EventCard({
   coverageError: string | null;
   coverageExpanded: boolean;
   onActivate: () => void;
+  onVisible: () => void;
 }) {
   const [expanded, setExpanded] = useState(false);
+  const cardRef = useRef<HTMLElement | null>(null);
   const hasConnections = event.affectedCountries.length > 1;
   const bias = biasDistributionForArticles(event.articles);
 
+  useEffect(() => {
+    if (coverageExpanded || coverageLoading || coverageError) return;
+    const card = cardRef.current;
+    if (!card || typeof IntersectionObserver === "undefined") return;
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries.some((entry) => entry.isIntersecting)) {
+          onVisible();
+          observer.disconnect();
+        }
+      },
+      { rootMargin: "300px 0px" },
+    );
+    observer.observe(card);
+    return () => observer.disconnect();
+  }, [coverageError, coverageExpanded, coverageLoading, onVisible]);
+
   return (
     <article
+      ref={cardRef}
       className={`cursor-pointer border-b border-[#273246] py-5 transition first:pt-0 last:border-0 ${
         connectionFocused
           ? "-mx-3 rounded-xl border border-[#3c6d70] bg-[#13262c] px-3"
@@ -513,6 +535,7 @@ export function WorldPulseApp({
   const [eventCoverage, setEventCoverage] = useState<
     Record<string, CoverageState>
   >({});
+  const coverageRequests = useRef(new Set<string>());
 
   const fetchGlobalNews = useCallback(async () => {
     setGlobalFeed((current) => ({
@@ -828,6 +851,8 @@ export function WorldPulseApp({
     selectedCountry;
   const fetchEventCoverage = useCallback(
     async (event: Event) => {
+      if (coverageRequests.current.has(event.id)) return;
+      coverageRequests.current.add(event.id);
       setEventCoverage((current) => ({
         ...current,
         [event.id]: {
@@ -855,12 +880,13 @@ export function WorldPulseApp({
         setEventCoverage((current) => ({
           ...current,
           [event.id]: {
-            event: enrichEventWithCoverage(event, payload),
+            payload,
             loading: false,
             error: null,
           },
         }));
       } catch (error) {
+        coverageRequests.current.delete(event.id);
         setEventCoverage((current) => ({
           ...current,
           [event.id]: {
@@ -909,6 +935,11 @@ export function WorldPulseApp({
         const affectedCountries = mentionedCountries.map(
           (country) => country.iso2 ?? country.name,
         );
+        const scoringInput = {
+          ...event.scoringInput,
+          affectedCountryCount: affectedCountries.length,
+        };
+        const scoring = calculateImportance(scoringInput);
         return {
           ...event,
           geographicScope: "International" as const,
@@ -917,17 +948,20 @@ export function WorldPulseApp({
               ? affectedCountries[0]
               : event.primaryCountry,
           affectedCountries,
-          scoringInput: {
-            ...event.scoringInput,
-            affectedCountryCount: affectedCountries.length,
-          },
+          importanceScore: scoring.score,
+          importanceLabel: scoring.label,
+          scoringComponents: scoring.components,
+          scoringInput,
         };
       }),
     [activeCountry, activeFeed.events, globalView, mapCountries],
   );
   const expandedEvents = useMemo(
     () =>
-      baseEvents.map((event) => eventCoverage[event.id]?.event ?? event),
+      baseEvents.map((event) => {
+        const payload = eventCoverage[event.id]?.payload;
+        return payload ? enrichEventWithCoverage(event, payload) : event;
+      }),
     [baseEvents, eventCoverage],
   );
   const filteredEvents = (() => {
@@ -979,7 +1013,13 @@ export function WorldPulseApp({
       );
     }
     const coverage = eventCoverage[event.id];
-    if (!coverage?.loading && !coverage?.event) {
+    if (!coverage?.loading && !coverage?.payload) {
+      void fetchEventCoverage(event);
+    }
+  };
+  const handleEventVisible = (event: Event) => {
+    const coverage = eventCoverage[event.id];
+    if (!coverage?.loading && !coverage?.payload && !coverage?.error) {
       void fetchEventCoverage(event);
     }
   };
@@ -1247,8 +1287,9 @@ export function WorldPulseApp({
                     eventCoverage[event.id]?.loading ?? false
                   }
                   coverageError={eventCoverage[event.id]?.error ?? null}
-                  coverageExpanded={Boolean(eventCoverage[event.id]?.event)}
+                  coverageExpanded={Boolean(eventCoverage[event.id]?.payload)}
                   onActivate={() => handleEventActivate(event)}
+                  onVisible={() => handleEventVisible(event)}
                 />
               ))
             ) : (

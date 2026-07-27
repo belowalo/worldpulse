@@ -64,16 +64,39 @@ const EVENT_STOP_WORDS = new Set([
   "from",
   "has",
   "have",
+  "latest",
+  "live",
   "into",
   "its",
   "new",
+  "still",
+  "under",
   "over",
   "says",
+  "stretches",
   "the",
   "their",
   "this",
   "that",
   "with",
+]);
+
+const EVENT_TOKEN_ALIASES = new Map<string, string>([
+  ["advisories", "warning"],
+  ["advisory", "warning"],
+  ["alerts", "warning"],
+  ["alert", "warning"],
+  ["americans", "usa"],
+  ["american", "usa"],
+  ["heatwave", "heat"],
+  ["hot", "heat"],
+  ["scorching", "heat"],
+  ["sweltering", "heat"],
+  ["temperatures", "heat"],
+  ["temperature", "heat"],
+  ["warnings", "warning"],
+  ["unitedstates", "usa"],
+  ["us", "usa"],
 ]);
 
 function decodeXml(value: string) {
@@ -463,13 +486,16 @@ function countryGoogleProviders(countryName: string, requestedRegion: string) {
 }
 
 function eventTokens(value: string) {
+  const prepared = value
+    .normalize("NFKC")
+    .toLowerCase()
+    .replace(/\bunited\s+states\b/gu, " unitedstates ");
   return [
     ...new Set(
-      value
-        .normalize("NFKC")
-        .toLowerCase()
-        .match(/[\p{L}\p{N}]{3,}/gu)
-        ?.filter((token) => !EVENT_STOP_WORDS.has(token)) ?? [],
+      prepared
+        .match(/[\p{L}\p{N}]{2,}/gu)
+        ?.filter((token) => !EVENT_STOP_WORDS.has(token))
+        .map((token) => EVENT_TOKEN_ALIASES.get(token) ?? token) ?? [],
     ),
   ];
 }
@@ -484,8 +510,17 @@ export function articleMatchesEvent(
   const shared = headlineTokens.filter((token) =>
     articleTokenSet.has(token),
   ).length;
+  const hasMeaningfulPair =
+    shared >= 2 &&
+    headlineTokens.some(
+      (token) => token.length >= 5 && articleTokenSet.has(token),
+    );
   const required = headlineTokens.length <= 4 ? 2 : 3;
-  return shared >= required || shared / headlineTokens.length >= 0.45;
+  return (
+    shared >= required ||
+    hasMeaningfulPair ||
+    shared / headlineTokens.length >= 0.4
+  );
 }
 
 function eventGoogleProviders(
@@ -501,11 +536,10 @@ function eventGoogleProviders(
     .replace(/["“”]+/g, " ")
     .replace(/\s+/g, " ")
     .trim();
-  const focusedTerms = eventTokens(cleanHeadline).slice(0, 8);
+  const focusedTerms = eventTokens(cleanHeadline).slice(0, 7);
   const exactQuery = `"${cleanHeadline.slice(0, 220)}" when:7d`;
-  const focusedQuery = `${focusedTerms
-    .map((term) => `"${term}"`)
-    .join(" ")} when:7d`;
+  const countryTerm = countryName ? `"${countryName}" ` : "";
+  const focusedQuery = `${countryTerm}${focusedTerms.join(" ")} when:7d`;
   const searchProvider = (
     name: string,
     query: string,

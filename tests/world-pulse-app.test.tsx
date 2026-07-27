@@ -235,7 +235,7 @@ describe("WorldPulse interactions", () => {
     expect(screen.getByTestId("link-event-ids")).toBeEmptyDOMElement();
   });
 
-  it("expands a selected event to five publishers and shows rated coverage mix", async () => {
+  it("automatically expands a visible event to five publishers and shows rated coverage mix", async () => {
     const headline = "Canada and Mexico agree cross-border trade accord";
     const originalArticle = {
       id: "original",
@@ -320,9 +320,28 @@ describe("WorldPulse interactions", () => {
       });
     });
     vi.stubGlobal("fetch", fetchMock);
+    vi.stubGlobal(
+      "IntersectionObserver",
+      class {
+        private readonly callback: IntersectionObserverCallback;
+
+        constructor(callback: IntersectionObserverCallback) {
+          this.callback = callback;
+        }
+
+        observe(target: Element) {
+          this.callback(
+            [{ isIntersecting: true, target } as IntersectionObserverEntry],
+            this as unknown as IntersectionObserver,
+          );
+        }
+
+        disconnect() {}
+      },
+    );
 
     render(<WorldPulseApp MapComponent={TestMap} />);
-    fireEvent.click(await screen.findByRole("heading", { name: headline }));
+    await screen.findByRole("heading", { name: headline });
 
     await waitFor(() =>
       expect(
