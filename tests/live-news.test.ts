@@ -532,7 +532,11 @@ describe("live news normalization", () => {
     });
 
     expect(expanded.articles).toHaveLength(5);
-    expect(expanded.scoringInput.independentSourceCount).toBe(6);
+    expect(expanded.matchedPublisherCount).toBe(6);
+    expect(expanded.importanceScore).toBe(event.importanceScore);
+    expect(expanded.importanceLabel).toBe(event.importanceLabel);
+    expect(expanded.scoringComponents).toEqual(event.scoringComponents);
+    expect(expanded.scoringInput).toEqual(event.scoringInput);
     expect(expanded.summary).toContain("Expanded topic search matched 6");
     expect(
       new Set(
@@ -562,7 +566,8 @@ describe("live news normalization", () => {
       articles: [payload.articles[1]],
     });
 
-    expect(expanded.scoringInput.independentSourceCount).toBe(2);
+    expect(expanded.matchedPublisherCount).toBe(2);
+    expect(expanded.scoringInput).toEqual(event.scoringInput);
     expect(
       expanded.articles.map((article) => article.source.publisherName),
     ).toEqual(expect.arrayContaining(["Reuters", "Associated Press"]));

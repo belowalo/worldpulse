@@ -319,8 +319,13 @@ function EventCard({
         <Metric
           label="Sources"
           value={
-            event.scoringInput.independentSourceCount > event.articles.length
-              ? `${event.articles.length} shown · ${event.scoringInput.independentSourceCount} matched`
+            (event.matchedPublisherCount ??
+              event.scoringInput.independentSourceCount) >
+            event.articles.length
+              ? `${event.articles.length} shown · ${
+                  event.matchedPublisherCount ??
+                  event.scoringInput.independentSourceCount
+                } matched`
               : `${event.articles.length} independent`
           }
         />

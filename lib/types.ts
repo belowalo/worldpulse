@@ -75,6 +75,7 @@ export interface Event {
   headline: string;
   summary: string;
   category: Category;
+  matchedPublisherCount?: number;
   importanceScore: number;
   importanceLabel: ImportanceLabel;
   geographicScope: GeographicScope;

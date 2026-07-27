@@ -1478,42 +1478,20 @@ export function enrichEventWithCoverage(
     (article) => article.source.publisherName,
     (article) => article.publishedAt,
   );
-  const averageProminence =
-    allArticles.reduce(
-      (sum, article) => sum + article.source.prominenceScore,
-      0,
-    ) / Math.max(1, allArticles.length);
-  const independentSourceCount = Math.max(
+  const matchedPublisherCount = Math.max(
+    event.matchedPublisherCount ?? 0,
     event.scoringInput.independentSourceCount,
     allArticles.length,
   );
-  const nextInput = {
-    ...event.scoringInput,
-    independentSourceCount,
-    publisherProminence: averageProminence,
-    articlesPerHour: Math.max(
-      event.scoringInput.articlesPerHour,
-      allArticles.length / 6,
-    ),
-  };
-  const scoring = calculateImportance(nextInput);
 
   return {
     ...event,
     summary:
-      independentSourceCount > 1
-        ? `Expanded topic search matched ${independentSourceCount} independent publishers. The ${visibleArticles.length} displayed reports prioritize left, right, and center-rated publishers when available, then publisher prominence and recency.`
+      matchedPublisherCount > 1
+        ? `Expanded topic search matched ${matchedPublisherCount} independent publishers. The ${visibleArticles.length} displayed reports prioritize left, right, and center-rated publishers when available, then publisher prominence and recency.`
         : "Expanded topic search found one matching publisher in the current seven-day window.",
-    importanceScore: scoring.score,
-    importanceLabel: scoring.label,
-    scoringComponents: scoring.components,
-    scoringInput: nextInput,
+    matchedPublisherCount,
     articles: visibleArticles,
-    lastUpdatedAt:
-      allArticles
-        .map((article) => article.publishedAt)
-        .sort((left, right) => Date.parse(right) - Date.parse(left))[0] ??
-      event.lastUpdatedAt,
   };
 }
 
