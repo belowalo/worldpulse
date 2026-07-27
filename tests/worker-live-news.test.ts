@@ -112,6 +112,21 @@ describe("worker live-news providers", () => {
     expect(articleMatchesCountry(article, ["Canada", "Canadian"])).toBe(false);
   });
 
+  it("rejects generic publisher index pages as country events", () => {
+    const xml = `
+      <rss><channel><item>
+        <title>Australia News | Today's Latest Stories | Reuters - Reuters</title>
+        <description>Browse current Australian reporting.</description>
+        <link>https://news.google.com/rss/articles/australia-index</link>
+        <guid>australia-index</guid>
+        <pubDate>Sun, 26 Jul 2026 21:06:00 GMT</pubDate>
+        <source url="https://www.reuters.com/">Reuters</source>
+      </item></channel></rss>
+    `;
+
+    expect(parseGoogleNewsFeed(xml)).toEqual([]);
+  });
+
   it("parses Bing News publisher attribution and restores the article URL", () => {
     const originalUrl = "https://example.com/tuvalu-climate-report";
     const redirectUrl = new URL("https://www.bing.com/news/apiclick.aspx");

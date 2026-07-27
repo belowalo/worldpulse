@@ -132,6 +132,7 @@ const COUNTRY_RELATED_TERMS: Record<string, string[]> = {
   Rwanda: ["Rwandan"],
   "Saint Helena, Ascension and Tristan da Cunha": [
     "Saint Helena",
+    "St Helena",
     "Ascension Island",
     "Tristan da Cunha",
   ],

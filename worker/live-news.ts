@@ -98,6 +98,7 @@ const GENERIC_OCCURRENCE_TOKENS = new Set([
 ]);
 const COUNTRY_NEWS_QUERY_OVERRIDES: Record<string, string> = {
   "British Indian Ocean Territory": "Diego Garcia",
+  "Saint Helena, Ascension and Tristan da Cunha": "St Helena",
   "Saint Pierre and Miquelon": "Saint-Pierre-et-Miquelon",
   "South Georgia and the South Sandwich Islands": "South Georgia island",
 };
@@ -242,7 +243,20 @@ function buildCandidate(
   const searchableDescription = publisherPattern
     ? cleanDescription.replace(new RegExp(publisherPattern, "giu"), " ")
     : cleanDescription;
-  if (!cleanTitle || !safeUrl || !cleanPublisherName || !safePublishedAt) {
+  const isGenericNewsIndex =
+    /\bnews\s*\|\s*today(?:'|’)?s latest stories\s*\|\s*reuters$/iu.test(
+      cleanTitle,
+    ) ||
+    /^(?:latest|breaking)\s+.+\s+news(?:\s+and\s+headlines)?$/iu.test(
+      cleanTitle,
+    );
+  if (
+    !cleanTitle ||
+    isGenericNewsIndex ||
+    !safeUrl ||
+    !cleanPublisherName ||
+    !safePublishedAt
+  ) {
     return null;
   }
   return {
