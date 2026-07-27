@@ -101,6 +101,7 @@ export interface MapCountry {
   region?: string;
   events: Event[];
   topEvent?: Event;
+  signalReady?: boolean;
 }
 
 export interface LiveArticle {
