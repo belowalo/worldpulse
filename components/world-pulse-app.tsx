@@ -931,7 +931,9 @@ export function WorldPulseApp({
       };
       await Promise.all(
         Array.from(
-          { length: Math.min(2, batches.length) },
+          {
+            length: Math.min(forceFresh ? 1 : 2, batches.length),
+          },
           () => worker(),
         ),
       );
@@ -1415,7 +1417,7 @@ export function WorldPulseApp({
               worldLoad.total
                 ? worldLoad.loaded === worldLoad.total
                   ? worldLoad.retrying
-                    ? `${worldLoad.loaded}/${worldLoad.total} countries indexed · ${worldLoad.retrying} awaiting a current match`
+                    ? `${worldLoad.loaded}/${worldLoad.total} countries indexed · live refresh active`
                     : `${worldLoad.loaded}/${worldLoad.total} countries live indexed${
                         worldLoad.refreshed
                           ? ` · ${worldLoad.refreshed} refreshed`
