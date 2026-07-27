@@ -41,6 +41,7 @@ const CATEGORY_TERMS: Array<[Category, string[]]> = [
       "defence",
       "defense",
       "disputed waters",
+      "drone",
       "hostage",
       "hijack",
       "incursion",
@@ -51,13 +52,18 @@ const CATEGORY_TERMS: Array<[Category, string[]]> = [
       "maritime standoff",
       "military",
       "missile",
+      "mobilization",
+      "mobilisation",
       "navy",
       "naval",
       "rebel",
       "rebellion",
       "revolution",
       "riot",
+      "retaliation",
       "security",
+      "settler",
+      "shelling",
       "skirmish",
       "standoff",
       "terror",
@@ -92,6 +98,7 @@ const CATEGORY_TERMS: Array<[Category, string[]]> = [
       "charged with",
       "criminal charge",
       "criminal charges",
+      "extradition",
       "faces charges",
       "indicted",
       "indictment",
@@ -108,6 +115,8 @@ const CATEGORY_TERMS: Array<[Category, string[]]> = [
       "homicide",
       "investigation",
       "investigate",
+      "killed",
+      "killing",
       "judge",
       "justice",
       "lawsuit",
@@ -262,9 +271,11 @@ const CATEGORY_TERMS: Array<[Category, string[]]> = [
       "motorsport",
       "olympic",
       "player",
+      "paddleboarder",
       "pool",
       "preview",
       "race",
+      "record time",
       "rugby",
       "score",
       "season",
@@ -278,6 +289,7 @@ const CATEGORY_TERMS: Array<[Category, string[]]> = [
       "vs",
       "wrestling",
       "world cup",
+      "world title",
       "coupe du monde",
       "coupe",
       "équipe",
@@ -507,9 +519,13 @@ const CATEGORY_TERMS: Array<[Category, string[]]> = [
       "congress",
       "diplomacy",
       "lawmakers",
+      "party",
+      "political",
+      "politician",
       "mayor",
       "minister",
       "parliament",
+      "pm pledges",
       "policy",
       "president",
       "prime minister",
@@ -927,12 +943,19 @@ export function eventsDescribeSameOccurrence(left: Event, right: Event) {
 export function classifyLiveHeadline(title: string): Category {
   const normalized = title.normalize("NFKC").toLowerCase();
   const tokens = new Set(newsTextTokens(normalized));
+  if (/\b(?:latest )?news bulletin\b/iu.test(normalized)) return "Other";
   let bestCategory: Category = "Other";
   let bestScore = 0;
 
   for (const [category, terms] of CATEGORY_TERMS) {
-    const score = terms.reduce((total, term) => {
+    const countedSignals = new Set<string>();
+    let score = terms.reduce((total, term) => {
       const trimmedTerm = term.trim();
+      const signalKey = trimmedTerm.includes(" ")
+        ? trimmedTerm.replace(/\s+/g, " ")
+        : stemToken(trimmedTerm);
+      if (countedSignals.has(signalKey)) return total;
+      countedSignals.add(signalKey);
       const matches = !trimmedTerm.includes(" ")
         ? tokens.has(stemToken(trimmedTerm))
         : new RegExp(
@@ -943,6 +966,14 @@ export function classifyLiveHeadline(title: string): Category {
           ).test(normalized);
       return total + (matches ? (trimmedTerm.includes(" ") ? 2 : 1) : 0);
     }, 0);
+    if (
+      category === "Conflict and security" &&
+      /\b(?:strikes?|hits?)\b.{0,90}\b(?:base|bases|border|capital|cities|city|military|site|sites|territory)\b/iu.test(
+        normalized,
+      )
+    ) {
+      score += 2;
+    }
 
     if (
       score > bestScore ||
@@ -1218,6 +1249,18 @@ export function buildLiveEvents(
       );
       const representative = representativeArticle(cluster);
       const headline = representative?.title ?? "Current report";
+      const classificationText = [
+        headline,
+        ...cluster.flatMap((article) => [
+          article.title,
+          article.description ?? "",
+        ]),
+      ].join(" ");
+      const headlineCategory = classifyLiveHeadline(headline);
+      const eventCategory =
+        headlineCategory === "Local affairs"
+          ? classifyLiveHeadline(classificationText)
+          : headlineCategory;
       const eventId = `live-event-${stableId(headline.toLowerCase())}`;
       const articles = visibleSourceArticles
         .map((article, index): Article => {
@@ -1279,7 +1322,7 @@ export function buildLiveEvents(
         id: eventId,
         headline,
         summary,
-        category: classifyLiveHeadline(headline),
+        category: eventCategory,
         importanceScore: scoring.score,
         importanceLabel: scoring.label,
         geographicScope: scope,

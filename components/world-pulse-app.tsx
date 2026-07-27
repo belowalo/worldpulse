@@ -303,7 +303,11 @@ function EventCard({
           aria-hidden="true"
         />
         <span className="font-mono text-[9px] uppercase tracking-[0.15em] text-[#9ba7b8]">
-          {event.category}
+          <span
+            title="Automatically classified from the source-backed headlines for this occurrence."
+          >
+            Auto-classified · {event.category}
+          </span>
         </span>
         <ImportancePill event={event} />
         {coverageLoading ? (
@@ -606,18 +610,21 @@ function MethodologyModal({ onClose }: { onClose: () => void }) {
         </div>
         <p className="mt-5 text-xs leading-5 text-[#8996a8]">
           Every displayed headline and publisher link comes from a real public
-          news feed. The interactive map opens immediately with the newest
-          available live index while WorldPulse refreshes current reporting for
-          every country in the background. No headlines are bundled into the
-          website. Opening a country also runs a deeper local and international
-          search. WorldPulse never invents headlines or sources.
+          news feed. Before the map appears, WorldPulse checks the initial
+          country snapshot and commits its colors together so clicking a
+          country cannot change its map category. No headlines are bundled into
+          the website. Opening a country runs a deeper local and international
+          search for the news panel without altering the map snapshot.
+          WorldPulse never invents headlines or sources.
         </p>
         <p className="mt-3 text-xs leading-5 text-[#8996a8]">
           Coverage is uneven. Countries with less digital reporting or fewer
-          accessible sources may appear less active. Publication volume alone
-          is never treated as importance, and political summaries use neutral
-          wording. Live headlines and publisher links come from public RSS
-          metadata; WorldPulse does not reproduce article bodies.
+          accessible sources may appear neutral until a source-backed match is
+          available. Publication volume alone is never treated as importance.
+          Event categories are automated labels inferred from source headline
+          wording, not facts supplied by the publisher; every card says so.
+          Live headlines, dates, publisher names, and links come from public
+          feed metadata, and WorldPulse does not reproduce article bodies.
         </p>
         <p className="mt-3 text-xs leading-5 text-[#8996a8]">
           Visible events automatically run exact, keyword, and
@@ -642,6 +649,73 @@ interface WorldPulseAppProps {
   liveUpdates?: boolean;
 }
 
+function WorldLoadingScreen({
+  checked,
+  matched,
+  total,
+}: {
+  checked: number;
+  matched: number;
+  total: number;
+}) {
+  const progress = total
+    ? Math.max(3, Math.min(100, Math.round((checked / total) * 100)))
+    : 3;
+
+  return (
+    <main
+      className="grid min-h-screen place-items-center overflow-hidden bg-[#080d15] px-6"
+      aria-busy="true"
+    >
+      <section className="relative w-full max-w-lg text-center">
+        <div
+          className="absolute left-1/2 top-4 h-56 w-56 -translate-x-1/2 rounded-full border border-[#2d4b55] opacity-60 shadow-[0_0_80px_rgba(115,226,204,0.12)]"
+          aria-hidden="true"
+        />
+        <div
+          className="absolute left-1/2 top-11 h-[10.5rem] w-[10.5rem] -translate-x-1/2 rounded-full border border-dashed border-[#3b6670] opacity-70"
+          aria-hidden="true"
+        />
+        <div className="relative mx-auto grid h-20 w-20 place-items-center rounded-full border border-[#4d6572] bg-[#13232a] text-3xl text-[#73e2cc] shadow-[0_0_45px_rgba(115,226,204,0.18)]">
+          ◉
+        </div>
+        <p className="relative mt-8 font-mono text-[10px] uppercase tracking-[0.24em] text-[#73e2cc]">
+          WorldPulse source verification
+        </p>
+        <h1 className="relative mt-3 text-3xl font-semibold tracking-[-0.045em] text-white">
+          Checking live world reporting
+        </h1>
+        <p className="relative mx-auto mt-3 max-w-md text-sm leading-6 text-[#9eabba]">
+          Checking current headlines, publisher attribution, and country
+          matches before the map is shown.
+        </p>
+        <div className="relative mt-8 overflow-hidden rounded-full bg-[#1b2737]">
+          <div
+            className="h-2 rounded-full bg-gradient-to-r from-[#2f8b82] via-[#73e2cc] to-[#a7fff0] transition-[width] duration-300"
+            style={{ width: `${progress}%` }}
+          />
+        </div>
+        <div
+          className="relative mt-3 flex items-center justify-between gap-3 font-mono text-[9px] uppercase tracking-[0.13em] text-[#8290a3]"
+          role="status"
+          aria-live="polite"
+        >
+          <span>
+            {total
+              ? `${checked}/${total} countries checked`
+              : "Preparing country index"}
+          </span>
+          <span>{matched} source-backed matches</span>
+        </div>
+        <p className="relative mt-7 text-[11px] leading-5 text-[#718095]">
+          No bundled or invented headlines. Countries without a source-backed
+          current match remain neutral.
+        </p>
+      </section>
+    </main>
+  );
+}
+
 export function WorldPulseApp({
   MapComponent = WorldMap,
   liveUpdates = true,
@@ -657,10 +731,15 @@ export function WorldPulseApp({
   const [liveCountryFeeds, setLiveCountryFeeds] = useState<
     Record<string, FeedState>
   >({});
+  const [mapSnapshotFeeds, setMapSnapshotFeeds] = useState<
+    Record<string, FeedState>
+  >({});
   const [countryDirectoryReady, setCountryDirectoryReady] = useState(false);
+  const [initialWorldReady, setInitialWorldReady] = useState(!liveUpdates);
   const [worldLoad, setWorldLoad] = useState({
     loaded: 0,
     total: 0,
+    matched: 0,
     refreshed: 0,
     retrying: 0,
     pass: 1,
@@ -807,25 +886,33 @@ export function WorldPulseApp({
       setWorldLoad({
         loaded: 0,
         total: 0,
+        matched: 0,
         refreshed: 0,
         retrying: 0,
         pass: 1,
       });
+      setInitialWorldReady(true);
       return;
     }
 
     let cancelled = false;
     let refreshTimer: number | undefined;
+    let readinessTimer: number | undefined;
     const loadedCountries = new Set<string>();
+    const matchedCountries = new Set<string>();
     const missingCountries = new Set<string>();
+    const scanFeeds: Record<string, FeedState> = {};
     const countriesByName = new Map(
       countryDirectory.map((country) => [country.name, country]),
     );
 
     setLiveCountryFeeds({});
+    setMapSnapshotFeeds({});
+    setInitialWorldReady(false);
     setWorldLoad({
       loaded: 0,
       total: countryDirectory.length,
+      matched: 0,
       refreshed: 0,
       retrying: 0,
       pass: 1,
@@ -874,6 +961,7 @@ export function WorldPulseApp({
             if (phase === "initial") missingCountries.add(country.name);
             continue;
           }
+          matchedCountries.add(country.name);
           missingCountries.delete(country.name);
           nextFeeds[country.name] = {
             events,
@@ -885,12 +973,14 @@ export function WorldPulseApp({
         }
 
         if (Object.keys(nextFeeds).length) {
+          Object.assign(scanFeeds, nextFeeds);
           setLiveCountryFeeds((current) => ({ ...current, ...nextFeeds }));
         }
         setWorldLoad((current) => ({
           ...current,
           loaded:
             phase === "initial" ? loadedCountries.size : current.loaded,
+          matched: matchedCountries.size,
           refreshed:
             phase === "refresh"
               ? refreshedCountries.size
@@ -903,6 +993,7 @@ export function WorldPulseApp({
           setWorldLoad((current) => ({
             ...current,
             loaded: loadedCountries.size,
+            matched: matchedCountries.size,
             retrying: missingCountries.size,
           }));
         }
@@ -932,7 +1023,7 @@ export function WorldPulseApp({
       await Promise.all(
         Array.from(
           {
-            length: Math.min(forceFresh ? 1 : 2, batches.length),
+            length: Math.min(forceFresh ? 1 : 4, batches.length),
           },
           () => worker(),
         ),
@@ -944,18 +1035,31 @@ export function WorldPulseApp({
       setWorldLoad((current) => ({ ...current, refreshed: 0 }));
       await runBatches(countryDirectory, "refresh", true);
       if (!cancelled) {
+        setMapSnapshotFeeds({ ...scanFeeds });
         refreshTimer = window.setTimeout(() => void refreshWorld(), 600_000);
       }
     };
 
     const loadWorld = async () => {
+      readinessTimer = window.setTimeout(() => {
+        if (cancelled) return;
+        setMapSnapshotFeeds({ ...scanFeeds });
+        setInitialWorldReady(true);
+      }, 12_000);
       await runBatches(countryDirectory, "initial");
       if (cancelled) return;
+      if (readinessTimer !== undefined) {
+        window.clearTimeout(readinessTimer);
+        readinessTimer = undefined;
+      }
       setWorldLoad((current) => ({
         ...current,
         loaded: loadedCountries.size,
+        matched: matchedCountries.size,
         retrying: missingCountries.size,
       }));
+      setMapSnapshotFeeds({ ...scanFeeds });
+      setInitialWorldReady(true);
       let pass = 2;
       while (!cancelled && missingCountries.size && pass <= 4) {
         await wait(Math.min(30_000, 5_000 * 2 ** Math.min(pass - 2, 3)));
@@ -969,9 +1073,11 @@ export function WorldPulseApp({
           pass,
         }));
         await runBatches(pending, "initial", true);
+        if (!cancelled) setMapSnapshotFeeds({ ...scanFeeds });
         pass += 1;
         setWorldLoad((current) => ({
           ...current,
+          matched: matchedCountries.size,
           retrying: missingCountries.size,
           pass,
         }));
@@ -985,6 +1091,7 @@ export function WorldPulseApp({
     return () => {
       cancelled = true;
       if (refreshTimer !== undefined) window.clearTimeout(refreshTimer);
+      if (readinessTimer !== undefined) window.clearTimeout(readinessTimer);
     };
   }, [countryDirectory, countryDirectoryReady, liveUpdates]);
 
@@ -1014,37 +1121,17 @@ export function WorldPulseApp({
   const mapCountries = useMemo(
     () =>
       countryDirectory.map((country): MapCountry => {
-        const countryFeed = countryFeeds[country.name];
-        const liveCountryFeed = liveCountryFeeds[country.name];
-        if (
-          countryFeed &&
-          !countryFeed.loading &&
-          !countryFeed.error
-        ) {
-          const mergedEvents = mergeEventFeeds(
-            countryFeed.events,
-            liveCountryFeed?.events ?? [],
-          );
+        const snapshotFeed = mapSnapshotFeeds[country.name];
+        if (snapshotFeed?.events.length) {
           return {
             ...country,
-            events: mergedEvents,
-            topEvent: mergedEvents[0],
-          };
-        }
-        if (liveCountryFeed?.events.length) {
-          return {
-            ...country,
-            events: liveCountryFeed.events,
-            topEvent: liveCountryFeed.events[0],
+            events: snapshotFeed.events,
+            topEvent: snapshotFeed.events[0],
           };
         }
         return country;
       }),
-    [
-      countryDirectory,
-      countryFeeds,
-      liveCountryFeeds,
-    ],
+    [countryDirectory, mapSnapshotFeeds],
   );
   const activeCountry =
     mapCountries.find((country) => country.mapId === selectedCountry.mapId) ??
@@ -1251,20 +1338,6 @@ export function WorldPulseApp({
         ),
     [baseEvents, eventCoverage],
   );
-  const presentedMapCountries = useMemo(
-    () =>
-      mapCountries.map((country) => {
-        if (country.mapId === activeCountry.mapId && expandedEvents[0]) {
-          return { ...country, topEvent: expandedEvents[0] };
-        }
-        return country;
-      }),
-    [
-      activeCountry.mapId,
-      expandedEvents,
-      mapCountries,
-    ],
-  );
   const filteredEvents = (() => {
     const limitHours =
       timeRange === "24 hours"
@@ -1350,6 +1423,16 @@ export function WorldPulseApp({
       : fetchCountryNews(activeCountry));
   };
 
+  if (liveUpdates && !initialWorldReady) {
+    return (
+      <WorldLoadingScreen
+        checked={worldLoad.loaded}
+        matched={worldLoad.matched}
+        total={worldLoad.total}
+      />
+    );
+  }
+
   return (
     <main className="min-h-screen bg-[#080d15]">
       <header className="sticky top-0 z-40 flex h-16 items-center justify-between border-b border-[#222d3e] bg-[#080d15]/95 px-3 backdrop-blur sm:px-6">
@@ -1409,21 +1492,19 @@ export function WorldPulseApp({
       <div className="grid min-h-[calc(100vh-4rem)] lg:grid-cols-[minmax(0,1fr)_420px]">
         <section className="relative min-h-[54vh] border-b border-[#222d3e] lg:h-[calc(100vh-4rem)] lg:border-b-0 lg:border-r">
           <MapComponent
-            countries={presentedMapCountries}
+            countries={mapCountries}
             selectedMapId={globalView ? null : selectedCountry.mapId}
             onSelect={handleSelect}
             linkEvents={mapLinkEvents}
             statusLabel={
               worldLoad.total
-                ? worldLoad.loaded === worldLoad.total
-                  ? worldLoad.retrying
-                    ? `${worldLoad.loaded}/${worldLoad.total} countries indexed · live refresh active`
-                    : `${worldLoad.loaded}/${worldLoad.total} countries live indexed${
-                        worldLoad.refreshed
-                          ? ` · ${worldLoad.refreshed} refreshed`
-                          : ""
-                      }`
-                  : `${worldLoad.loaded}/${worldLoad.total} countries indexed · refreshing the rest`
+                ? `${worldLoad.matched}/${worldLoad.total} source-backed country signals${
+                    worldLoad.refreshed
+                      ? ` · ${worldLoad.refreshed} refreshed`
+                      : worldLoad.retrying
+                        ? " · unmatched countries retrying"
+                        : " · live"
+                  }`
                 : countryDirectoryReady
                   ? "Starting live world scan…"
                   : "Preparing live world index…"
@@ -1455,6 +1536,13 @@ export function WorldPulseApp({
                   {item}
                 </div>
               ))}
+              <div className="flex shrink-0 items-center gap-1.5 text-[9px] text-[#b7c1ce]">
+                <span
+                  className="h-2 w-2 rounded-full bg-[#5a6573]"
+                  aria-hidden="true"
+                />
+                No source-backed match
+              </div>
             </div>
           </div>
         </section>

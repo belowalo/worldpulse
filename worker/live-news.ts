@@ -164,7 +164,7 @@ function safeIsoDate(value: string) {
   const timestamp = Date.parse(normalized);
   return Number.isFinite(timestamp)
     ? new Date(timestamp).toISOString()
-    : new Date().toISOString();
+    : null;
 }
 
 function stableId(value: string) {
@@ -208,8 +208,31 @@ function buildCandidate(
   const safeUrl = safeHttpUrl(url);
   const cleanTitle = stripMarkup(title);
   const cleanDescription = stripMarkup(description).slice(0, 500);
+  const safePublishedAt = safeIsoDate(publishedAt);
+  let publisherFromUrl = "";
+  try {
+    const hostParts = new URL(safeUrl).hostname
+      .replace(/^www\./i, "")
+      .split(".");
+    const secondLevel = hostParts.at(-2) ?? "";
+    const usesCountrySuffix =
+      (hostParts.at(-1)?.length ?? 0) === 2 &&
+      ["co", "com", "net", "org"].includes(secondLevel);
+    publisherFromUrl = (
+      usesCountrySuffix ? hostParts.at(-3) : secondLevel
+    )
+      ?.replace(/^www\./i, "")
+      .replace(/[-_]+/g, " ")
+      .replace(/\b\w/g, (character) => character.toUpperCase()) ?? "";
+  } catch {
+    // The candidate is rejected below when its article URL is invalid.
+  }
+  const statedPublisherName = stripMarkup(publisherName);
   const cleanPublisherName =
-    stripMarkup(publisherName) || "Independent publisher";
+    statedPublisherName &&
+    statedPublisherName.toLowerCase() !== "independent publisher"
+      ? statedPublisherName
+      : publisherFromUrl;
   const publisherPattern = cleanPublisherName.replace(
     /[.*+?^${}()|[\]\\]/g,
     "\\$&",
@@ -217,7 +240,9 @@ function buildCandidate(
   const searchableDescription = publisherPattern
     ? cleanDescription.replace(new RegExp(publisherPattern, "giu"), " ")
     : cleanDescription;
-  if (!cleanTitle || !safeUrl) return null;
+  if (!cleanTitle || !safeUrl || !cleanPublisherName || !safePublishedAt) {
+    return null;
+  }
   return {
     id: stableId(id || safeUrl),
     title: cleanTitle,
@@ -225,7 +250,7 @@ function buildCandidate(
     url: safeUrl,
     publisherName: cleanPublisherName,
     publisherUrl: safeHttpUrl(publisherUrl) || new URL(safeUrl).origin,
-    publishedAt: safeIsoDate(publishedAt),
+    publishedAt: safePublishedAt,
     // Google descriptions repeat the publisher name. Excluding that
     // attribution prevents brands such as "Yahoo News Canada" from making
     // an unrelated story look country-relevant.
@@ -259,7 +284,7 @@ export function parsePublisherRss(
 export function parseGoogleNewsFeed(xml: string) {
   const items = xml.match(/<item(?:\s[^>]*)?>[\s\S]*?<\/item>/gi) ?? [];
   return items.flatMap((item) => {
-    const publisherName = tagValue(item, "source") || "Independent publisher";
+    const publisherName = tagValue(item, "source");
     const sourceTag = item.match(/<source[^>]*\surl="([^"]+)"[^>]*>/i);
     const rawTitle = tagValue(item, "title");
     const suffix = ` - ${publisherName}`;
@@ -300,9 +325,7 @@ export function parseBingNewsFeed(xml: string) {
   const items = xml.match(/<item(?:\s[^>]*)?>[\s\S]*?<\/item>/gi) ?? [];
   return items.flatMap((item) => {
     const articleUrl = originalBingArticleUrl(tagValue(item, "link"));
-    const publisherName = (
-      tagValue(item, "News:Source") || "Independent publisher"
-    )
+    const publisherName = tagValue(item, "News:Source")
       .replace(/\s+on\s+MSN$/i, "")
       .trim();
     let publisherUrl = "";
@@ -655,17 +678,27 @@ async function fetchMapCountry(
   ];
   let relevantResults = countryRelevantResults(results, terms);
   if (!hasProviderArticles(relevantResults)) {
-    const latestCountryResult = await fetchProvider(
-      countryProviders[1],
-      "country",
-      countryName,
-      terms,
-      fetchImpl,
-    );
-    results.push(latestCountryResult);
+    const [latestCountryResult, gdeltResult] = await Promise.all([
+      fetchProvider(
+        countryProviders[1],
+        "country",
+        countryName,
+        terms,
+        fetchImpl,
+      ),
+      fetchProvider(
+        GDELT_PROVIDER,
+        "country",
+        countryName,
+        terms,
+        fetchImpl,
+      ),
+    ]);
+    results.push(latestCountryResult, gdeltResult);
     relevantResults = [
       ...relevantResults,
       ...countryRelevantResults([latestCountryResult], terms),
+      ...countryRelevantResults([gdeltResult], terms),
     ];
   }
   if (!hasProviderArticles(relevantResults)) {

@@ -78,6 +78,11 @@ describe("live news normalization", () => {
     expect(
       classifyLiveHeadline("Rebel uprising grows into a nationwide revolution"),
     ).toBe("Conflict and security");
+    expect(
+      classifyLiveHeadline(
+        "Russia strikes Kyiv and other Ukrainian cities overnight",
+      ),
+    ).toBe("Conflict and security");
   });
 
   it.each([
@@ -118,6 +123,37 @@ describe("live news normalization", () => {
       "Record Canadian Para presence at 2026 Commonwealth Games",
       "Sports",
     ],
+    [
+      "Ukraine drone strikes on warehouses hit Russian sellers",
+      "Conflict and security",
+    ],
+    [
+      "Israeli settlers set fire to mosques and cars in the West Bank",
+      "Conflict and security",
+    ],
+    [
+      "Israeli settlers set fire to mosques, cars and farm land in West Bank, Palestinians say",
+      "Conflict and security",
+    ],
+    [
+      "White House will not intervene in extradition to the UK",
+      "Crime and justice",
+    ],
+    ["PM pledges continued support ahead of state visit", "Politics"],
+    ["Candidate gets party nod to run against president", "Politics"],
+    [
+      "Iran warns of retaliation after deadly Caspian Sea strike",
+      "Conflict and security",
+    ],
+    [
+      "ICE officer in killing should not have cleared vetting",
+      "Crime and justice",
+    ],
+    [
+      "Paddleboarder wins world title in record time after shark rescue",
+      "Sports",
+    ],
+    ["Latest news bulletin for Monday morning", "Other"],
   ] as const)("classifies %s as %s", (headline, expected) => {
     expect(classifyLiveHeadline(headline)).toBe(expected);
   });
@@ -132,6 +168,33 @@ describe("live news normalization", () => {
         "game",
       ]),
     );
+  });
+
+  it("does not let background description text override an explicit headline category", () => {
+    const [event] = buildLiveEvents(
+      {
+        countryName: "Spain",
+        scope: "country",
+        generatedAt: "2026-07-27T00:00:00.000Z",
+        refreshAfterSeconds: 600,
+        provider: "Test live index",
+        articles: [
+          {
+            id: "spain-wildfire",
+            title: "Firefighters battle unprecedented wildfires in Spain",
+            description:
+              "The prime minister and government announced an emergency briefing.",
+            url: "https://example.com/spain-wildfire",
+            publisherName: "Example News",
+            publisherUrl: "https://example.com",
+            publishedAt: "2026-07-26T23:00:00.000Z",
+          },
+        ],
+      },
+      { name: "Spain", iso2: "ES" },
+    );
+
+    expect(event.category).toBe("Weather and disasters");
   });
 
   it("does not ship a static news snapshot", () => {

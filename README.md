@@ -2,7 +2,7 @@
 
 WorldPulse is a production-quality MVP for exploring recent world news through an interactive map. Each country's hue represents the category of its highest-impact active event, while intensity represents a deterministic 0–100 importance estimate. Clicking any mapped country loads current RSS-indexed headlines, publisher links, timestamps, geographic scope, and a plain-language score explanation.
 
-The hosted site opens the map and controls immediately, then fills the world index progressively from live country searches. No headline bundle ships with the application. A recent server-side live index can appear immediately for up to 30 minutes while a fresh sweep replaces it in the background; genuinely old map data is skipped. The site reads headline-level public RSS metadata and never scrapes or republishes article bodies.
+The hosted site checks the initial live country snapshot behind a progress screen, then reveals all map colors in one atomic update. No headline bundle ships with the application. A recent server-side live index can be checked quickly for up to 30 minutes while a fresh sweep replaces it in the background; genuinely old map data is skipped. The site reads headline-level public feed metadata and never scrapes or republishes article bodies.
 
 ## Screenshots
 
@@ -15,7 +15,7 @@ The deployed application is the preferred live preview. A social preview is avai
 - **Hosted cache:** Cloudflare edge caching plus D1 persistence streams a recent live index immediately, refreshes it in the background, and provides resilience for deeper country and event feeds.
 - **Reference API:** FastAPI, Pydantic validation, SQLAlchemy 2, and PostgreSQL remain available for local full-stack development.
 - **Local orchestration:** Docker Compose starts PostgreSQL, migrates and seeds the API, then starts the web app with health checks.
-- **Hosted preview:** The browser initially downloads one current map signal per country rather than the complete world article index. Full reporting is fetched when needed and the map is refreshed progressively without blocking interaction.
+- **Hosted preview:** The browser initially checks one current map signal per country rather than downloading the complete world article index. The map snapshot is committed together after source verification, so deeper click-time country searches cannot change its colors. Countries without a source-backed current match use a neutral fill rather than synthetic news.
 
 The web app lives at the repository root to preserve the hosting runtime's required structure. `apps/api` contains the backend. See [architecture.md](docs/architecture.md) for details.
 

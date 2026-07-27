@@ -136,6 +136,34 @@ describe("worker live-news providers", () => {
     });
   });
 
+  it("derives a real publisher identity from the article domain and rejects invented dates", () => {
+    const xml = `
+      <rss><channel>
+        <item>
+          <title>Tuvalu approves a new coastal resilience plan</title>
+          <description>Current reporting from Tuvalu.</description>
+          <link>https://pacific-desk.example/tuvalu-plan</link>
+          <guid>tuvalu-plan</guid>
+          <pubDate>Fri, 24 Jul 2026 21:00:00 GMT</pubDate>
+        </item>
+        <item>
+          <title>Story with an unverifiable publication date</title>
+          <description>Missing valid publication metadata.</description>
+          <link>https://pacific-desk.example/invalid-date</link>
+          <guid>invalid-date</guid>
+          <pubDate>not-a-date</pubDate>
+        </item>
+      </channel></rss>
+    `;
+
+    const articles = parseBingNewsFeed(xml);
+    expect(articles).toHaveLength(1);
+    expect(articles[0]).toMatchObject({
+      publisherName: "Pacific Desk",
+      publishedAt: "2026-07-24T21:00:00.000Z",
+    });
+  });
+
   it("parses GDELT results and ignores non-English entries", () => {
     const articles = parseGdeltJson(
       JSON.stringify({
@@ -484,6 +512,57 @@ describe("worker live-news providers", () => {
         new URL(url).searchParams
           .get("q")
           ?.includes("latest"),
+      ),
+    ).toBe(true);
+  });
+
+  it("uses a country-specific GDELT fallback when news search has no verified match", async () => {
+    vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const requestedUrls: string[] = [];
+    const fetchMock = vi.fn(async (input: URL | RequestInfo) => {
+      const url = String(input);
+      requestedUrls.push(url);
+      if (url.startsWith("https://api.gdeltproject.org/api/v2/doc/doc")) {
+        return Response.json({
+          articles: [
+            {
+              url: "https://tuvalu.example/current-parliament-report",
+              title: "Tuvalu parliament approves a current coastal plan",
+              domain: "tuvalu.example",
+              seendate: "20260724T210000Z",
+              language: "English",
+            },
+          ],
+        });
+      }
+      return new Response("<rss><channel></channel></rss>", { status: 200 });
+    });
+
+    const response = await handleLiveNews(
+      new Request(
+        "https://worldpulse.test/api/live-news?scope=map&countries=Tuvalu",
+      ),
+      fetchMock as typeof fetch,
+    );
+    const payload = (await response.json()) as {
+      countries: Array<{
+        available: boolean;
+        articles: Array<{ title: string; publisherName: string }>;
+      }>;
+    };
+
+    expect(payload.countries[0]).toMatchObject({
+      available: true,
+      articles: [
+        expect.objectContaining({
+          title: "Tuvalu parliament approves a current coastal plan",
+          publisherName: "tuvalu.example",
+        }),
+      ],
+    });
+    expect(
+      requestedUrls.some((url) =>
+        url.startsWith("https://api.gdeltproject.org/api/v2/doc/doc"),
       ),
     ).toBe(true);
   });

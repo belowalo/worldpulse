@@ -72,11 +72,18 @@ function TestMap({
 }: WorldMapProps) {
   const japan = countryPulses.find((country) => country.iso2 === "JP");
   const egypt = countryPulses.find((country) => country.iso2 === "EG");
+  const canada = countries.find((country) => country.iso2 === "CA");
   return (
     <>
       <span>{statusLabel}</span>
       <span data-testid="countries-with-news">
         {countries.filter((country) => country.topEvent).length}
+      </span>
+      <span data-testid="canada-map-category">
+        {canada?.topEvent?.category ?? ""}
+      </span>
+      <span data-testid="canada-map-headline">
+        {canada?.topEvent?.headline ?? ""}
       </span>
       <span data-testid="link-event-ids">
         {linkEvents?.map((event) => event.id).join(",") ?? ""}
@@ -296,7 +303,9 @@ describe("WorldPulse interactions", () => {
     vi.stubGlobal("fetch", fetchMock);
 
     render(<WorldPulseApp MapComponent={TestMap} />);
-    fireEvent.click(screen.getByRole("button", { name: "Global feed" }));
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Global feed" }),
+    );
 
     expect(
       await screen.findByText("Showing 40 of 45 matching events"),
@@ -655,7 +664,9 @@ describe("WorldPulse interactions", () => {
     ]);
     expect(requestedUrls).not.toContain("/api/live-news?scope=global");
 
-    fireEvent.click(screen.getByRole("button", { name: "Global feed" }));
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Global feed" }),
+    );
     await waitFor(() =>
       expect(fetchMock).toHaveBeenCalledWith("/api/live-news?scope=global"),
     );
@@ -905,7 +916,7 @@ describe("WorldPulse interactions", () => {
     vi.stubGlobal("fetch", fetchMock);
 
     render(<WorldPulseApp MapComponent={TestMap} />);
-    await screen.findByText(/2\/2 countries live indexed/);
+    await screen.findByText(/2\/2 source-backed country signals/);
     fireEvent.click(
       screen.getByRole("button", { name: "Select Egypt on map" }),
     );
@@ -916,7 +927,7 @@ describe("WorldPulse interactions", () => {
     ).not.toBeInTheDocument();
   });
 
-  it("opens immediately while live country batches continue loading", async () => {
+  it("keeps the interface behind a live source-check screen until the initial snapshot is complete", async () => {
     let finishSecondBatch: (() => void) | undefined;
     const secondBatchReady = new Promise<void>((resolve) => {
       finishSecondBatch = resolve;
@@ -968,16 +979,14 @@ describe("WorldPulse interactions", () => {
     render(<WorldPulseApp MapComponent={TestMap} />);
 
     expect(
-      screen.getByRole("button", { name: "Global feed" }),
-    ).toBeInTheDocument();
-    expect(
-      screen.queryByRole("heading", {
-        name: "Gathering current reporting worldwide",
+      screen.getByRole("heading", {
+        name: "Checking live world reporting",
       }),
-    ).not.toBeInTheDocument();
-    expect(
-      await screen.findByText(/8\/16 countries indexed · refreshing the rest/),
     ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "Global feed" }),
+    ).not.toBeInTheDocument();
+    expect(await screen.findByText(/8\/16 countries checked/)).toBeInTheDocument();
 
     await act(async () => {
       finishSecondBatch?.();
@@ -988,8 +997,13 @@ describe("WorldPulse interactions", () => {
       await screen.findByRole("button", { name: "Global feed" }),
     ).toBeInTheDocument();
     expect(
-      screen.getByText(/16\/16 countries live indexed/),
+      screen.getByText(/16\/16 source-backed country signals/),
     ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("heading", {
+        name: "Checking live world reporting",
+      }),
+    ).not.toBeInTheDocument();
   });
 
   it("finishes the live sweep without inventing a headline for an empty country", async () => {
@@ -1030,7 +1044,7 @@ describe("WorldPulse interactions", () => {
     render(<WorldPulseApp MapComponent={TestMap} />);
 
     expect(
-      await screen.findByText(/1\/1 countries indexed/),
+      await screen.findByText(/0\/1 source-backed country signals/),
     ).toBeInTheDocument();
     expect(screen.getByTestId("countries-with-news")).toHaveTextContent("0");
   });
@@ -1092,7 +1106,7 @@ describe("WorldPulse interactions", () => {
 
     await waitFor(() =>
       expect(
-        screen.getByText(/2\/2 countries live indexed/),
+        screen.getByText(/2\/2 source-backed country signals/),
       ).toBeInTheDocument(),
     );
     expect(screen.getByTestId("countries-with-news")).toHaveTextContent("2");
@@ -1164,7 +1178,70 @@ describe("WorldPulse interactions", () => {
       { timeout: 15_000 },
     );
     expect(
-      screen.getByText(/215\/215 countries live indexed/),
+      screen.getByText(/215\/215 source-backed country signals/),
     ).toBeInTheDocument();
   }, 20_000);
+
+  it("keeps the map category snapshot stable when a deeper country feed loads", async () => {
+    const mapHeadline = "Canada trade exports rise after a new market agreement";
+    const countryHeadline =
+      "Canada military forces clash near a disputed border base";
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === "/countries.geojson") {
+        return Response.json({
+          features: [{ id: "124", properties: { name: "Canada" } }],
+        });
+      }
+      if (url.includes("scope=map")) {
+        return liveMapResponse(url, {
+          Canada: [
+            {
+              ...liveArticleFor("Canada"),
+              id: "canada-map-economy",
+              title: mapHeadline,
+              publishedAt: "2026-07-25T00:00:00.000Z",
+            },
+          ],
+        });
+      }
+      return Response.json({
+        countryName: "Canada",
+        scope: "country",
+        generatedAt: "2026-07-25T02:00:00.000Z",
+        refreshAfterSeconds: 600,
+        provider: "Test live index",
+        articles: [
+          {
+            ...liveArticleFor("Canada"),
+            id: "canada-country-conflict",
+            title: countryHeadline,
+            publishedAt: "2026-07-25T01:00:00.000Z",
+          },
+        ],
+      });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<WorldPulseApp MapComponent={TestMap} />);
+
+    await screen.findByText(/1\/1 source-backed country signals/);
+    expect(screen.getByTestId("canada-map-category")).toHaveTextContent(
+      "Economy",
+    );
+    expect(screen.getByTestId("canada-map-headline")).toHaveTextContent(
+      mapHeadline,
+    );
+    expect(
+      await screen.findByRole("heading", { name: countryHeadline }),
+    ).toBeInTheDocument();
+    expect(screen.getByTestId("canada-map-category")).toHaveTextContent(
+      "Economy",
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Global feed" }));
+    expect(screen.getByTestId("canada-map-category")).toHaveTextContent(
+      "Economy",
+    );
+  });
 });

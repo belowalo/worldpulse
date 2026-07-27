@@ -53,7 +53,7 @@ function buildCountryColorExpression(countries: MapCountry[]) {
       ).fillColor,
     );
   }
-  expression.push("#24444b");
+  expression.push("#303a47");
   return expression as ExpressionSpecification;
 }
 

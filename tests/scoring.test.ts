@@ -48,7 +48,7 @@ describe("impact scoring", () => {
   });
 
   it("gives countries without a current headline a visible neutral color", () => {
-    expect(mapStyleForEvent().fillColor).toBe("#24444b");
+    expect(mapStyleForEvent().fillColor).toBe("#303a47");
   });
 
   it("assigns every category a distinct, visible map color", () => {
