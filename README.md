@@ -2,7 +2,7 @@
 
 WorldPulse is a production-quality MVP for exploring recent world news through an interactive map. Each country's hue represents the category of its highest-impact active event, while intensity represents a deterministic 0–100 importance estimate. Clicking any mapped country opens its current RSS-indexed headlines, publisher links, timestamps, geographic scope, and a plain-language score explanation.
 
-The hosted site shows the map as soon as country geometry is ready, then automatically hydrates every country's complete live feed in a throttled background queue. An unresolved country displays its flag; after its full source-backed feed succeeds, the flag is replaced by the category color of its top-ranked event. Clicking never starts the country request. No headline bundle ships with the application. The site reads headline-level public feed metadata and never scrapes or republishes article bodies.
+The hosted site keeps the map behind a live verification screen while it checks complete local and international feeds for every country. A broader live map search supplies a source-backed signal when a deeper feed returns no usable event. The completed country index then appears at once; clicking never starts a country request. No headline bundle ships with the application. The site reads headline-level public feed metadata and never scrapes or republishes article bodies.
 
 ## Screenshots
 
@@ -15,7 +15,7 @@ The deployed application is the preferred live preview. A social preview is avai
 - **Hosted cache:** Cloudflare edge caching plus D1 persistence streams a recent live index immediately, refreshes it in the background, and provides resilience for deeper country and event feeds.
 - **Reference API:** FastAPI, Pydantic validation, SQLAlchemy 2, and PostgreSQL remain available for local full-stack development.
 - **Local orchestration:** Docker Compose starts PostgreSQL, migrates and seeds the API, then starts the web app with health checks.
-- **Hosted preview:** The browser starts a complete local and international feed search for every country automatically, with three concurrent requests to avoid overloading upstream providers. Flags mark unresolved countries without implying a news category. Each successful full feed supplies the same canonical top event to the country panel and map; failures remain flagged and retry automatically. A successful feed with no source-backed current match uses a neutral fill rather than synthetic news.
+- **Hosted preview:** The browser starts complete local and international searches automatically, using five concurrent country requests plus a broader live verification sweep. The loading screen remains until the initial country index is complete. A deeper result is authoritative when available; otherwise a real attributed map-search result fills the signal gap. A country remains neutral only when neither live path produces a source-backed current match.
 
 The web app lives at the repository root to preserve the hosting runtime's required structure. `apps/api` contains the backend. See [architecture.md](docs/architecture.md) for details.
 

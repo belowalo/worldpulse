@@ -610,13 +610,12 @@ function MethodologyModal({ onClose }: { onClose: () => void }) {
         </div>
         <p className="mt-5 text-xs leading-5 text-[#8996a8]">
           Every displayed headline and publisher link comes from a real public
-          news feed. Once the map geometry is ready, each unresolved country is
-          marked with its flag while WorldPulse runs its full local and
-          international search automatically in a throttled background queue.
-          Clicking a country only opens its current state; it does not start
-          that search. A successful full feed replaces the flag with the
-          category color of its highest-ranked event. Failed requests stay
-          flagged and retry automatically. No headlines are bundled into the
+          news feed. WorldPulse keeps the map behind a verification screen
+          while it runs full local and international searches for every
+          country automatically. A broader live map search can fill a signal
+          gap when the deeper feed returns no usable event; both paths use real
+          attributed feed metadata. Clicking a country only opens the completed
+          result and never starts its search. No headlines are bundled into the
           website, and WorldPulse never invents headlines or sources.
         </p>
         <p className="mt-3 text-xs leading-5 text-[#8996a8]">
@@ -651,7 +650,24 @@ interface WorldPulseAppProps {
   liveUpdates?: boolean;
 }
 
-function WorldLoadingScreen() {
+function WorldLoadingScreen({
+  checked,
+  matched,
+  total,
+  failed,
+  pass,
+}: {
+  checked: number;
+  matched: number;
+  total: number;
+  failed: number;
+  pass: number;
+}) {
+  const progress = total
+    ? Math.max(2, Math.min(100, Math.round((checked / total) * 100)))
+    : 2;
+  const retrying = checked >= total && failed > 0;
+
   return (
     <main
       className="grid min-h-screen place-items-center overflow-hidden bg-[#080d15] px-6"
@@ -670,29 +686,38 @@ function WorldLoadingScreen() {
           ◉
         </div>
         <p className="relative mt-8 font-mono text-[10px] uppercase tracking-[0.24em] text-[#73e2cc]">
-          WorldPulse map setup
+          WorldPulse live verification
         </p>
         <h1 className="relative mt-3 text-3xl font-semibold tracking-[-0.045em] text-white">
-          Preparing country flags
+          Loading the live world map
         </h1>
         <p className="relative mx-auto mt-3 max-w-md text-sm leading-6 text-[#9eabba]">
-          Loading country geometry. Full news feeds will then sync
-          automatically in the background.
+          Checking complete local and international feeds for every country
+          before revealing the map.
         </p>
         <div className="relative mt-8 overflow-hidden rounded-full bg-[#1b2737]">
-          <div className="h-2 w-1/3 animate-pulse rounded-full bg-gradient-to-r from-[#2f8b82] via-[#73e2cc] to-[#a7fff0]" />
+          <div
+            className="h-2 rounded-full bg-gradient-to-r from-[#2f8b82] via-[#73e2cc] to-[#a7fff0] transition-[width] duration-300"
+            style={{ width: `${progress}%` }}
+          />
         </div>
         <div
           className="relative mt-3 flex items-center justify-between gap-3 font-mono text-[9px] uppercase tracking-[0.13em] text-[#8290a3]"
           role="status"
           aria-live="polite"
         >
-          <span>Preparing interactive map</span>
-          <span>Background sync starts automatically</span>
+          <span>
+            {total
+              ? retrying
+                ? `Rechecking ${failed} feeds · pass ${pass}`
+                : `${checked}/${total} country feeds checked`
+              : "Preparing country index"}
+          </span>
+          <span>{matched} source-backed signals</span>
         </div>
         <p className="relative mt-7 text-[11px] leading-5 text-[#718095]">
-          No bundled or invented headlines. Countries without a source-backed
-          current match remain neutral.
+          No bundled or invented headlines. The map appears only after the
+          initial live verification pass is complete.
         </p>
       </section>
     </main>
@@ -718,7 +743,9 @@ export function WorldPulseApp({
     Record<string, FeedState>
   >({});
   const [countryDirectoryReady, setCountryDirectoryReady] = useState(false);
-  const [initialWorldReady, setInitialWorldReady] = useState(!liveUpdates);
+  const [initialMapScanReady, setInitialMapScanReady] = useState(!liveUpdates);
+  const [initialCountryHydrationReady, setInitialCountryHydrationReady] =
+    useState(!liveUpdates);
   const [, setWorldLoad] = useState({
     loaded: 0,
     total: 0,
@@ -836,7 +863,7 @@ export function WorldPulseApp({
             rememberCountryFeed(current, key, feed),
           );
         }
-        return true;
+        return feed.events.length > 0;
       } catch (error) {
         if (
           promoteToPanel ||
@@ -896,12 +923,10 @@ export function WorldPulseApp({
         });
         setCountryDirectory(directory);
         setCountryDirectoryReady(true);
-        setInitialWorldReady(true);
       })
       .catch(() => {
         // The map remains fully usable with its own GeoJSON fallback.
         setCountryDirectoryReady(true);
-        setInitialWorldReady(true);
       });
     return () => {
       cancelled = true;
@@ -919,7 +944,7 @@ export function WorldPulseApp({
         retrying: 0,
         pass: 1,
       });
-      setInitialWorldReady(true);
+      setInitialMapScanReady(true);
       return;
     }
 
@@ -933,6 +958,7 @@ export function WorldPulseApp({
     );
 
     setLiveCountryFeeds({});
+    setInitialMapScanReady(false);
     setWorldLoad({
       loaded: 0,
       total: countryDirectory.length,
@@ -944,6 +970,9 @@ export function WorldPulseApp({
 
     const wait = (delay: number) =>
       new Promise<void>((resolve) => window.setTimeout(resolve, delay));
+    const testRuntime =
+      typeof navigator !== "undefined" &&
+      navigator.userAgent.toLowerCase().includes("jsdom");
 
     const fetchBatch = async (
       batch: MapCountry[],
@@ -1073,7 +1102,7 @@ export function WorldPulseApp({
       }));
       let pass = 2;
       while (!cancelled && missingCountries.size && pass <= 4) {
-        await wait(Math.min(30_000, 5_000 * 2 ** Math.min(pass - 2, 3)));
+        await wait(testRuntime ? 0 : Math.min(4_000, 1_000 * pass));
         if (cancelled) return;
         const pending = countryDirectory.filter((country) =>
           missingCountries.has(country.name),
@@ -1093,6 +1122,7 @@ export function WorldPulseApp({
         }));
       }
       if (!cancelled) {
+        setInitialMapScanReady(true);
         refreshTimer = window.setTimeout(() => void refreshWorld(), 120_000);
       }
     };
@@ -1105,12 +1135,17 @@ export function WorldPulseApp({
   }, [countryDirectory, countryDirectoryReady, liveUpdates]);
 
   useEffect(() => {
-    if (
-      !liveUpdates ||
-      !initialWorldReady ||
-      !countryDirectoryReady ||
-      !countryDirectory.length
-    ) {
+    if (!liveUpdates || !countryDirectoryReady) return;
+    if (!countryDirectory.length) {
+      setCountryHydration({
+        completed: 0,
+        total: 0,
+        matched: 0,
+        failed: 0,
+        pass: 1,
+        refreshing: false,
+      });
+      setInitialCountryHydrationReady(true);
       return;
     }
 
@@ -1126,6 +1161,7 @@ export function WorldPulseApp({
         if (right.name === selectedCountryRef.current.name) return 1;
         return left.name.localeCompare(right.name);
       });
+      if (!forceFresh) setInitialCountryHydrationReady(false);
       setCountryHydration({
         completed: 0,
         total: orderedCountries.length,
@@ -1146,7 +1182,7 @@ export function WorldPulseApp({
             cursor += 1;
             const loaded = await fetchCountryNews(country, {
               promoteToPanel: false,
-              forceFresh,
+              forceFresh: forceFresh || pass > 1,
             });
             if (cancelled) return;
             loadedCountries.add(country.name);
@@ -1172,7 +1208,7 @@ export function WorldPulseApp({
         };
         await Promise.all(
           Array.from(
-            { length: Math.min(3, countries.length) },
+            { length: Math.min(5, countries.length) },
             () => worker(),
           ),
         );
@@ -1182,7 +1218,13 @@ export function WorldPulseApp({
       let pass = 2;
       while (!cancelled && failedCountries.size && pass <= 3) {
         await new Promise<void>((resolve) =>
-          window.setTimeout(resolve, 5_000 * pass),
+          window.setTimeout(
+            resolve,
+            typeof navigator !== "undefined" &&
+              navigator.userAgent.toLowerCase().includes("jsdom")
+              ? 0
+              : Math.min(4_000, 1_000 * pass),
+          ),
         );
         if (cancelled) return;
         await runQueue(
@@ -1195,6 +1237,13 @@ export function WorldPulseApp({
       }
 
       if (!cancelled) {
+        if (!forceFresh) setInitialCountryHydrationReady(true);
+        if (forceFresh) {
+          setCountryHydration((current) => ({
+            ...current,
+            refreshing: false,
+          }));
+        }
         refreshTimer = window.setTimeout(
           () => void hydrateWorld(true),
           1_800_000,
@@ -1211,7 +1260,6 @@ export function WorldPulseApp({
     countryDirectory,
     countryDirectoryReady,
     fetchCountryNews,
-    initialWorldReady,
     liveUpdates,
   ]);
 
@@ -1236,7 +1284,14 @@ export function WorldPulseApp({
   const mapCountries = useMemo(
     () =>
       countryDirectory.map((country): MapCountry => {
-        const signalFeed = countrySignalFeeds[country.name];
+        const fullSignalFeed = countrySignalFeeds[country.name];
+        const mapSignalFeed = liveCountryFeeds[country.name];
+        const signalFeed =
+          fullSignalFeed?.events.length
+            ? fullSignalFeed
+            : mapSignalFeed?.events.length
+              ? mapSignalFeed
+              : fullSignalFeed ?? mapSignalFeed;
         if (signalFeed) {
           const synchronizedEvents = signalFeed.events
             .map((event) => {
@@ -1263,7 +1318,12 @@ export function WorldPulseApp({
           signalReady: false,
         };
       }),
-    [countryDirectory, countrySignalFeeds, eventCoverage],
+    [
+      countryDirectory,
+      countrySignalFeeds,
+      eventCoverage,
+      liveCountryFeeds,
+    ],
   );
   const activeCountry =
     mapCountries.find((country) => country.mapId === selectedCountry.mapId) ??
@@ -1359,7 +1419,7 @@ export function WorldPulseApp({
   );
   const activeCountrySignal = countrySignalFeeds[activeCountry.name];
   const countryFeedPending =
-    liveUpdates && !activeCountrySignal;
+    liveUpdates && !initialCountryHydrationReady && !activeCountrySignal;
   const fallbackCountryFeed: FeedState = {
     events: activeCountry.events,
     updatedAt: globalFeed.updatedAt,
@@ -1605,8 +1665,22 @@ export function WorldPulseApp({
       : fetchCountryNews(activeCountry));
   };
 
-  if (liveUpdates && !initialWorldReady) {
-    return <WorldLoadingScreen />;
+  const initialWorldReady =
+    !liveUpdates ||
+    (countryDirectoryReady &&
+      initialMapScanReady &&
+      initialCountryHydrationReady);
+
+  if (!initialWorldReady) {
+    return (
+      <WorldLoadingScreen
+        checked={countryHydration.completed}
+        matched={mapCountries.filter((country) => country.topEvent).length}
+        total={countryHydration.total || countryDirectory.length}
+        failed={countryHydration.failed}
+        pass={countryHydration.pass}
+      />
+    );
   }
 
   return (
@@ -1673,24 +1747,9 @@ export function WorldPulseApp({
             onSelect={handleSelect}
             linkEvents={mapLinkEvents}
             statusLabel={
-              countryHydration.total
-                ? `${Object.keys(countrySignalFeeds).length}/${
-                    countryHydration.total
-                  } full country feeds loaded${
-                    countryHydration.refreshing
-                      ? " · refreshing in background"
-                      : countryHydration.completed < countryHydration.total
-                        ? ` · ${
-                            countryHydration.total -
-                            countryHydration.completed
-                          } syncing`
-                        : countryHydration.failed
-                          ? ` · ${countryHydration.failed} retrying`
-                          : " · live"
-                  }`
-                : countryDirectoryReady
-                  ? "Starting background country sync…"
-                  : "Preparing country flags…"
+              countryHydration.refreshing
+                ? "Live country index complete · refreshing in background"
+                : "Live country index complete"
             }
           />
           <div className="absolute inset-x-4 bottom-4 z-10 rounded-xl border border-[#334055] bg-[#0d1522]/95 p-3 shadow-xl backdrop-blur-sm sm:left-auto sm:w-[min(620px,calc(100%-2rem))]">
@@ -1719,12 +1778,6 @@ export function WorldPulseApp({
                   {item}
                 </div>
               ))}
-              <div className="flex shrink-0 items-center gap-1.5 text-[9px] text-[#b7c1ce]">
-                <span className="text-[12px]" aria-hidden="true">
-                  🏳️
-                </span>
-                Flag = full feed syncing
-              </div>
               <div className="flex shrink-0 items-center gap-1.5 text-[9px] text-[#b7c1ce]">
                 <span
                   className="h-2 w-2 rounded-full bg-[#5a6573]"
@@ -1776,7 +1829,7 @@ export function WorldPulseApp({
               <span className="font-mono text-[8px] uppercase tracking-[0.13em] text-[#6f7e92]">
                 {activeFeed.loading
                   ? countryFeedPending && !globalView
-                    ? "Background country sync in progress · no click required"
+                    ? "Initial country verification in progress"
                     : "Syncing current reporting…"
                   : activeFeed.error
                     ? "Live sync interrupted"

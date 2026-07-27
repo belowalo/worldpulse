@@ -2,7 +2,6 @@
 
 import * as maplibregl from "maplibre-gl";
 import maplibreWorkerUrl from "maplibre-gl/dist/maplibre-gl-worker.mjs?url";
-import "flag-icons/css/flag-icons.min.css";
 import {
   type ExpressionSpecification,
   type GeoJSONSource,
@@ -103,9 +102,6 @@ export function WorldMap({
     [countries, countryCenters, linkEvents, selectedMapId],
   );
   const eventLinksRef = useRef(eventLinks);
-  const pendingFlagMarkersRef = useRef(
-    new Map<string, maplibregl.Marker>(),
-  );
 
   useEffect(() => {
     let cancelled = false;
@@ -124,7 +120,6 @@ export function WorldMap({
 
   useEffect(() => {
     if (!containerRef.current || mapRef.current) return;
-    const pendingFlagMarkers = pendingFlagMarkersRef.current;
 
     const map = new maplibregl.Map({
       container: containerRef.current,
@@ -335,10 +330,6 @@ export function WorldMap({
 
     mapRef.current = map;
     return () => {
-      for (const marker of pendingFlagMarkers.values()) {
-        marker.remove();
-      }
-      pendingFlagMarkers.clear();
       resizeObserver.disconnect();
       map.remove();
       mapRef.current = null;
@@ -359,69 +350,6 @@ export function WorldMap({
     ) as GeoJSONSource | null;
     source?.setData(eventLinks);
   }, [eventLinks]);
-
-  useEffect(() => {
-    const map = mapRef.current;
-    if (!map) return;
-    const pendingCountries = new Map(
-      countries
-        .filter(
-          (country) =>
-            !country.signalReady &&
-            country.iso2 &&
-            (countryCenters[country.name] ||
-              countryCenters[country.mapId]),
-        )
-        .map((country) => [country.mapId, country]),
-    );
-
-    for (const [mapId, marker] of pendingFlagMarkersRef.current) {
-      if (pendingCountries.has(mapId)) continue;
-      marker.remove();
-      pendingFlagMarkersRef.current.delete(mapId);
-    }
-
-    for (const [mapId, country] of pendingCountries) {
-      if (pendingFlagMarkersRef.current.has(mapId)) continue;
-      const center =
-        countryCenters[country.name] ?? countryCenters[country.mapId];
-      if (!center || !country.iso2) continue;
-      const element = document.createElement("span");
-      element.className = `fi fi-${country.iso2.toLowerCase()}`;
-      element.setAttribute("aria-hidden", "true");
-      element.title = `${country.name} is syncing in the background`;
-      Object.assign(element.style, {
-        display: "block",
-        width: "17px",
-        height: "12px",
-        border: "1px solid rgba(255, 255, 255, 0.45)",
-        borderRadius: "2px",
-        lineHeight: "1",
-        opacity: "0.9",
-        pointerEvents: "none",
-        filter: "drop-shadow(0 1px 3px rgba(0, 0, 0, 0.95))",
-        transform: "translateZ(0)",
-      });
-      const marker = new maplibregl.Marker({
-        element,
-        anchor: "center",
-      })
-        .setLngLat(center)
-        .addTo(map);
-      element.setAttribute("aria-hidden", "true");
-      element.setAttribute("role", "presentation");
-      element.tabIndex = -1;
-      if (window.getComputedStyle(element).backgroundImage === "none") {
-        element.className = "";
-        element.textContent = "🏳️";
-        element.style.width = "auto";
-        element.style.height = "auto";
-        element.style.border = "0";
-        element.style.fontSize = "13px";
-      }
-      pendingFlagMarkersRef.current.set(mapId, marker);
-    }
-  }, [countries, countryCenters]);
 
   useEffect(() => {
     const map = mapRef.current;
@@ -499,9 +427,7 @@ export function WorldMap({
             </>
           ) : (
             <p className="mt-2 text-xs text-[#8f9caf]">
-              {hoveredCountry.signalReady
-                ? "The full feed loaded without a current source-backed match."
-                : "The full country feed is syncing automatically in the background."}
+              No current source-backed match was returned for this country.
             </p>
           )}
         </div>

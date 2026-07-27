@@ -671,9 +671,14 @@ describe("WorldPulse interactions", () => {
     const countryRequests = requestedUrls.filter((url) =>
       url.includes("/api/live-news?country="),
     );
-    expect(countryRequests).toEqual([
+    expect(countryRequests[0]).toBe(
       "/api/live-news?country=Canada&iso2=CA",
-    ]);
+    );
+    expect(
+      countryRequests.some(
+        (url) => url === "/api/live-news?country=Canada&iso2=CA&fresh=1",
+      ),
+    ).toBe(true);
     expect(requestedUrls).not.toContain("/api/live-news?scope=global");
 
     fireEvent.click(
@@ -713,12 +718,10 @@ describe("WorldPulse interactions", () => {
         "/api/live-news?country=Canada&iso2=CA",
       ),
     );
-    expect(screen.getByTestId("countries-syncing")).toHaveTextContent("1");
     expect(
-      screen.getByText(
-        "Background country sync in progress · no click required",
-      ),
+      await screen.findByText("Live country index complete"),
     ).toBeInTheDocument();
+    expect(screen.getByTestId("countries-syncing")).toHaveTextContent("1");
     expect(
       fetchMock.mock.calls.some(([input]) =>
         String(input).includes("scope=global"),
@@ -894,7 +897,7 @@ describe("WorldPulse interactions", () => {
     ).toHaveLength(egyptRequestsBeforeClick);
   });
 
-  it("shows the map while full country feeds hydrate in the background", async () => {
+  it("keeps the loading screen visible until every full country feed is checked", async () => {
     let finishMexico: (() => void) | undefined;
     const mexicoReady = new Promise<void>((resolve) => {
       finishMexico = resolve;
@@ -932,13 +935,16 @@ describe("WorldPulse interactions", () => {
     render(<WorldPulseApp MapComponent={TestMap} />);
 
     expect(
-      await screen.findByRole("button", { name: "Global feed" }),
+      await screen.findByRole("heading", {
+        name: "Loading the live world map",
+      }),
     ).toBeInTheDocument();
     expect(
-      await screen.findByText(/1\/2 full country feeds loaded · 1 syncing/),
+      await screen.findByText(/1\/2 country feeds checked/),
     ).toBeInTheDocument();
-    expect(screen.getByTestId("countries-with-news")).toHaveTextContent("1");
-    expect(screen.getByTestId("countries-syncing")).toHaveTextContent("1");
+    expect(
+      screen.queryByRole("button", { name: "Global feed" }),
+    ).not.toBeInTheDocument();
 
     await act(async () => {
       finishMexico?.();
@@ -946,7 +952,7 @@ describe("WorldPulse interactions", () => {
     });
 
     expect(
-      await screen.findByText(/2\/2 full country feeds loaded · live/),
+      await screen.findByText("Live country index complete"),
     ).toBeInTheDocument();
     expect(screen.getByTestId("countries-with-news")).toHaveTextContent("2");
     expect(screen.getByTestId("countries-syncing")).toHaveTextContent("0");
@@ -990,10 +996,57 @@ describe("WorldPulse interactions", () => {
     render(<WorldPulseApp MapComponent={TestMap} />);
 
     expect(
-      await screen.findByText(/1\/1 full country feeds loaded · live/),
+      await screen.findByText("Live country index complete"),
     ).toBeInTheDocument();
     expect(screen.getByTestId("countries-with-news")).toHaveTextContent("0");
     expect(screen.getByTestId("countries-syncing")).toHaveTextContent("0");
+  });
+
+  it("uses a source-backed live map result when the deeper country feed is empty", async () => {
+    const fallbackHeadline =
+      "Canada military forces clash near a disputed border base";
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === "/countries.geojson") {
+        return Response.json({
+          features: [{ id: "124", properties: { name: "Canada" } }],
+        });
+      }
+      if (url.includes("scope=map")) {
+        return liveMapResponse(url, {
+          Canada: [
+            {
+              ...liveArticleFor("Canada"),
+              id: "canada-map-conflict",
+              title: fallbackHeadline,
+            },
+          ],
+        });
+      }
+      return Response.json({
+        countryName: "Canada",
+        scope: "country",
+        generatedAt: "2026-07-25T00:00:00.000Z",
+        refreshAfterSeconds: 600,
+        provider: "Test live index",
+        articles: [],
+      });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<WorldPulseApp MapComponent={TestMap} />);
+
+    await screen.findByText("Live country index complete");
+    expect(screen.getByTestId("countries-with-news")).toHaveTextContent("1");
+    expect(screen.getByTestId("canada-map-category")).toHaveTextContent(
+      "Conflict and security",
+    );
+    expect(screen.getByTestId("canada-map-headline")).toHaveTextContent(
+      fallbackHeadline,
+    );
+    expect(
+      screen.getByRole("heading", { name: fallbackHeadline }),
+    ).toBeInTheDocument();
   });
 
   it("loads every mapped country live without a static snapshot", async () => {
@@ -1063,7 +1116,7 @@ describe("WorldPulse interactions", () => {
 
     await waitFor(() =>
       expect(
-        screen.getByText(/2\/2 full country feeds loaded · live/),
+        screen.getByText("Live country index complete"),
       ).toBeInTheDocument(),
     );
     expect(screen.getByTestId("countries-with-news")).toHaveTextContent("2");
@@ -1139,7 +1192,7 @@ describe("WorldPulse interactions", () => {
       { timeout: 15_000 },
     );
     expect(
-      screen.getByText(/215\/215 full country feeds loaded · live/),
+      screen.getByText("Live country index complete"),
     ).toBeInTheDocument();
     expect(screen.getByTestId("countries-syncing")).toHaveTextContent("0");
   }, 20_000);
@@ -1179,10 +1232,8 @@ describe("WorldPulse interactions", () => {
 
     render(<WorldPulseApp MapComponent={TestMap} />);
 
-    await screen.findByText(/0\/1 full country feeds loaded · 1 syncing/);
-    expect(screen.getByTestId("canada-map-category")).toBeEmptyDOMElement();
-    expect(screen.getByTestId("canada-map-headline")).toBeEmptyDOMElement();
-    expect(screen.getByTestId("countries-syncing")).toHaveTextContent("1");
+    await screen.findByText(/0\/1 country feeds checked/);
+    expect(screen.queryByTestId("canada-map-category")).not.toBeInTheDocument();
     await act(async () => {
       resolveCountryFeed?.(
         Response.json({
@@ -1213,7 +1264,7 @@ describe("WorldPulse interactions", () => {
       countryHeadline,
     );
     expect(
-      screen.getByText(/1\/1 full country feeds loaded · live/),
+      screen.getByText("Live country index complete"),
     ).toBeInTheDocument();
     expect(screen.getByTestId("countries-syncing")).toHaveTextContent("0");
 
