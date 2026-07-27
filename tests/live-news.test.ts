@@ -108,13 +108,31 @@ describe("live news normalization", () => {
       "South Africa warns against searches of migrants' documents",
       "Society and education",
     ],
+    [
+      "Growing Pains: Rethinking Development Charges in Canadian Municipalities",
+      "Economy",
+    ],
+    [
+      "Human rights groups support the museum's curatorial independence",
+      "Society and education",
+    ],
+    [
+      "Record Canadian Para presence at 2026 Commonwealth Games",
+      "Sports",
+    ],
   ] as const)("classifies %s as %s", (headline, expected) => {
     expect(classifyLiveHeadline(headline)).toBe(expected);
   });
 
   it("normalizes common inflections consistently", () => {
-    expect(newsTextTokens("wildfires athletes prices warnings")).toEqual(
-      expect.arrayContaining(["wildfire", "athlete", "price", "warning"]),
+    expect(newsTextTokens("wildfires athletes prices warnings games")).toEqual(
+      expect.arrayContaining([
+        "wildfire",
+        "athlete",
+        "price",
+        "warning",
+        "game",
+      ]),
     );
   });
 

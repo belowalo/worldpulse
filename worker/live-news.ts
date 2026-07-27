@@ -169,16 +169,28 @@ function buildCandidate(
   const safeUrl = safeHttpUrl(url);
   const cleanTitle = stripMarkup(title);
   const cleanDescription = stripMarkup(description).slice(0, 500);
+  const cleanPublisherName =
+    stripMarkup(publisherName) || "Independent publisher";
+  const publisherPattern = cleanPublisherName.replace(
+    /[.*+?^${}()|[\]\\]/g,
+    "\\$&",
+  );
+  const searchableDescription = publisherPattern
+    ? cleanDescription.replace(new RegExp(publisherPattern, "giu"), " ")
+    : cleanDescription;
   if (!cleanTitle || !safeUrl) return null;
   return {
     id: stableId(id || safeUrl),
     title: cleanTitle,
     description: cleanDescription || undefined,
     url: safeUrl,
-    publisherName: stripMarkup(publisherName) || "Independent publisher",
+    publisherName: cleanPublisherName,
     publisherUrl: safeHttpUrl(publisherUrl) || new URL(safeUrl).origin,
     publishedAt: safeIsoDate(publishedAt),
-    searchableText: `${cleanTitle} ${cleanDescription}`.trim(),
+    // Google descriptions repeat the publisher name. Excluding that
+    // attribution prevents brands such as "Yahoo News Canada" from making
+    // an unrelated story look country-relevant.
+    searchableText: `${cleanTitle} ${searchableDescription}`.trim(),
   };
 }
 

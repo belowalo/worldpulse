@@ -73,6 +73,22 @@ describe("worker live-news providers", () => {
     expect(article.publisherUrl).toBe("https://wire.example/");
   });
 
+  it("does not treat a country in aggregator branding as story relevance", () => {
+    const xml = `
+      <rss><channel><item>
+        <title>ABC15 Arizona in Phoenix Latest Headlines - Yahoo News Canada</title>
+        <description>ABC15 Arizona in Phoenix Latest Headlines Yahoo News Canada</description>
+        <link>https://news.google.com/rss/articles/arizona</link>
+        <guid>arizona</guid>
+        <pubDate>Sun, 26 Jul 2026 21:06:00 GMT</pubDate>
+        <source url="https://ca.news.yahoo.com/">Yahoo News Canada</source>
+      </item></channel></rss>
+    `;
+
+    const [article] = parseGoogleNewsFeed(xml);
+    expect(articleMatchesCountry(article, ["Canada", "Canadian"])).toBe(false);
+  });
+
   it("parses GDELT results and ignores non-English entries", () => {
     const articles = parseGdeltJson(
       JSON.stringify({

@@ -89,8 +89,12 @@ const CATEGORY_TERMS: Array<[Category, string[]]> = [
       "capture",
       "captured",
       "cartel",
-      "charge",
-      "charges",
+      "charged with",
+      "criminal charge",
+      "criminal charges",
+      "faces charges",
+      "indicted",
+      "indictment",
       "conviction",
       "corruption",
       "court",
@@ -448,6 +452,8 @@ const CATEGORY_TERMS: Array<[Category, string[]]> = [
       "business",
       "company",
       "deal",
+      "development charge",
+      "development charges",
       "economy",
       "energy",
       "export",
@@ -549,6 +555,7 @@ const CATEGORY_TERMS: Array<[Category, string[]]> = [
       "education",
       "family",
       "housing",
+      "human rights",
       "immigration",
       "inequality",
       "labor",
@@ -733,6 +740,7 @@ function stableId(value: string) {
 }
 
 function stemToken(token: string) {
+  if (token === "games") return "game";
   if (token === "movies") return "movie";
   if (token === "warning") return token;
   if (token === "series" || token === "species") return token;
