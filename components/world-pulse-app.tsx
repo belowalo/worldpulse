@@ -839,8 +839,8 @@ export function WorldPulseApp({
     let batchIndex = 0;
     const refreshedCountries = new Set<string>();
     const batches: MapCountry[][] = [];
-    for (let index = 0; index < countryDirectory.length; index += 5) {
-      batches.push(countryDirectory.slice(index, index + 5));
+    for (let index = 0; index < countryDirectory.length; index += 2) {
+      batches.push(countryDirectory.slice(index, index + 2));
     }
 
     const schedule = (delay: number) => {

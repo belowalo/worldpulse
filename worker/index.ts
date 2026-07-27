@@ -24,14 +24,127 @@ interface ExecutionContext {
   passThroughOnException(): void;
 }
 
-const LIVE_CACHE_NAME = "worldpulse-live-v3";
+const LIVE_CACHE_NAME = "worldpulse-live-v4";
 const LIVE_CACHE_FRESH_MS = 5 * 60_000;
 const LIVE_CACHE_RETENTION_SECONDS = 24 * 60 * 60;
+const ARTICLE_RETENTION_MS = 8 * 24 * 60 * 60_000;
+
+type JsonRecord = Record<string, unknown>;
+
+function isJsonRecord(value: unknown): value is JsonRecord {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+function cachedArticleKey(article: JsonRecord) {
+  for (const field of ["url", "id", "title"]) {
+    const value = article[field];
+    if (typeof value === "string" && value) return `${field}:${value}`;
+  }
+  return JSON.stringify(article);
+}
+
+function mergeCachedArticles(
+  freshArticles: unknown,
+  storedArticles: unknown,
+  limit: number,
+) {
+  const merged = new Map<string, JsonRecord>();
+  for (const candidate of [
+    ...(Array.isArray(freshArticles) ? freshArticles : []),
+    ...(Array.isArray(storedArticles) ? storedArticles : []),
+  ]) {
+    if (!isJsonRecord(candidate)) continue;
+    const publishedAt = candidate.publishedAt;
+    if (
+      typeof publishedAt === "string" &&
+      Number.isFinite(Date.parse(publishedAt)) &&
+      Date.now() - Date.parse(publishedAt) > ARTICLE_RETENTION_MS
+    ) {
+      continue;
+    }
+    const key = cachedArticleKey(candidate);
+    if (!merged.has(key)) merged.set(key, candidate);
+  }
+  return [...merged.values()]
+    .sort((left, right) => {
+      const leftDate =
+        typeof left.publishedAt === "string"
+          ? Date.parse(left.publishedAt)
+          : 0;
+      const rightDate =
+        typeof right.publishedAt === "string"
+          ? Date.parse(right.publishedAt)
+          : 0;
+      return rightDate - leftDate;
+    })
+    .slice(0, limit);
+}
+
+function mergeCachedPayloads(freshText: string, storedText: string) {
+  try {
+    const fresh = JSON.parse(freshText) as unknown;
+    const stored = JSON.parse(storedText) as unknown;
+    if (!isJsonRecord(fresh) || !isJsonRecord(stored)) return freshText;
+
+    if (fresh.scope === "map") {
+      const storedCountries = new Map<string, JsonRecord>();
+      for (const country of Array.isArray(stored.countries)
+        ? stored.countries
+        : []) {
+        if (
+          isJsonRecord(country) &&
+          typeof country.countryName === "string"
+        ) {
+          storedCountries.set(country.countryName, country);
+        }
+      }
+      const countries = (Array.isArray(fresh.countries)
+        ? fresh.countries
+        : []
+      ).flatMap((country) => {
+        if (
+          !isJsonRecord(country) ||
+          typeof country.countryName !== "string"
+        ) {
+          return [];
+        }
+        const previous = storedCountries.get(country.countryName);
+        return [
+          {
+            ...previous,
+            ...country,
+            articles: mergeCachedArticles(
+              country.articles,
+              previous?.articles,
+              32,
+            ),
+          },
+        ];
+      });
+      return JSON.stringify({ ...stored, ...fresh, countries });
+    }
+
+    const limit =
+      fresh.scope === "global" ? 700 : fresh.scope === "event" ? 40 : 180;
+    return JSON.stringify({
+      ...stored,
+      ...fresh,
+      articles: mergeCachedArticles(
+        fresh.articles,
+        stored.articles,
+        limit,
+      ),
+    });
+  } catch {
+    return freshText;
+  }
+}
 
 function normalizedLiveCacheKey(request: Request) {
   const url = new URL(request.url);
   url.hash = "";
   url.searchParams.delete("release");
+  url.searchParams.set("__wp_cache", "4");
   url.searchParams.sort();
   return new Request(url.toString(), { method: "GET" });
 }
@@ -57,8 +170,21 @@ async function storeLiveResponse(
   db?: D1Database,
 ) {
   if (!response.ok) return;
-  const payload = await response.text();
+  let payload = await response.text();
   const cachedAt = Date.now();
+  if (db) {
+    try {
+      const stored = await readStoredNewsFeed(db, cacheKey.url);
+      if (stored) payload = mergeCachedPayloads(payload, stored.payload);
+    } catch (error) {
+      console.warn(
+        JSON.stringify({
+          event: "news_persistent_cache_merge_failed",
+          error: error instanceof Error ? error.message : "unknown error",
+        }),
+      );
+    }
+  }
   const headers = new Headers(response.headers);
   headers.set(
     "Cache-Control",

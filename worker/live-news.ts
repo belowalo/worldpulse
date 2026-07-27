@@ -97,6 +97,27 @@ const GENERIC_OCCURRENCE_TOKENS = new Set([
   "victim",
 ]);
 
+async function mapWithConcurrency<T, R>(
+  items: T[],
+  concurrency: number,
+  operation: (item: T) => Promise<R>,
+) {
+  const results = new Array<R>(items.length);
+  let nextIndex = 0;
+  const workers = Array.from(
+    { length: Math.min(concurrency, items.length) },
+    async () => {
+      while (nextIndex < items.length) {
+        const index = nextIndex;
+        nextIndex += 1;
+        results[index] = await operation(items[index]);
+      }
+    },
+  );
+  await Promise.all(workers);
+  return results;
+}
+
 function decodeXml(value: string) {
   return value
     .replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g, "$1")
@@ -600,9 +621,9 @@ function providersForRequest(
     return [...CORE_PROVIDERS, GDELT_PROVIDER, GOOGLE_WORLD_PROVIDER];
   }
   return [
+    ...countryGoogleProviders(countryName, requestedRegion),
     ...CORE_PROVIDERS,
     GDELT_PROVIDER,
-    ...countryGoogleProviders(countryName, requestedRegion),
   ];
 }
 
@@ -869,10 +890,10 @@ export async function handleLiveNews(
       );
     }
     const generatedAt = new Date().toISOString();
-    const countries = await Promise.all(
-      requestedCountries.map((country) =>
-        fetchMapCountry(country, fetchImpl),
-      ),
+    const countries = await mapWithConcurrency(
+      requestedCountries,
+      1,
+      (country) => fetchMapCountry(country, fetchImpl),
     );
     return json(
       {
@@ -938,10 +959,11 @@ export async function handleLiveNews(
           requestedRegion,
         )
       : providersForRequest(scope, countryName, requestedRegion);
-  let results = await Promise.all(
-    providers.map((provider) =>
+  let results = await mapWithConcurrency(
+    providers,
+    6,
+    (provider) =>
       fetchProvider(provider, scope, countryName, terms, fetchImpl),
-    ),
   );
   if (scope === "country") {
     const relevantResults = countryRelevantResults(results, terms);
