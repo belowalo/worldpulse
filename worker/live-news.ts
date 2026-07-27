@@ -783,7 +783,7 @@ function countryRelevantResults(
   return results.map((result) => ({
     ...result,
     articles: result.articles.filter((article) =>
-      articleMatchesCountry(article, terms),
+      articleHeadlineMatchesCountry(article, terms),
     ),
   }));
 }
