@@ -3,8 +3,10 @@ import { resolve } from "node:path";
 
 const projectRoot = resolve(import.meta.dirname, "..");
 const baseUrl = process.env.WORLDPULSE_SEED_ORIGIN ?? "http://localhost:4318";
-const seedBatchSize = 5;
-const maxArticlesPerCountry = 32;
+const summaryBatchSize = 5;
+const maxArticlesPerCountry = 1;
+const outputPath = resolve(projectRoot, "public/map-news-summary.json");
+
 const geojson = JSON.parse(
   await readFile(resolve(projectRoot, "public/countries.geojson"), "utf8"),
 );
@@ -24,15 +26,15 @@ async function fetchCountries(names) {
     `${baseUrl}/api/live-news?${parameters.toString()}`,
   );
   if (!response.ok) {
-    throw new Error(`Map preload returned HTTP ${response.status}.`);
+    throw new Error(`Map summary request returned HTTP ${response.status}.`);
   }
   const payload = await response.json();
   return payload.countries;
 }
 
 const countryResults = new Map();
-for (let index = 0; index < countryNames.length; index += seedBatchSize) {
-  const batch = countryNames.slice(index, index + seedBatchSize);
+for (let index = 0; index < countryNames.length; index += summaryBatchSize) {
+  const batch = countryNames.slice(index, index + summaryBatchSize);
   const results = await fetchCountries(batch);
   for (const result of results) countryResults.set(result.countryName, result);
   await wait(250);
@@ -74,12 +76,12 @@ const output = {
   scope: "map",
   generatedAt,
   refreshAfterSeconds: 600,
-  provider: "WorldPulse preloaded local-news snapshot",
+  provider: "WorldPulse rolling map summary",
   countries,
 };
 
 await writeFile(
-  resolve(projectRoot, "public/map-news-seed.json"),
+  outputPath,
   `${JSON.stringify(output)}\n`,
   "utf8",
 );

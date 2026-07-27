@@ -124,7 +124,7 @@ describe("WorldPulse interactions", () => {
           ],
         });
       }
-      if (url === "/map-news-seed.json") {
+      if (url === "/map-news-summary.json") {
         return Response.json({
           scope: "map",
           generatedAt: "2026-07-25T00:00:00.000Z",
@@ -191,7 +191,7 @@ describe("WorldPulse interactions", () => {
           ],
         });
       }
-      if (url === "/map-news-seed.json") {
+      if (url === "/map-news-summary.json") {
         return Response.json({
           scope: "map",
           generatedAt: "2026-07-25T00:00:00.000Z",
@@ -289,7 +289,7 @@ describe("WorldPulse interactions", () => {
           features: [{ id: "124", properties: { name: "Canada" } }],
         });
       }
-      if (url === "/map-news-seed.json") {
+      if (url === "/map-news-summary.json") {
         return Response.json({
           scope: "map",
           generatedAt: "2026-07-25T00:00:00.000Z",
@@ -418,7 +418,7 @@ describe("WorldPulse interactions", () => {
           features: [{ id: "124", properties: { name: "Canada" } }],
         });
       }
-      if (url === "/map-news-seed.json" || url.includes("scope=map")) {
+      if (url === "/map-news-summary.json" || url.includes("scope=map")) {
         return Response.json({
           scope: "map",
           generatedAt: "2026-07-25T23:30:00.000Z",
@@ -471,7 +471,7 @@ describe("WorldPulse interactions", () => {
     render(<WorldPulseApp MapComponent={TestMap} />);
 
     const countryHeading = await screen.findByRole("heading", {
-      name: globalHeadline,
+      name: localHeadline,
     });
     const countryCard = countryHeading.closest("article");
     expect(countryCard).not.toBeNull();
@@ -495,9 +495,35 @@ describe("WorldPulse interactions", () => {
     expect(within(globalCard!).getByText(countryMix ?? "")).toBeInTheDocument();
   });
 
-  it("filters the visible events by search", () => {
-    render(<WorldPulseApp liveUpdates={false} />);
-    fireEvent.click(screen.getByRole("button", { name: "Global feed" }));
+  it("filters the visible events by search", async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === "/countries.geojson") {
+        return Response.json({ features: [] });
+      }
+      return Response.json({
+        countryName: "Canada",
+        scope: "country",
+        generatedAt: "2026-07-25T00:00:00.000Z",
+        refreshAfterSeconds: 600,
+        provider: "Test local index",
+        articles: [
+          {
+            id: "canada-trade",
+            title: "Canada signs a new international trade agreement",
+            url: "https://publisher.example/canada-trade",
+            publisherName: "Test Publisher",
+            publisherUrl: "https://publisher.example/",
+            publishedAt: "2026-07-25T00:00:00.000Z",
+          },
+        ],
+      });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    render(<WorldPulseApp MapComponent={TestMap} />);
+    await screen.findByRole("heading", {
+      name: "Canada signs a new international trade agreement",
+    });
     fireEvent.change(screen.getByRole("searchbox", { name: "Search news" }), {
       target: { value: "vaccine" },
     });
@@ -518,7 +544,7 @@ describe("WorldPulse interactions", () => {
     ).not.toBeInTheDocument();
   });
 
-  it("loads the global index and only the selected country's local index at startup", async () => {
+  it("loads only the selected country at startup and defers global news until opened", async () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input);
       if (url === "/countries.geojson") {
@@ -548,7 +574,9 @@ describe("WorldPulse interactions", () => {
     render(<WorldPulseApp MapComponent={TestMap} />);
 
     await waitFor(() =>
-      expect(fetchMock).toHaveBeenCalledWith("/api/live-news?scope=global"),
+      expect(fetchMock).toHaveBeenCalledWith(
+        "/api/live-news?country=Canada&iso2=CA",
+      ),
     );
     const requestedUrls = fetchMock.mock.calls.map(([input]) => String(input));
     const countryRequests = requestedUrls.filter((url) =>
@@ -557,6 +585,12 @@ describe("WorldPulse interactions", () => {
     expect(countryRequests).toEqual([
       "/api/live-news?country=Canada&iso2=CA",
     ]);
+    expect(requestedUrls).not.toContain("/api/live-news?scope=global");
+
+    fireEvent.click(screen.getByRole("button", { name: "Global feed" }));
+    await waitFor(() =>
+      expect(fetchMock).toHaveBeenCalledWith("/api/live-news?scope=global"),
+    );
   });
 
   it("retries a failed country feed without calling the global endpoint", async () => {
@@ -749,7 +783,7 @@ describe("WorldPulse interactions", () => {
           ],
         });
       }
-      if (url === "/map-news-seed.json") {
+      if (url === "/map-news-summary.json") {
         return Response.json({
           scope: "map",
           generatedAt: "2026-07-25T00:00:00.000Z",
@@ -818,7 +852,7 @@ describe("WorldPulse interactions", () => {
     vi.stubGlobal("fetch", fetchMock);
 
     render(<WorldPulseApp MapComponent={TestMap} />);
-    await screen.findByText(/2\/2 country snapshots ready/);
+    await screen.findByText(/2\/2 map signals ready/);
     fireEvent.click(
       screen.getByRole("button", { name: "Select Egypt on map" }),
     );
@@ -854,7 +888,7 @@ describe("WorldPulse interactions", () => {
           ],
         });
       }
-      if (url === "/map-news-seed.json" || url.includes("scope=map")) {
+      if (url === "/map-news-summary.json" || url.includes("scope=map")) {
         return Response.json({
           scope: "map",
           generatedAt: "2026-07-25T00:00:00.000Z",
@@ -896,7 +930,7 @@ describe("WorldPulse interactions", () => {
 
     await waitFor(() =>
       expect(
-        screen.getByText(/2\/2 country snapshots ready/),
+        screen.getByText(/2\/2 map signals ready/),
       ).toBeInTheDocument(),
     );
     expect(screen.getByTestId("countries-with-news")).toHaveTextContent("2");
@@ -910,6 +944,15 @@ describe("WorldPulse interactions", () => {
     expect(
       screen.getAllByText("Culture and entertainment").length,
     ).toBeGreaterThan(0);
+    await waitFor(
+      () =>
+        expect(
+          fetchMock.mock.calls.some(([input]) =>
+            String(input).includes("scope=map"),
+          ),
+        ).toBe(true),
+      { timeout: 3_000 },
+    );
   });
 
   it("gives every real map country a categorized top event before a click", async () => {
@@ -917,12 +960,12 @@ describe("WorldPulse interactions", () => {
       readFileSync(resolve("public/countries.geojson"), "utf8"),
     );
     const mapSnapshot = JSON.parse(
-      readFileSync(resolve("public/map-news-seed.json"), "utf8"),
+      readFileSync(resolve("public/map-news-summary.json"), "utf8"),
     );
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input);
       if (url === "/countries.geojson") return Response.json(geojson);
-      if (url === "/map-news-seed.json" || url.includes("scope=map")) {
+      if (url === "/map-news-summary.json" || url.includes("scope=map")) {
         return Response.json(mapSnapshot);
       }
       const countryName = url.includes("country=Canada") ? "Canada" : null;
@@ -946,7 +989,7 @@ describe("WorldPulse interactions", () => {
       { timeout: 15_000 },
     );
     expect(
-      screen.getByText(/215\/215 country snapshots ready/),
+      screen.getByText(/215\/215 map signals ready/),
     ).toBeInTheDocument();
   }, 20_000);
 });

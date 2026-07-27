@@ -879,7 +879,7 @@ export async function handleLiveNews(
         scope: "map",
         generatedAt,
         refreshAfterSeconds: CACHE_SECONDS,
-        provider: "Local news country preload",
+        provider: "Rolling local-news country scan",
         countries,
       },
       200,

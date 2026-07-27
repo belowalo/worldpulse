@@ -261,12 +261,12 @@ describe("worker live-news providers", () => {
     expect(unresolved).toEqual([]);
   });
 
-  it("ships a preloaded headline index for every mapped country", () => {
+  it("ships a lightweight headline summary for every mapped country", () => {
     const geojson = JSON.parse(
       readFileSync(resolve("public/countries.geojson"), "utf8"),
     ) as { features: Array<{ properties: { name: string } }> };
     const snapshot = JSON.parse(
-      readFileSync(resolve("public/map-news-seed.json"), "utf8"),
+      readFileSync(resolve("public/map-news-summary.json"), "utf8"),
     ) as {
       countries: Array<{
         countryName: string;
@@ -285,7 +285,7 @@ describe("worker live-news providers", () => {
     expect(new Set(snapshotCountries).size).toBe(mapCountries.length);
     expect(
       snapshot.countries.every(
-        (country) => country.available && country.articles.length > 0,
+        (country) => country.available && country.articles.length === 1,
       ),
     ).toBe(true);
   });

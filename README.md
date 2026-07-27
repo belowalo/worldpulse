@@ -2,7 +2,7 @@
 
 WorldPulse is a production-quality MVP for exploring recent world news through an interactive map. Each country's hue represents the category of its highest-impact active event, while intensity represents a deterministic 0–100 importance estimate. Clicking any mapped country loads current RSS-indexed headlines, publisher links, timestamps, geographic scope, and a plain-language score explanation.
 
-The hosted site refreshes global and selected-country feeds every ten minutes. It reads headline-level public RSS metadata from Google News and never scrapes or republishes article bodies. The deterministic seed dataset remains available for local backend development and tests; it is not presented as live reporting.
+The hosted site opens with a compact, real-headline map summary, fetches the selected country live, loads the global feed only when requested, and refreshes country signals in small background batches. It reads headline-level public RSS metadata and never scrapes or republishes article bodies. Fresh results are cached at the edge and in the hosted database so later visits do not repeat slow upstream work.
 
 ## Screenshots
 
@@ -11,10 +11,11 @@ The deployed application is the preferred live preview. A social preview is avai
 ## Architecture
 
 - **Web:** Next.js 16, React 19, strict TypeScript, Tailwind CSS, MapLibre GL JS, and local country geometry.
-- **API:** FastAPI, Pydantic validation, SQLAlchemy 2, and automatically generated OpenAPI docs.
-- **Database:** PostgreSQL 17 with Alembic migrations. Articles, sources, events, and countries are normalized; many articles can belong to one event.
+- **Hosted news API:** A same-origin Cloudflare Worker endpoint queries public RSS indexes, validates and deduplicates articles, and returns country, global, map-summary, and event-coverage feeds.
+- **Hosted cache:** Cloudflare edge caching plus D1 persistence provides stale-while-refresh country feeds across sessions.
+- **Reference API:** FastAPI, Pydantic validation, SQLAlchemy 2, and PostgreSQL remain available for local full-stack development.
 - **Local orchestration:** Docker Compose starts PostgreSQL, migrates and seeds the API, then starts the web app with health checks.
-- **Hosted preview:** The web surface is Cloudflare Worker-compatible. A same-origin live-news endpoint normalizes public RSS metadata, while the Python API remains the reference local full-stack backend.
+- **Hosted preview:** The browser initially downloads one current map signal per country rather than the complete world article index. Full reporting is fetched when needed and the map is refreshed progressively without blocking interaction.
 
 The web app lives at the repository root to preserve the hosting runtime's required structure. `apps/api` contains the backend. See [architecture.md](docs/architecture.md) for details.
 
@@ -114,11 +115,11 @@ Scores are clamped to 0–100. Labels are `Major` (80–100), `Significant` (60�
 ## Responsible presentation
 
 - Every event links to its underlying attributed sources.
-- AI-assisted summaries are identified and are not presented as original reporting.
+- Automated metadata summaries are identified and are not presented as original reporting.
 - Demo copy avoids invented quotations and uses neutral language for political subjects.
 - Timestamps, source counts, geographic scope, and affected countries are retained.
 - Countries with less digital reporting or fewer accessible sources may appear less active.
-- Seed source URLs and stories are examples; a production ingestion pipeline must retain canonical URLs and source rights.
+- The map summary and live feeds retain canonical source links and publisher attribution.
 
 ## Current limitations
 
@@ -126,7 +127,7 @@ Scores are clamped to 0–100. Labels are `Major` (80–100), `Significant` (60�
 - Headlines are clustered heuristically; they are not reviewed by a human editor.
 - Country geometry is intentionally low-resolution for fast rendering.
 - No authentication, personalization, alerting, or editorial administration is included.
-- Event clustering and multilingual entity extraction are represented by interfaces, not production pipelines.
+- Event clustering and multilingual entity extraction remain heuristic rather than editorially reviewed.
 - Source prominence and country-significance inputs require editorial governance in a real deployment.
 
 ## Roadmap
@@ -134,7 +135,7 @@ Scores are clamped to 0–100. Labels are `Major` (80–100), `Significant` (60�
 1. Add licensed news APIs and additional publisher-provided RSS feeds.
 2. Cluster articles into events with multilingual embeddings and human-review tooling.
 3. Add multilingual summaries, names, and search.
-4. Connect the hosted web surface to the deployed FastAPI/PostgreSQL service with caching.
+4. Add scheduled ingestion independent of visitor traffic and editorial cache controls.
 5. Add ingestion observability, provenance audits, editorial overrides, and deployment automation.
 
 See [news-provider-interface.md](docs/news-provider-interface.md) for the integration boundary.

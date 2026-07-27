@@ -416,7 +416,7 @@ export function WorldMap({
             </>
           ) : (
             <p className="mt-2 text-xs text-[#8f9caf]">
-              No matching headline in the preloaded index.
+              No matching headline in the rolling map index.
             </p>
           )}
         </div>

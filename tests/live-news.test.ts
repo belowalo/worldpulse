@@ -136,9 +136,9 @@ describe("live news normalization", () => {
     );
   });
 
-  it("keeps Other as a narrow fallback in the real preloaded index", () => {
+  it("keeps Other as a narrow fallback in the real map summary", () => {
     const snapshot = JSON.parse(
-      readFileSync(resolve("public/map-news-seed.json"), "utf8"),
+      readFileSync(resolve("public/map-news-summary.json"), "utf8"),
     ) as MapNewsPayload;
     const titles = snapshot.countries.flatMap((country) =>
       country.articles.map((article) => article.title),
@@ -200,19 +200,9 @@ describe("live news normalization", () => {
       JSON.stringify(topCategoryCounts),
     ).toBeGreaterThanOrEqual(8);
 
-    const egypt = snapshot.countries.find(
-      (country) => country.countryName === "Egypt",
-    );
-    expect(egypt?.articles.length).toBeGreaterThanOrEqual(24);
-    const egyptTitles = egypt?.articles
-      .map((article) => article.title)
-      .join(" ");
-    expect(egyptTitles).toMatch(/detained|release/i);
-    expect(egyptTitles).toMatch(/petroleum|exports|tariff/i);
-    expect(egyptTitles).toMatch(/visa|ticketing|tourism|travel|تأشيرات/i);
     expect(
-      countryEvents[snapshot.countries.indexOf(egypt!)].length,
-    ).toBeGreaterThan(10);
+      snapshot.countries.every((country) => country.articles.length === 1),
+    ).toBe(true);
   }, 20_000);
 
   it("clusters related reporting and preserves publisher links", () => {

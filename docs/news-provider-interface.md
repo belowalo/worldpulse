@@ -47,6 +47,8 @@ Clustering must keep articles separate from events. Source count means independe
 
 ## Hosted live adapter
 
-The hosted Cloudflare Worker exposes `/api/live-news` for global or country-scoped queries. It reads public RSS headline metadata, retains publisher attribution and outbound article links, and applies ten-minute cache guidance. The browser clusters similar headlines, preserves each publisher as a separate article, and runs the same deterministic scoring model used elsewhere in the product.
+The hosted Cloudflare Worker exposes `/api/live-news` for global, country, map-batch, and event-coverage queries. It reads public RSS headline metadata, retains publisher attribution and outbound article links, and stores successful responses in both the edge cache and D1. The browser clusters similar headlines, preserves each publisher as a separate article, and runs the same deterministic scoring model used elsewhere in the product.
+
+The initial browser payload contains only one real headline per mapped country. Full country feeds are requested on selection, while five-country batches refresh map signals after the interface becomes interactive. Stale cached responses are returned immediately and refreshed server-side, avoiding a blank interface when an upstream feed is slow.
 
 This adapter does not fetch article bodies, bypass publisher access controls, or present feed metadata as original WorldPulse reporting. A future licensed provider can replace or supplement it without changing the map and panel contracts.

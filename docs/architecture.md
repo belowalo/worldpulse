@@ -9,10 +9,13 @@ Browser
   └─ Next.js web app
        ├─ MapLibre + local Natural Earth GeoJSON
        ├─ filters, country panel, methodology
-       ├─ live headline clustering and scoring
+       ├─ compact map summary + live headline clustering
        └─ same-origin Cloudflare Worker news endpoint
-             └─ public RSS metadata index
-             └─ FastAPI
+             ├─ public RSS metadata indexes
+             ├─ edge stale-while-refresh cache
+             ├─ D1 persistent feed cache
+             └─ optional local reference stack
+                  └─ FastAPI
                   ├─ query and serialization services
                   ├─ deterministic scoring module
                   ├─ NewsProvider interface
@@ -31,7 +34,7 @@ The web app is at the repository root because the deployable Sites runtime expec
 - `lib/seed-data.ts` retains deterministic data for backend development and tests.
 - `public/countries.geojson` is a local, deployment-safe country dataset derived from the ISC-licensed `geojson-world-map` package.
 
-The map canvas supports pointer navigation and direct country selection across all 215 geometries in the bundled dataset. Every country triggers a focused live query; countries without current matches show an explicit empty state and continue refreshing. The global feed infers country signals from current headline mentions so map colors improve as live metadata arrives.
+The map canvas supports pointer navigation and direct country selection across all 215 geometries in the bundled dataset. Startup loads one current headline per country, while the selected country receives a full focused query. Five-country background batches progressively refresh map signals, and the global feed remains deferred until the user requests it.
 
 ## API boundaries
 
@@ -48,10 +51,12 @@ FastAPI exposes OpenAPI documentation at `/docs` and its schema at `/openapi.jso
 
 Articles remain separate from events. An event can have many articles, each with one source. Events have a primary country and many affected countries through `event_countries`. This supports future clustering without inflating event importance from duplicate articles.
 
+The hosted worker also stores successful JSON feed snapshots in D1 by normalized request identity. Edge cache hits return immediately; records older than five minutes are served safely while the worker refreshes them in the background. The 24-hour persistent fallback keeps real attributed reporting visible during temporary upstream failures.
+
 ## Failure behavior
 
 The API validates pagination bounds and returns a consistent `{"error": ...}` envelope for HTTP and validation failures. Docker health checks gate dependent services. The web app includes route loading, empty-result, and recoverable error states.
 
 ## Deployment
 
-Docker Compose is the full local reference deployment. The hosted app packages the Next.js surface and a cached RSS-metadata proxy as a Cloudflare-compatible worker. Browser clients refresh every ten minutes; upstream failures produce recoverable error states without mislabeling seeded content as live.
+Docker Compose is the full local reference deployment. The hosted app packages the Next.js surface, rolling map summary, cached RSS-metadata proxy, and D1 migration as a Cloudflare-compatible worker. Full country feeds load only when needed; background map batches and ten-minute active-feed refreshes keep the interface current without blocking startup.
