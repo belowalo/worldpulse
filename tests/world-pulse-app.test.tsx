@@ -88,7 +88,7 @@ describe("WorldPulse interactions", () => {
     fireEvent.click(screen.getByRole("button", { name: "Global feed" }));
     expect(screen.getByTestId("selected-map-id")).toBeEmptyDOMElement();
 
-    fireEvent.click(screen.getByRole("button", { name: "Map view" }));
+    fireEvent.click(screen.getByRole("button", { name: "Country feed" }));
     expect(screen.getByTestId("selected-map-id")).toHaveTextContent("392");
   });
 
@@ -559,6 +559,89 @@ describe("WorldPulse interactions", () => {
     ]);
   });
 
+  it("retries a failed country feed without calling the global endpoint", async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === "/countries.geojson") {
+        return Response.json({ features: [] });
+      }
+      if (url.includes("country=Canada")) {
+        return new Response("Unavailable", { status: 503 });
+      }
+      return Response.json({
+        countryName: null,
+        scope: "global",
+        generatedAt: "2026-07-25T00:00:00.000Z",
+        refreshAfterSeconds: 600,
+        provider: "Test global index",
+        articles: [],
+      });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<WorldPulseApp MapComponent={TestMap} />);
+
+    expect(
+      await screen.findByRole("heading", { name: "Live feed unavailable" }),
+    ).toBeInTheDocument();
+    fetchMock.mockClear();
+    fireEvent.click(screen.getByRole("button", { name: "Try again" }));
+
+    await waitFor(() =>
+      expect(fetchMock).toHaveBeenCalledWith(
+        "/api/live-news?country=Canada&iso2=CA",
+      ),
+    );
+    expect(
+      fetchMock.mock.calls.some(([input]) =>
+        String(input).includes("scope=global"),
+      ),
+    ).toBe(false);
+  });
+
+  it("offers older indexed reporting when the default window is empty", async () => {
+    const oldHeadline = "Canada opens a historic northern research archive";
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === "/countries.geojson") {
+        return Response.json({ features: [] });
+      }
+      const countryName = url.includes("country=Canada") ? "Canada" : null;
+      return Response.json({
+        countryName,
+        scope: countryName ? "country" : "global",
+        generatedAt: "2026-07-25T00:00:00.000Z",
+        refreshAfterSeconds: 600,
+        provider: "Test live index",
+        articles: countryName
+          ? [
+              {
+                id: "canada-archive",
+                title: oldHeadline,
+                url: "https://publisher.example/canada-archive",
+                publisherName: "Archive Publisher",
+                publisherUrl: "https://publisher.example/",
+                publishedAt: "2026-07-01T00:00:00.000Z",
+              },
+            ]
+          : [],
+      });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<WorldPulseApp MapComponent={TestMap} />);
+
+    expect(
+      await screen.findByRole("heading", {
+        name: "No events in the last 7 days",
+      }),
+    ).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Show all indexed" }));
+    expect(
+      screen.getByRole("heading", { name: oldHeadline }),
+    ).toBeInTheDocument();
+  });
+
   it("loads country-local reporting when a country is selected on the map", async () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input);
@@ -735,7 +818,7 @@ describe("WorldPulse interactions", () => {
     vi.stubGlobal("fetch", fetchMock);
 
     render(<WorldPulseApp MapComponent={TestMap} />);
-    await screen.findByText(/2\/2 countries loaded/);
+    await screen.findByText(/2\/2 country snapshots ready/);
     fireEvent.click(
       screen.getByRole("button", { name: "Select Egypt on map" }),
     );
@@ -813,7 +896,7 @@ describe("WorldPulse interactions", () => {
 
     await waitFor(() =>
       expect(
-        screen.getByText(/2\/2 countries loaded/),
+        screen.getByText(/2\/2 country snapshots ready/),
       ).toBeInTheDocument(),
     );
     expect(screen.getByTestId("countries-with-news")).toHaveTextContent("2");
@@ -862,6 +945,8 @@ describe("WorldPulse interactions", () => {
       ),
       { timeout: 15_000 },
     );
-    expect(screen.getByText(/215\/215 countries loaded/)).toBeInTheDocument();
+    expect(
+      screen.getByText(/215\/215 country snapshots ready/),
+    ).toBeInTheDocument();
   }, 20_000);
 });

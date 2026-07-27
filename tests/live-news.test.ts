@@ -9,6 +9,7 @@ import {
   enrichEventWithCoverage,
   eventsDescribeSameOccurrence,
   mergeCanonicalEvents,
+  newsTextTokens,
 } from "@/lib/live-news";
 import {
   biasDistributionForArticles,
@@ -92,8 +93,29 @@ describe("live news normalization", () => {
     ["Researchers launch an artificial intelligence satellite", "Science and technology"],
     ["Forest conservation plan cuts carbon emissions", "Environment"],
     ["Oddly shaped garden bench becomes neighborhood curiosity", "Other"],
+    ["Wildfires spread across Spain during record heat", "Weather and disasters"],
+    ["Jersey Zoo geckos threatened by an invasive ant attack", "Environment"],
+    ["Xenophobic violence intensifies near the border", "Conflict and security"],
+    ["Police capture an international fugitive", "Crime and justice"],
+    ["Authorities uncover a North Korean hacking ring", "Crime and justice"],
+    ["Island athletes win at the Commonwealth Games", "Sports"],
+    ["Antares red star appears beside the Moon", "Science and technology"],
+    ["Temps are predicted to hit 106 in Egypt this week", "Weather and disasters"],
+    ["Egypt petroleum exports rise as refinery output surges", "Economy"],
+    ["New steel quotas will weaken competition", "Economy"],
+    ["Qatar Airways adds a new Auckland route", "Travel and transport"],
+    [
+      "South Africa warns against searches of migrants' documents",
+      "Society and education",
+    ],
   ] as const)("classifies %s as %s", (headline, expected) => {
     expect(classifyLiveHeadline(headline)).toBe(expected);
+  });
+
+  it("normalizes common inflections consistently", () => {
+    expect(newsTextTokens("wildfires athletes prices warnings")).toEqual(
+      expect.arrayContaining(["wildfire", "athlete", "price", "warning"]),
+    );
   });
 
   it("keeps Other as a narrow fallback in the real preloaded index", () => {
@@ -167,9 +189,9 @@ describe("live news normalization", () => {
     const egyptTitles = egypt?.articles
       .map((article) => article.title)
       .join(" ");
-    expect(egyptTitles).toMatch(/digital visa/i);
     expect(egyptTitles).toMatch(/detained|release/i);
-    expect(egyptTitles).toMatch(/Egypt-Gaza border tunnels/i);
+    expect(egyptTitles).toMatch(/petroleum|exports|tariff/i);
+    expect(egyptTitles).toMatch(/visa|ticketing|tourism|travel|تأشيرات/i);
     expect(
       countryEvents[snapshot.countries.indexOf(egypt!)].length,
     ).toBeGreaterThan(10);
@@ -352,6 +374,23 @@ describe("live news normalization", () => {
     );
   });
 
+  it("keeps canonical sources when broader coverage returns only new publishers", () => {
+    const [event] = buildLiveEvents(
+      { ...payload, articles: [payload.articles[0]] },
+      { name: "Canada", iso2: "CA" },
+    );
+    const expanded = enrichEventWithCoverage(event, {
+      ...payload,
+      scope: "event",
+      articles: [payload.articles[1]],
+    });
+
+    expect(expanded.scoringInput.independentSourceCount).toBe(2);
+    expect(
+      expanded.articles.map((article) => article.source.publisherName),
+    ).toEqual(expect.arrayContaining(["Reuters", "Associated Press"]));
+  });
+
   it("builds a Ground News publisher mix and excludes unrated outlets", () => {
     const [event] = buildLiveEvents(payload, {
       name: "Canada",
@@ -383,6 +422,19 @@ describe("live news normalization", () => {
       bucket: "right",
       label: "Lean Right",
     });
+    expect(publisherBiasRating("Fox News")).toMatchObject({
+      bucket: "right",
+      label: "Right",
+    });
+    expect(publisherBiasRating("Washington Examiner")).toMatchObject({
+      bucket: "right",
+      label: "Lean Right",
+    });
+    expect(publisherBiasRating("National Review")).toMatchObject({
+      bucket: "right",
+      label: "Right",
+    });
+    expect(publisherBiasRating("ABC News Australia")).toBeNull();
     expect(publisherBiasRating("Unknown Local Desk")).toBeNull();
     expect(distribution).toMatchObject({
       left: 1,

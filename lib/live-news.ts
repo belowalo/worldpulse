@@ -63,8 +63,12 @@ const CATEGORY_TERMS: Array<[Category, string[]]> = [
       "terror",
       "troops",
       "uprising",
+      "violence",
+      "violent",
       "war",
       "warship",
+      "xenophobia",
+      "xenophobic",
       "pirate",
       "ataque",
       "conflit",
@@ -82,6 +86,8 @@ const CATEGORY_TERMS: Array<[Category, string[]]> = [
     [
       "arrest",
       "arrested",
+      "capture",
+      "captured",
       "cartel",
       "charge",
       "charges",
@@ -91,7 +97,13 @@ const CATEGORY_TERMS: Array<[Category, string[]]> = [
       "crime",
       "criminal",
       "fraud",
+      "fugitive",
+      "hack",
+      "hacker",
+      "hacking",
       "homicide",
+      "investigation",
+      "investigate",
       "judge",
       "justice",
       "lawsuit",
@@ -99,6 +111,7 @@ const CATEGORY_TERMS: Array<[Category, string[]]> = [
       "police",
       "prison",
       "prosecutor",
+      "probe",
       "robbery",
       "sentence",
       "shooting",
@@ -134,6 +147,7 @@ const CATEGORY_TERMS: Array<[Category, string[]]> = [
       "snow",
       "storm",
       "temperature",
+      "temps",
       "tornado",
       "tsunami",
       "typhoon",
@@ -186,11 +200,14 @@ const CATEGORY_TERMS: Array<[Category, string[]]> = [
       "ai ",
       "artificial intelligence",
       "app",
+      "astronomy",
+      "astronomical",
       "chip",
       "cyber",
       "data",
       "digital",
       "internet",
+      "moon",
       "research",
       "robot",
       "satellite",
@@ -334,6 +351,7 @@ const CATEGORY_TERMS: Array<[Category, string[]]> = [
   [
     "Environment",
     [
+      "ant",
       "biodiversity",
       "carbon",
       "climate",
@@ -342,6 +360,10 @@ const CATEGORY_TERMS: Array<[Category, string[]]> = [
       "emissions",
       "environment",
       "forest",
+      "gecko",
+      "habitat",
+      "insect",
+      "invasive",
       "natural resources",
       "nature",
       "pollution",
@@ -362,6 +384,7 @@ const CATEGORY_TERMS: Array<[Category, string[]]> = [
       "airline",
       "airport",
       "aviation",
+      "airways",
       "bridge",
       "bus",
       "car",
@@ -427,17 +450,25 @@ const CATEGORY_TERMS: Array<[Category, string[]]> = [
       "deal",
       "economy",
       "energy",
+      "export",
+      "exports",
       "finance",
       "gas",
       "housing",
       "industry",
+      "import",
+      "imports",
       "inflation",
       "investment",
       "jobs",
       "market",
       "mortgage",
       "oil",
+      "petroleum",
       "prices",
+      "quota",
+      "quotas",
+      "refinery",
       "revenue",
       "sales",
       "tax",
@@ -609,6 +640,9 @@ const PROMINENT_PUBLISHERS = new Map<string, number>([
   ["un news", 81],
   ["euronews", 80],
   ["sky news", 80],
+  ["fox news", 80],
+  ["washington examiner", 77],
+  ["national review", 76],
   ["fox weather", 79],
 ]);
 
@@ -699,17 +733,31 @@ function stableId(value: string) {
 }
 
 function stemToken(token: string) {
-  if (token.length > 7 && token.endsWith("ies")) {
+  if (token === "movies") return "movie";
+  if (token === "warning") return token;
+  if (token === "series" || token === "species") return token;
+  if (token.length > 5 && token.endsWith("ies")) {
     return `${token.slice(0, -3)}y`;
   }
   if (token.length > 6 && token.endsWith("ing")) return token.slice(0, -3);
   if (token.length > 6 && token.endsWith("ed")) return token.slice(0, -2);
-  if (token.length > 6 && token.endsWith("es")) return token.slice(0, -2);
-  if (token.length > 5 && token.endsWith("s")) return token.slice(0, -1);
+  if (
+    token.length > 6 &&
+    /(sses|shes|ches|xes|zes|oes)$/.test(token)
+  ) {
+    return token.slice(0, -2);
+  }
+  if (
+    token.length > 5 &&
+    token.endsWith("s") &&
+    !/(is|ss|us)$/.test(token)
+  ) {
+    return token.slice(0, -1);
+  }
   return token;
 }
 
-function textTokens(value: string) {
+export function newsTextTokens(value: string) {
   const prepared = value
     .toLowerCase()
     .replace(/\bu\.?\s*s\.?\b/g, " usa ")
@@ -755,15 +803,21 @@ function hasSharedTitlePhrase(left: string[], right: string[]) {
 }
 
 function articleSimilarity(left: LiveArticle, right: LiveArticle) {
-  const leftTitle = textTokens(left.title);
-  const rightTitle = textTokens(right.title);
+  const leftTitle = newsTextTokens(left.title);
+  const rightTitle = newsTextTokens(right.title);
   const title = tokenMetrics(leftTitle, rightTitle);
-  const leftContext = textTokens(`${left.title} ${left.description ?? ""}`);
-  const rightContext = textTokens(`${right.title} ${right.description ?? ""}`);
+  const leftContext = newsTextTokens(
+    `${left.title} ${left.description ?? ""}`,
+  );
+  const rightContext = newsTextTokens(
+    `${right.title} ${right.description ?? ""}`,
+  );
   const context = tokenMetrics(leftContext, rightContext);
   const sharedPhrase = hasSharedTitlePhrase(leftTitle, rightTitle);
 
-  if (sharedPhrase && title.common >= 2) return 1;
+  // A two-word place name such as "South Africa" is not enough to prove that
+  // two reports describe the same occurrence. Require another shared signal.
+  if (sharedPhrase && title.common >= 3) return 1;
   if (title.common >= 3 && title.containment >= 0.38) {
     return title.containment;
   }
@@ -781,7 +835,7 @@ function articleSimilarity(left: LiveArticle, right: LiveArticle) {
 }
 
 function normalizedHeadline(value: string) {
-  return textTokens(value).sort().join(" ");
+  return newsTextTokens(value).sort().join(" ");
 }
 
 export function eventsDescribeSameOccurrence(left: Event, right: Event) {
@@ -839,7 +893,7 @@ export function eventsDescribeSameOccurrence(left: Event, right: Event) {
 
 export function classifyLiveHeadline(title: string): Category {
   const normalized = title.normalize("NFKC").toLowerCase();
-  const tokens = new Set(textTokens(normalized));
+  const tokens = new Set(newsTextTokens(normalized));
   let bestCategory: Category = "Other";
   let bestScore = 0;
 
@@ -1226,10 +1280,8 @@ export function enrichEventWithCoverage(
   payload: LiveNewsPayload,
 ): Event {
   const combined = new Map<string, Article>();
-  if (!payload.articles.length) {
-    for (const article of event.articles) {
-      combined.set(article.source.id, article);
-    }
+  for (const article of event.articles) {
+    combined.set(article.source.id, article);
   }
   for (const liveArticle of payload.articles) {
     const source = createSource(liveArticle);

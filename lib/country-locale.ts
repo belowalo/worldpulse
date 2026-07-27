@@ -36,6 +36,7 @@ const COUNTRY_CODE_OVERRIDES: Record<string, string> = {
   syria: "SY",
   taiwan: "TW",
   tanzania: "TZ",
+  "timor-leste": "TL",
   "trinidad and tobago": "TT",
   turkey: "TR",
   "turks and caicos islands": "TC",
@@ -51,7 +52,6 @@ const LANGUAGE_GROUPS: Array<[string, string[]]> = [
       "BF",
       "BI",
       "BJ",
-      "CA",
       "CD",
       "CF",
       "CG",
@@ -102,7 +102,7 @@ const LANGUAGE_GROUPS: Array<[string, string[]]> = [
       "VE",
     ],
   ],
-  ["pt", ["AO", "BR", "CV", "GW", "MZ", "PT", "ST"]],
+  ["pt", ["AO", "BR", "CV", "GW", "MZ", "PT", "ST", "TL"]],
   [
     "ar",
     [

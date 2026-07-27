@@ -54,6 +54,27 @@ const makeEvent = (headline: string, primaryCountry = "CN") =>
   }) satisfies Event;
 
 describe("multi-country map links", () => {
+  it("recognizes local names used for remote territories", () => {
+    expect(
+      textMatchesCountry(
+        "Conservation work continues across the Chagos Archipelago",
+        countrySearchTerms("Br. Indian Ocean Ter."),
+      ),
+    ).toBe(true);
+    expect(
+      textMatchesCountry(
+        "Researchers return to Kerguelen for a new survey",
+        countrySearchTerms("Fr. S. Antarctic Lands"),
+      ),
+    ).toBe(true);
+    expect(
+      textMatchesCountry(
+        "Ascension Island updates its marine protection plan",
+        countrySearchTerms("Saint Helena"),
+      ),
+    ).toBe(true);
+  });
+
   it("recognizes the countries named in an international event", () => {
     const event = makeEvent(
       "China, Philippine coastguard vessels clash in South China Sea",

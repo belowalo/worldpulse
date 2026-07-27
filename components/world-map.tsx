@@ -137,14 +137,14 @@ export function WorldMap({
 
     map.addControl(
       new maplibregl.NavigationControl({ showCompass: false }),
-      "bottom-left",
+      "top-right",
     );
     map.addControl(
       new maplibregl.AttributionControl({
         compact: true,
         customAttribution: "Country geometry: geojson-world-map",
       }),
-      "bottom-right",
+      "bottom-left",
     );
     const resizeObserver = new ResizeObserver(() => map.resize());
     resizeObserver.observe(containerRef.current);
@@ -300,9 +300,15 @@ export function WorldMap({
     map.on("mousemove", FILL_LAYER, (event: MapMouseEvent) => {
       const country = countryAt(event);
       map.getCanvas().style.cursor = country ? "pointer" : "";
+      const mapWidth = containerRef.current?.clientWidth ?? 720;
+      const mapHeight = containerRef.current?.clientHeight ?? 520;
       setHovered(
         country
-          ? { x: event.point.x, y: event.point.y, country }
+          ? {
+              x: Math.max(12, Math.min(event.point.x + 14, mapWidth - 272)),
+              y: Math.max(96, Math.min(event.point.y - 24, mapHeight - 150)),
+              country,
+            }
           : null,
       );
     });
@@ -378,7 +384,7 @@ export function WorldMap({
           Hue shows the topic. Intensity estimates impact.
         </p>
       </div>
-      <div className="pointer-events-none absolute right-4 top-4 rounded-full border border-[#354258] bg-[#101827]/90 px-3 py-1.5 font-mono text-[10px] uppercase tracking-[0.16em] text-[#aab5c5]">
+      <div className="pointer-events-none absolute left-5 top-28 z-10 max-w-[calc(100%-2.5rem)] truncate rounded-full border border-[#354258] bg-[#101827]/90 px-3 py-1.5 font-mono text-[10px] uppercase tracking-[0.16em] text-[#aab5c5] sm:left-auto sm:right-4 sm:top-4 sm:max-w-[360px]">
         {statusLabel}
       </div>
 
@@ -386,8 +392,8 @@ export function WorldMap({
         <div
           className="pointer-events-none absolute z-20 w-64 rounded-xl border border-[#39475d] bg-[#0d1522]/95 p-3 shadow-2xl"
           style={{
-            left: Math.min(hovered.x + 14, 640),
-            top: Math.max(90, hovered.y - 24),
+            left: hovered.x,
+            top: hovered.y,
           }}
         >
           <div className="flex items-center justify-between gap-3">

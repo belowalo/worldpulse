@@ -84,6 +84,16 @@ select:focus-visible {
   color: #b6c3d6;
 }
 
+.maplibregl-ctrl-top-right {
+  right: 0.5rem;
+  top: 3.5rem;
+}
+
+.maplibregl-ctrl-bottom-left {
+  bottom: 6.5rem;
+  left: 0.5rem;
+}
+
 .scrollbar-thin {
   scrollbar-color: #344258 transparent;
   scrollbar-width: thin;

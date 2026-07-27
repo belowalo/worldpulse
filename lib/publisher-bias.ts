@@ -106,6 +106,30 @@ const GROUND_RATINGS: Array<{
     },
   },
   {
+    aliases: ["fox news"],
+    rating: {
+      bucket: "right",
+      label: "Right",
+      groundNewsUrl: "https://ground.news/interest/fox-news_a44aba",
+    },
+  },
+  {
+    aliases: ["washington examiner"],
+    rating: {
+      bucket: "right",
+      label: "Lean Right",
+      groundNewsUrl: "https://ground.news/interest/washington-examiner",
+    },
+  },
+  {
+    aliases: ["national review"],
+    rating: {
+      bucket: "right",
+      label: "Right",
+      groundNewsUrl: "https://ground.news/interest/national-review",
+    },
+  },
+  {
     aliases: ["al jazeera", "al jazeera english"],
     rating: {
       bucket: "left",
@@ -222,12 +246,7 @@ export function publisherBiasRating(
 ): PublisherBiasRating | null {
   const normalized = canonicalPublisherKey(publisherName);
   const match = GROUND_RATINGS.find(({ aliases }) =>
-    aliases.some(
-      (alias) =>
-        normalized === alias ||
-        normalized.startsWith(`${alias} `) ||
-        normalized.endsWith(` ${alias}`),
-    ),
+    aliases.some((alias) => normalized === canonicalPublisherKey(alias)),
   );
   return match?.rating ?? null;
 }

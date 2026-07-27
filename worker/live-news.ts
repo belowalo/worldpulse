@@ -4,6 +4,7 @@ import {
   textMatchesCountry,
 } from "../lib/country-terms";
 import { googleNewsLocaleForCountry } from "../lib/country-locale";
+import { newsTextTokens } from "../lib/live-news";
 
 export interface FeedArticle {
   id: string;
@@ -73,30 +74,12 @@ const EVENT_STOP_WORDS = new Set([
   "under",
   "over",
   "says",
-  "stretches",
+  "stretch",
   "the",
   "their",
   "this",
   "that",
   "with",
-]);
-
-const EVENT_TOKEN_ALIASES = new Map<string, string>([
-  ["advisories", "warning"],
-  ["advisory", "warning"],
-  ["alerts", "warning"],
-  ["alert", "warning"],
-  ["americans", "usa"],
-  ["american", "usa"],
-  ["heatwave", "heat"],
-  ["hot", "heat"],
-  ["scorching", "heat"],
-  ["sweltering", "heat"],
-  ["temperatures", "heat"],
-  ["temperature", "heat"],
-  ["warnings", "warning"],
-  ["unitedstates", "usa"],
-  ["us", "usa"],
 ]);
 
 function decodeXml(value: string) {
@@ -486,18 +469,9 @@ function countryGoogleProviders(countryName: string, requestedRegion: string) {
 }
 
 function eventTokens(value: string) {
-  const prepared = value
-    .normalize("NFKC")
-    .toLowerCase()
-    .replace(/\bunited\s+states\b/gu, " unitedstates ");
-  return [
-    ...new Set(
-      prepared
-        .match(/[\p{L}\p{N}]{2,}/gu)
-        ?.filter((token) => !EVENT_STOP_WORDS.has(token))
-        .map((token) => EVENT_TOKEN_ALIASES.get(token) ?? token) ?? [],
-    ),
-  ];
+  return newsTextTokens(value).filter(
+    (token) => !EVENT_STOP_WORDS.has(token),
+  );
 }
 
 export function articleMatchesEvent(
@@ -627,7 +601,8 @@ async function fetchMapCountry(
       ),
     ),
   );
-  if (!results.some((result) => result.ok && result.articles.length)) {
+  let relevantResults = countryRelevantResults(results, terms);
+  if (!hasProviderArticles(relevantResults)) {
     results.push(
       await fetchProvider(
         GDELT_PROVIDER,
@@ -637,8 +612,12 @@ async function fetchMapCountry(
         fetchImpl,
       ),
     );
+    relevantResults = countryRelevantResults(results, terms);
   }
-  const successful = results.filter(
+  const selectedResults = hasProviderArticles(relevantResults)
+    ? relevantResults
+    : results;
+  const successful = selectedResults.filter(
     (result) => result.ok && result.articles.length,
   );
   return {
@@ -657,6 +636,22 @@ export function articleMatchesCountry(
   terms: string[],
 ) {
   return textMatchesCountry(article.searchableText, terms);
+}
+
+function countryRelevantResults(
+  results: ProviderResult[],
+  terms: string[],
+) {
+  return results.map((result) => ({
+    ...result,
+    articles: result.articles.filter((article) =>
+      articleMatchesCountry(article, terms),
+    ),
+  }));
+}
+
+function hasProviderArticles(results: ProviderResult[]) {
+  return results.some((result) => result.ok && result.articles.length);
 }
 
 async function fetchProvider(
@@ -905,11 +900,17 @@ export async function handleLiveNews(
           requestedRegion,
         )
       : providersForRequest(scope, countryName, requestedRegion);
-  const results = await Promise.all(
+  let results = await Promise.all(
     providers.map((provider) =>
       fetchProvider(provider, scope, countryName, terms, fetchImpl),
     ),
   );
+  if (scope === "country") {
+    const relevantResults = countryRelevantResults(results, terms);
+    if (hasProviderArticles(relevantResults)) {
+      results = relevantResults;
+    }
+  }
   if (scope === "event") {
     for (const result of results) {
       result.articles = result.articles.filter((article) =>

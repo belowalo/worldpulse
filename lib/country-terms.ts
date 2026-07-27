@@ -70,11 +70,21 @@ const COUNTRY_RELATED_TERMS: Record<string, string[]> = {
   Ethiopia: ["Ethiopian"],
   Finland: ["Finnish"],
   France: ["French"],
+  "French Southern Territories": [
+    "Kerguelen",
+    "Crozet Islands",
+    "French Antarctic",
+  ],
   Georgia: ["Georgian", "Tbilisi"],
   Germany: ["German"],
   Ghana: ["Ghanaian"],
   Greece: ["Greek"],
   Haiti: ["Haitian"],
+  "Heard Island and McDonald Islands": [
+    "Heard Island",
+    "McDonald Islands",
+    "Australian subantarctic",
+  ],
   Hungary: ["Hungarian"],
   Iceland: ["Icelandic"],
   India: ["Indian"],
@@ -120,6 +130,12 @@ const COUNTRY_RELATED_TERMS: Record<string, string[]> = {
   Romania: ["Romanian"],
   Russia: ["Russian"],
   Rwanda: ["Rwandan"],
+  "Saint Helena, Ascension and Tristan da Cunha": [
+    "Saint Helena",
+    "Ascension Island",
+    "Tristan da Cunha",
+  ],
+  "Saint Pierre and Miquelon": ["Saint Pierre", "Miquelon"],
   "Saudi Arabia": ["Saudi"],
   Senegal: ["Senegalese", "Sénégal", "Sénégalais", "Dakar"],
   Serbia: ["Serbian"],
@@ -128,6 +144,11 @@ const COUNTRY_RELATED_TERMS: Record<string, string[]> = {
   Slovenia: ["Slovenian"],
   Somalia: ["Somali"],
   "South Africa": ["South African"],
+  "South Georgia and the South Sandwich Islands": [
+    "South Georgia",
+    "South Sandwich Islands",
+    "South Georgia Island",
+  ],
   "South Korea": ["South Korean", "Seoul"],
   "South Sudan": ["South Sudanese"],
   Spain: ["Spanish"],
@@ -151,6 +172,13 @@ const COUNTRY_RELATED_TERMS: Record<string, string[]> = {
   Yemen: ["Yemeni"],
   Zambia: ["Zambian"],
   Zimbabwe: ["Zimbabwean"],
+  "British Indian Ocean Territory": ["Chagos", "Diego Garcia"],
+  "São Tomé and Principe": [
+    "São Tomé",
+    "Sao Tome",
+    "São Toméan",
+    "Santomean",
+  ],
 };
 
 export function canonicalCountryName(countryName: string) {

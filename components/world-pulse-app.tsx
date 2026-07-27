@@ -56,7 +56,7 @@ const WorldMap = dynamic(
 );
 
 type ImportanceFilter = "All" | "Major" | "Significant" | "Developing" | "Routine";
-type TimeFilter = "24 hours" | "3 days" | "7 days";
+type TimeFilter = "24 hours" | "3 days" | "7 days" | "All indexed";
 
 interface FeedState {
   events: Event[];
@@ -68,6 +68,7 @@ interface FeedState {
 
 interface CoverageState {
   payload?: LiveNewsPayload;
+  fetchedAt?: number;
   loading: boolean;
   error: string | null;
 }
@@ -79,6 +80,13 @@ const EMPTY_FEED: FeedState = {
   loading: false,
   error: null,
 };
+
+function coverageIsFresh(coverage?: CoverageState) {
+  if (!coverage?.payload || !coverage.fetchedAt) return false;
+  const lifetime =
+    Math.max(300, coverage.payload.refreshAfterSeconds) * 1_000;
+  return Date.now() - coverage.fetchedAt < lifetime;
+}
 
 const countryMetadata = countryPulses.map(
   (country): MapCountry => ({
@@ -246,8 +254,8 @@ function EventCard({
         onActivate();
       }}
       tabIndex={0}
-      aria-label={`${event.headline}. Press Enter to search for broader coverage${
-        hasConnections ? " and toggle this event's map connections" : ""
+      aria-label={`${event.headline}. Press Enter for event details${
+        hasConnections ? " and to isolate this event's map connections" : ""
       }.`}
     >
       <div className="flex flex-wrap items-center gap-2">
@@ -368,9 +376,10 @@ function EventCard({
         )}
         <p className="mt-2 text-[9px] leading-4 text-[#68778a]">
           Publication-level ratings, not a rating of this event. Unrated local
-          outlets are excluded. When available, the five displayed sources
-          include at least one left-rated and one right-rated publisher, then
-          favor center-rated publishers before prominence and recency.{" "}
+          outlets are excluded. Labels use Ground News&apos;s U.S.-political
+          reference frame. When available, the five displayed sources include
+          at least one left-rated and one right-rated publisher, then favor
+          center-rated publishers before prominence and recency.{" "}
           <a
             href="https://ground.news/rating-system"
             target="_blank"
@@ -382,11 +391,13 @@ function EventCard({
         </p>
       </div>
       {coverageError ? (
-        <p className="mt-3 text-[10px] text-[#d58a96]">{coverageError}</p>
+        <p className="mt-3 text-[10px] text-[#d58a96]">
+          {coverageError} Select the card to retry.
+        </p>
       ) : !coverageExpanded && !coverageLoading ? (
         <p className="mt-3 text-[10px] text-[#7f8da1]">
-          Select this event to search the current seven-day news index for
-          broader coverage.
+          Broader source coverage loads automatically when this event becomes
+          visible.
         </p>
       ) : null}
       <button
@@ -461,6 +472,14 @@ function FilterSelect({
 }
 
 function MethodologyModal({ onClose }: { onClose: () => void }) {
+  useEffect(() => {
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") onClose();
+    };
+    window.addEventListener("keydown", closeOnEscape);
+    return () => window.removeEventListener("keydown", closeOnEscape);
+  }, [onClose]);
+
   return (
     <div
       className="fixed inset-0 z-50 grid place-items-center bg-black/70 p-4"
@@ -487,6 +506,7 @@ function MethodologyModal({ onClose }: { onClose: () => void }) {
           <button
             type="button"
             onClick={onClose}
+            autoFocus
             aria-label="Close methodology"
             className="rounded-full border border-[#3a4659] px-3 py-1.5 text-sm text-[#cad2dd] hover:bg-[#1a2537]"
           >
@@ -532,13 +552,16 @@ function MethodologyModal({ onClose }: { onClose: () => void }) {
           metadata; WorldPulse does not reproduce article bodies.
         </p>
         <p className="mt-3 text-xs leading-5 text-[#8996a8]">
-          Selecting an event runs an exact and keyword topic search across
-          local and international Google News editions, deduplicates
-          publishers, and displays up to five prominent recent matches.
+          Visible events automatically run an exact and keyword topic search
+          across local and international Google News editions. WorldPulse
+          groups rewritten headlines into one occurrence, deduplicates
+          publishers by identity, and displays up to five recent matches.
           Publisher lean labels use a checked Ground News ratings snapshot
           (July 26, 2026). They describe publications—not individual articles
-          or the event—and unrated publishers are excluded from the percentage
-          bar.
+          or the event—use a U.S.-political reference frame, and exclude
+          unrated publishers from the percentage bar. When available, source
+          selection includes left- and right-rated publishers before filling
+          remaining slots with center-rated reporting.
         </p>
       </section>
     </div>
@@ -661,6 +684,11 @@ export function WorldPulseApp({
         },
       }));
     }
+  }, []);
+
+  const invalidateCoverage = useCallback(() => {
+    coverageRequests.current.clear();
+    setEventCoverage({});
   }, []);
 
   useEffect(() => {
@@ -837,6 +865,7 @@ export function WorldPulseApp({
   useEffect(() => {
     if (!liveUpdates) return;
     const refreshTimer = window.setInterval(() => {
+      invalidateCoverage();
       void fetchGlobalNews();
       void fetchCountryNews(selectedCountry);
     }, 600_000);
@@ -844,6 +873,7 @@ export function WorldPulseApp({
   }, [
     fetchCountryNews,
     fetchGlobalNews,
+    invalidateCoverage,
     liveUpdates,
     selectedCountry,
   ]);
@@ -938,12 +968,12 @@ export function WorldPulseApp({
           ...current,
           [event.id]: {
             payload,
+            fetchedAt: Date.now(),
             loading: false,
             error: null,
           },
         }));
       } catch (error) {
-        coverageRequests.current.delete(event.id);
         setEventCoverage((current) => ({
           ...current,
           [event.id]: {
@@ -955,6 +985,8 @@ export function WorldPulseApp({
                 : "Broader coverage search is temporarily unavailable.",
           },
         }));
+      } finally {
+        coverageRequests.current.delete(event.id);
       }
     },
     [mapCountries],
@@ -1060,22 +1092,72 @@ export function WorldPulseApp({
   );
   const expandedEvents = useMemo(
     () =>
-      baseEvents.map((event) => {
-        const payload = eventCoverage[event.id]?.payload;
-        return payload ? enrichEventWithCoverage(event, payload) : event;
-      }),
+      baseEvents
+        .map((event) => {
+          const payload = eventCoverage[event.id]?.payload;
+          return payload ? enrichEventWithCoverage(event, payload) : event;
+        })
+        .sort(
+          (left, right) =>
+            right.importanceScore - left.importanceScore ||
+            Date.parse(right.lastUpdatedAt) -
+              Date.parse(left.lastUpdatedAt),
+        ),
     [baseEvents, eventCoverage],
+  );
+  const presentedMapCountries = useMemo(
+    () =>
+      mapCountries.map((country) => {
+        if (country.mapId === activeCountry.mapId && expandedEvents[0]) {
+          return { ...country, topEvent: expandedEvents[0] };
+        }
+        if (!country.topEvent) return country;
+        const prepared = applyDetectedGeography(
+          country.topEvent,
+          mapCountries,
+          country,
+        );
+        const canonical =
+          canonicalEvents.find(
+            (event) =>
+              event.id === prepared.id ||
+              (event.category === prepared.category &&
+                eventsDescribeSameOccurrence(event, prepared)),
+          ) ?? prepared;
+        const payload = eventCoverage[canonical.id]?.payload;
+        return {
+          ...country,
+          topEvent: payload
+            ? enrichEventWithCoverage(canonical, payload)
+            : canonical,
+        };
+      }),
+    [
+      activeCountry.mapId,
+      canonicalEvents,
+      eventCoverage,
+      expandedEvents,
+      mapCountries,
+    ],
   );
   const filteredEvents = (() => {
     const limitHours =
-      timeRange === "24 hours" ? 24 : timeRange === "3 days" ? 72 : 168;
+      timeRange === "24 hours"
+        ? 24
+        : timeRange === "3 days"
+          ? 72
+          : timeRange === "7 days"
+            ? 168
+            : Number.POSITIVE_INFINITY;
     const reference = Date.now();
     return expandedEvents.filter((event) => {
       const matchesCategory = category === "All" || event.category === category;
       const matchesImportance =
         importance === "All" || event.importanceLabel === importance;
       const matchesTime =
-        reference - Date.parse(event.lastUpdatedAt) <= limitHours * 3_600_000;
+        !Number.isFinite(limitHours) ||
+        reference - Date.parse(event.lastUpdatedAt) <=
+          limitHours * 3_600_000;
       const query = search.trim().toLowerCase();
       const matchesSearch =
         !query ||
@@ -1115,13 +1197,13 @@ export function WorldPulseApp({
       );
     }
     const coverage = eventCoverage[event.id];
-    if (!coverage?.loading && !coverage?.payload) {
+    if (!coverage?.loading && !coverageIsFresh(coverage)) {
       void fetchEventCoverage(event);
     }
   };
   const handleEventVisible = (event: Event) => {
     const coverage = eventCoverage[event.id];
-    if (!coverage?.loading && !coverage?.payload && !coverage?.error) {
+    if (!coverage?.loading && !coverageIsFresh(coverage) && !coverage?.error) {
       void fetchEventCoverage(event);
     }
   };
@@ -1130,6 +1212,16 @@ export function WorldPulseApp({
     importance !== "All" ||
     timeRange !== "7 days" ||
     search.trim().length > 0;
+  const noRecentEvents =
+    baseEvents.length > 0 &&
+    filteredEvents.length === 0 &&
+    !hasActiveFilters;
+  const refreshActiveFeed = () => {
+    invalidateCoverage();
+    void (globalView
+      ? fetchGlobalNews()
+      : fetchCountryNews(activeCountry));
+  };
 
   return (
     <main className="min-h-screen bg-[#080d15]">
@@ -1153,14 +1245,19 @@ export function WorldPulseApp({
             onClick={() => {
               setGlobalView((value) => !value);
               setConnectionEventId(null);
+              setCategory("All");
+              setImportance("All");
+              setTimeRange("7 days");
+              setSearch("");
             }}
+            aria-pressed={globalView}
             className={`rounded-full border px-3 py-2 text-[10px] transition sm:px-4 ${
               globalView
                 ? "border-[#73e2cc] bg-[#14332f] text-[#b7fff1]"
                 : "border-[#344157] text-[#c5cfdb] hover:bg-[#151f30]"
             }`}
           >
-            {globalView ? "Map view" : "Global feed"}
+            {globalView ? "Country feed" : "Global feed"}
           </button>
           <button
             type="button"
@@ -1175,14 +1272,14 @@ export function WorldPulseApp({
       <div className="grid min-h-[calc(100vh-4rem)] lg:grid-cols-[minmax(0,1fr)_420px]">
         <section className="relative min-h-[54vh] border-b border-[#222d3e] lg:h-[calc(100vh-4rem)] lg:border-b-0 lg:border-r">
           <MapComponent
-            countries={mapCountries}
+            countries={presentedMapCountries}
             selectedMapId={globalView ? null : selectedCountry.mapId}
             onSelect={handleSelect}
             linkEvents={mapLinkEvents}
             statusLabel={
               mapPreload.total
                 ? mapPreload.loaded === mapPreload.total
-                  ? `${mapPreload.loaded}/${mapPreload.total} countries loaded${
+                  ? `${mapPreload.loaded}/${mapPreload.total} country snapshots ready${
                       globalFeed.loading
                         ? " · syncing live"
                         : mapPreload.refreshed
@@ -1204,11 +1301,11 @@ export function WorldPulseApp({
                 <span>Intensity = estimated importance</span>
                 <span className="inline-flex items-center gap-1.5">
                   <span className="h-2 w-5 rounded-[50%] border-t-2 border-[#d8fff7] shadow-[0_0_6px_#73e2cc]" />
-                  Glowing curves = selected event connections
+                  Curves = cross-border events; select a card to isolate one
                 </span>
               </div>
             </div>
-            <div className="mt-2 flex flex-wrap gap-x-3 gap-y-2">
+            <div className="mt-2 flex flex-nowrap gap-3 overflow-x-auto pb-1 scrollbar-thin">
               {CATEGORIES.map((item) => (
                 <div
                   key={item}
@@ -1254,7 +1351,7 @@ export function WorldPulseApp({
               </div>
               <div className="rounded-lg bg-[#182234] px-3 py-2 text-center">
                 <div className="font-mono text-lg text-[#73e2cc]">
-                  {baseEvents[0]?.importanceScore ?? "—"}
+                  {filteredEvents[0]?.importanceScore ?? "—"}
                 </div>
                 <div className="font-mono text-[7px] uppercase tracking-[0.14em] text-[#7f8da1]">
                   top score
@@ -1273,11 +1370,7 @@ export function WorldPulseApp({
               </span>
               <button
                 type="button"
-                onClick={() =>
-                  void (globalView
-                    ? fetchGlobalNews()
-                    : fetchCountryNews(activeCountry))
-                }
+                onClick={refreshActiveFeed}
                 disabled={activeFeed.loading || !liveUpdates}
                 className="rounded-md border border-[#354359] px-2.5 py-1.5 text-[9px] text-[#aeb9c7] transition hover:border-[#64748b] hover:text-white disabled:cursor-wait disabled:opacity-50"
               >
@@ -1321,9 +1414,11 @@ export function WorldPulseApp({
                   setConnectionEventId(null);
                 }}
               >
-                {["24 hours", "3 days", "7 days"].map((item) => (
-                  <option key={item}>{item}</option>
-                ))}
+                {["24 hours", "3 days", "7 days", "All indexed"].map(
+                  (item) => (
+                    <option key={item}>{item}</option>
+                  ),
+                )}
               </FilterSelect>
             </div>
             <label className="mt-2 block">
@@ -1372,7 +1467,7 @@ export function WorldPulseApp({
                   </p>
                   <button
                     type="button"
-                    onClick={() => void fetchGlobalNews()}
+                    onClick={refreshActiveFeed}
                     className="mt-4 rounded-lg border border-[#46556b] px-3 py-2 text-[10px] text-[#cad3df] hover:bg-[#192437]"
                   >
                     Try again
@@ -1389,7 +1484,7 @@ export function WorldPulseApp({
                     eventCoverage[event.id]?.loading ?? false
                   }
                   coverageError={eventCoverage[event.id]?.error ?? null}
-                  coverageExpanded={Boolean(eventCoverage[event.id]?.payload)}
+                  coverageExpanded={coverageIsFresh(eventCoverage[event.id])}
                   onActivate={() => handleEventActivate(event)}
                   onVisible={() => handleEventVisible(event)}
                 />
@@ -1399,20 +1494,32 @@ export function WorldPulseApp({
                 <div>
                   <div className="text-2xl text-[#59687d]">◎</div>
                   <h3 className="mt-3 text-sm font-medium">
-                    {!globalView && !baseEvents.length && !hasActiveFilters
-                      ? `No indexed news for ${activeCountry.name}`
-                      : globalView && !baseEvents.length && !hasActiveFilters
-                        ? "No live global events"
-                      : "No matching events"}
+                    {noRecentEvents
+                      ? "No events in the last 7 days"
+                      : !globalView && !baseEvents.length && !hasActiveFilters
+                        ? `No indexed news for ${activeCountry.name}`
+                        : globalView && !baseEvents.length && !hasActiveFilters
+                          ? "No live global events"
+                          : "No matching events"}
                   </h3>
                   <p className="mt-2 text-xs leading-5 text-[#7f8da1]">
-                    {!globalView && !baseEvents.length && !hasActiveFilters
-                      ? "No matching headlines were indexed in the current three-day window. This country will refresh automatically."
-                      : globalView && !baseEvents.length && !hasActiveFilters
-                        ? "The global feed will refresh automatically."
-                      : "Broaden the filters or try a different search term."}
+                    {noRecentEvents
+                      ? "Older verified headlines are available in the current index."
+                      : !globalView && !baseEvents.length && !hasActiveFilters
+                        ? "No matching headlines were found in the current seven-day index. This country will refresh automatically."
+                        : globalView && !baseEvents.length && !hasActiveFilters
+                          ? "The global feed will refresh automatically."
+                          : "Broaden the filters or try a different search term."}
                   </p>
-                  {hasActiveFilters ? (
+                  {noRecentEvents ? (
+                    <button
+                      type="button"
+                      onClick={() => setTimeRange("All indexed")}
+                      className="mt-4 rounded-lg border border-[#46556b] px-3 py-2 text-[10px] text-[#cad3df] hover:bg-[#192437]"
+                    >
+                      Show all indexed
+                    </button>
+                  ) : hasActiveFilters ? (
                     <button
                       type="button"
                       onClick={() => {
@@ -1434,8 +1541,8 @@ export function WorldPulseApp({
           <footer className="border-t border-[#273246] px-5 py-3 text-[9px] leading-4 text-[#68768a]">
             Country panels combine local top stories, country-specific search,
             and international reporting. Metadata refreshes every 10 minutes.
-            Duplicate headlines about the same occurrence are grouped into one
-            event. Importance is an estimate, not an objective fact.
+            Related headlines describing the same occurrence are grouped into
+            one event. Importance is an estimate, not an objective fact.
           </footer>
         </aside>
       </div>

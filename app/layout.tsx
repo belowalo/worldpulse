@@ -16,11 +16,21 @@ const geistMono = Geist_Mono({
 export async function generateMetadata(): Promise<Metadata> {
   const requestHeaders = await headers();
   const host = requestHeaders.get("host") ?? "localhost:3000";
-  const protocol = host.startsWith("localhost") ? "http" : "https";
+  const forwardedProtocol = requestHeaders
+    .get("x-forwarded-proto")
+    ?.split(",")[0]
+    ?.trim();
+  const isLocalHost = /^(localhost|127\.0\.0\.1|\[::1\])(?::|$)/i.test(host);
+  const protocol =
+    forwardedProtocol === "http" || forwardedProtocol === "https"
+      ? forwardedProtocol
+      : isLocalHost
+        ? "http"
+        : "https";
   const origin = `${protocol}://${host}`;
   const title = "WorldPulse — Global news, mapped";
   const description =
-    "An interactive world-news tracker that maps the most important recent event in every country.";
+    "An interactive world-news tracker mapping current reporting across every country and territory.";
   return {
     metadataBase: new URL(origin),
     title,

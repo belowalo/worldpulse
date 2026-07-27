@@ -139,6 +139,13 @@ describe("worker live-news providers", () => {
         <guid>senegal-local</guid>
         <pubDate>Fri, 24 Jul 2026 21:00:00 GMT</pubDate>
         <source url="https://aps.sn/">APS</source>
+      </item><item>
+        <title>Japan launches a lunar research mission - Science Desk</title>
+        <description>A spacecraft entered lunar orbit.</description>
+        <link>https://news.google.com/rss/articles/unrelated-space</link>
+        <guid>unrelated-space</guid>
+        <pubDate>Fri, 24 Jul 2026 20:00:00 GMT</pubDate>
+        <source url="https://science.example/">Science Desk</source>
       </item></channel></rss>
     `;
     const fetchMock = vi.fn(async (input: URL | RequestInfo) => {
@@ -157,7 +164,7 @@ describe("worker live-news providers", () => {
       fetchMock as typeof fetch,
     );
     const payload = (await response.json()) as {
-      articles: Array<{ publisherName: string }>;
+      articles: Array<{ publisherName: string; title: string }>;
     };
 
     expect(response.status).toBe(200);
@@ -166,6 +173,17 @@ describe("worker live-news providers", () => {
       region: "SN",
       language: "fr",
       ceid: "SN:fr",
+    });
+    expect(googleNewsLocaleForCountry("Canada")).toMatchObject({
+      region: "CA",
+      language: "en",
+      ceid: "CA:en",
+    });
+    expect(countryCodeForName("Timor-Leste")).toBe("TL");
+    expect(googleNewsLocaleForCountry("Timor-Leste")).toMatchObject({
+      region: "TL",
+      language: "pt",
+      ceid: "TL:pt",
     });
     expect(
       requestedUrls.some(
@@ -189,6 +207,9 @@ describe("worker live-news providers", () => {
       ),
     ).toBe(true);
     expect(payload.articles[0].publisherName).toBe("APS");
+    expect(
+      payload.articles.some((article) => article.title.includes("lunar")),
+    ).toBe(false);
   });
 
   it("resolves a local-news region for every country on the map", () => {
