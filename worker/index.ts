@@ -24,7 +24,7 @@ interface ExecutionContext {
   passThroughOnException(): void;
 }
 
-const LIVE_CACHE_NAME = "worldpulse-live-v14";
+const LIVE_CACHE_NAME = "worldpulse-live-v17";
 const LIVE_CACHE_FRESH_MS = 5 * 60_000;
 const LIVE_MAP_STALE_MS = 30 * 60_000;
 const LIVE_CACHE_RETENTION_SECONDS = 24 * 60 * 60;
@@ -146,7 +146,7 @@ function normalizedLiveCacheKey(request: Request) {
   url.hash = "";
   url.searchParams.delete("release");
   url.searchParams.delete("fresh");
-  url.searchParams.set("__wp_cache", "14");
+  url.searchParams.set("__wp_cache", "17");
   url.searchParams.sort();
   return new Request(url.toString(), { method: "GET" });
 }
@@ -245,9 +245,8 @@ async function handleCachedLiveNews(
   const cacheKey = normalizedLiveCacheKey(request);
   const requestUrl = new URL(request.url);
   const isMapSearch = requestUrl.searchParams.get("scope") === "map";
-  const forceFreshMapSearch =
-    isMapSearch && requestUrl.searchParams.get("fresh") === "1";
-  if (forceFreshMapSearch) {
+  const forceFresh = requestUrl.searchParams.get("fresh") === "1";
+  if (forceFresh) {
     requestUrl.searchParams.delete("fresh");
     const fresh = await handleLiveNews(new Request(requestUrl, request));
     ctx.waitUntil(

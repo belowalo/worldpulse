@@ -73,6 +73,12 @@ describe("multi-country map links", () => {
         countrySearchTerms("Saint Helena"),
       ),
     ).toBe(true);
+    expect(
+      textMatchesCountry(
+        "Saint-Pierre-et-Miquelon adopte son budget territorial",
+        countrySearchTerms("St. Pierre and Miquelon"),
+      ),
+    ).toBe(true);
   });
 
   it("recognizes the countries named in an international event", () => {

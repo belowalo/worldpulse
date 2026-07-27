@@ -50,6 +50,7 @@ const MAX_EVENT_ARTICLES = 40;
 const MAX_MAP_BATCH_COUNTRIES = 40;
 const MAX_MAP_ARTICLES_PER_COUNTRY = 32;
 const CACHE_SECONDS = 300;
+const MAX_ARTICLE_AGE_MS = 8 * 24 * 60 * 60 * 1_000;
 const VALID_COUNTRY_NAME = /^[\p{L}\p{M}\d .,'’()&-]+$/u;
 const EVENT_STOP_WORDS = new Set([
   "about",
@@ -97,6 +98,7 @@ const GENERIC_OCCURRENCE_TOKENS = new Set([
 ]);
 const COUNTRY_NEWS_QUERY_OVERRIDES: Record<string, string> = {
   "British Indian Ocean Territory": "Diego Garcia",
+  "Saint Pierre and Miquelon": "Saint-Pierre-et-Miquelon",
   "South Georgia and the South Sandwich Islands": "South Georgia island",
 };
 
@@ -539,6 +541,25 @@ function bingNewsProvider(name: string, query: string): NewsProvider {
   };
 }
 
+function googleCountryProvider(countryName: string): NewsProvider {
+  const queryTerm = COUNTRY_NEWS_QUERY_OVERRIDES[countryName] ?? countryName;
+  return {
+    name: "Google News · Current country search",
+    publisherUrl: "https://news.google.com/",
+    timeoutMs: 4_500,
+    filterByCountry: false,
+    url: () => {
+      const url = new URL("https://news.google.com/rss/search");
+      url.searchParams.set("q", `"${queryTerm}" when:7d`);
+      url.searchParams.set("hl", "en-US");
+      url.searchParams.set("gl", "US");
+      url.searchParams.set("ceid", "US:en");
+      return url;
+    },
+    parse: parseGoogleNewsFeed,
+  };
+}
+
 const BING_WORLD_PROVIDER = bingNewsProvider(
   "Bing News · World",
   "world news",
@@ -597,7 +618,8 @@ export function articleMatchesEvent(
     );
   }
   return (
-    shared >= 3 ||
+    shared >= 4 ||
+    (shared >= 3 && shared / headlineTokens.length >= 0.4) ||
     (shared >= 2 &&
       distinctiveShared >= 1 &&
       shared / headlineTokens.length >= 0.5)
@@ -654,8 +676,8 @@ function providersForRequest(
     return [...CORE_PROVIDERS, GDELT_PROVIDER, BING_WORLD_PROVIDER];
   }
   return [
+    googleCountryProvider(countryName),
     ...countryBingProviders(countryName),
-    ...CORE_PROVIDERS,
     GDELT_PROVIDER,
   ];
 }
@@ -666,10 +688,11 @@ async function fetchMapCountry(
 ) {
   const countryName = canonicalCountryName(requestedCountry);
   const terms = countrySearchTerms(requestedCountry);
+  const googleProvider = googleCountryProvider(countryName);
   const countryProviders = countryBingProviders(countryName);
   const results = [
     await fetchProvider(
-      countryProviders[0],
+      googleProvider,
       "country",
       countryName,
       terms,
@@ -678,9 +701,9 @@ async function fetchMapCountry(
   ];
   let relevantResults = countryRelevantResults(results, terms);
   if (!hasProviderArticles(relevantResults)) {
-    const [latestCountryResult, gdeltResult] = await Promise.all([
+    const [currentCountryResult, gdeltResult] = await Promise.all([
       fetchProvider(
-        countryProviders[1],
+        countryProviders[0],
         "country",
         countryName,
         terms,
@@ -694,31 +717,38 @@ async function fetchMapCountry(
         fetchImpl,
       ),
     ]);
-    results.push(latestCountryResult, gdeltResult);
+    results.push(currentCountryResult, gdeltResult);
     relevantResults = [
       ...relevantResults,
-      ...countryRelevantResults([latestCountryResult], terms),
+      ...countryRelevantResults([currentCountryResult], terms),
       ...countryRelevantResults([gdeltResult], terms),
     ];
   }
   if (!hasProviderArticles(relevantResults)) {
-    const alternateCountryResult = await fetchProvider(
-      countryProviders[2],
-      "country",
-      countryName,
-      terms,
-      fetchImpl,
-    );
-    results.push(alternateCountryResult);
+    const [latestCountryResult, alternateCountryResult] = await Promise.all([
+      fetchProvider(
+        countryProviders[1],
+        "country",
+        countryName,
+        terms,
+        fetchImpl,
+      ),
+      fetchProvider(
+        countryProviders[2],
+        "country",
+        countryName,
+        terms,
+        fetchImpl,
+      ),
+    ]);
+    results.push(latestCountryResult, alternateCountryResult);
     relevantResults = [
       ...relevantResults,
+      ...countryRelevantResults([latestCountryResult], terms),
       ...countryRelevantResults([alternateCountryResult], terms),
     ];
   }
-  const selectedResults = hasProviderArticles(relevantResults)
-    ? relevantResults
-    : results;
-  const successful = selectedResults.filter(
+  const successful = relevantResults.filter(
     (result) => result.ok && result.articles.length,
   );
   return {
@@ -762,6 +792,13 @@ function hasProviderArticles(results: ProviderResult[]) {
   return results.some((result) => result.ok && result.articles.length);
 }
 
+function articleIsCurrent(article: CandidateArticle) {
+  const publishedAt = Date.parse(article.publishedAt);
+  if (!Number.isFinite(publishedAt)) return false;
+  const age = Date.now() - publishedAt;
+  return age >= -6 * 60 * 60 * 1_000 && age <= MAX_ARTICLE_AGE_MS;
+}
+
 async function fetchProvider(
   provider: NewsProvider,
   scope: "country" | "global" | "event",
@@ -793,7 +830,7 @@ async function fetchProvider(
     if (body.length > MAX_PROVIDER_BYTES) {
       throw new Error("response too large");
     }
-    const parsed = provider.parse(body);
+    const parsed = provider.parse(body).filter(articleIsCurrent);
     if (!parsed.length) throw new Error("no parseable articles");
     const articles =
       scope === "country" && provider.filterByCountry
@@ -1011,15 +1048,13 @@ export async function handleLiveNews(
       : providersForRequest(scope, countryName);
   let results = await mapWithConcurrency(
     providers,
-    6,
+    scope === "country" ? 3 : scope === "event" ? 4 : 6,
     (provider) =>
       fetchProvider(provider, scope, countryName, terms, fetchImpl),
   );
   if (scope === "country") {
     const relevantResults = countryRelevantResults(results, terms);
-    if (hasProviderArticles(relevantResults)) {
-      results = relevantResults;
-    }
+    results = relevantResults;
   }
   if (scope === "event") {
     for (const result of results) {

@@ -39,7 +39,7 @@ retrieve → normalize → deduplicate → extract countries/category
          → cluster into events → calculate score → persist → publish
 ```
 
-Clustering must keep articles separate from events. Source count means independent reporting organizations, not URL count. Generated summaries must remain labeled and linked to their source set.
+Clustering must keep articles separate from events. Source count means independent reporting organizations, not URL count. Event descriptions are limited to coverage metadata; factual reporting remains in the attributed headline and linked source.
 
 ## Mock provider
 
@@ -47,8 +47,8 @@ Clustering must keep articles separate from events. Source count means independe
 
 ## Hosted live adapter
 
-The hosted Cloudflare Worker exposes `/api/live-news` for global, country, map-batch, and event-coverage queries. It reads public RSS headline metadata, retains publisher attribution and outbound article links, and stores successful responses in both the edge cache and D1. The browser clusters similar headlines, preserves each publisher as a separate article, and runs the same deterministic scoring model used elsewhere in the product.
+The hosted Cloudflare Worker exposes `/api/live-news` for global, country, map-batch, and event-coverage queries. It reads current Google News, Bing News, GDELT, and publisher RSS headline metadata, retains publisher attribution and outbound article links, and stores successful responses in both the edge cache and D1. The browser clusters similar headlines, preserves each publisher as a separate article, and runs the same deterministic scoring model used elsewhere in the product.
 
-The initial browser bundle contains no headlines. After loading the country geometry, the client keeps the interface behind a progress screen while complete multi-provider country queries run in a five-worker queue and a broader map sweep checks every country. The deeper feed supplies the canonical top event when available; otherwise a real attributed event from the map sweep fills the signal gap. Recent live responses may be reused for up to five minutes while fresh requests update them; older stored map results are skipped and rebuilt. Failed results receive bounded automatic retries rather than being filled with unrelated headlines. Selecting a country opens its completed state and does not initiate a request.
+After loading the country geometry, the client keeps the interface behind a progress screen while a batched sweep checks every map area. Articles must explicitly reference the requested country before they can enter its feed. Each batch supplies both the map signal and the country panel, avoiding a duplicate all-country hydration pass. Matching records from map, selected-country, global, and event searches are merged and rescored as one canonical occurrence. Recent live responses may be reused for up to five minutes while fresh requests update them; older stored map results are skipped and rebuilt. Failed results receive bounded automatic retries. Selecting a country opens its completed state and does not initiate a request.
 
 This adapter does not fetch article bodies, bypass publisher access controls, or present feed metadata as original WorldPulse reporting. A future licensed provider can replace or supplement it without changing the map and panel contracts.

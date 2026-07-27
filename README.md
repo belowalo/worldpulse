@@ -2,7 +2,7 @@
 
 WorldPulse is a production-quality MVP for exploring recent world news through an interactive map. Each country's hue represents the category of its highest-impact active event, while intensity represents a deterministic 0–100 importance estimate. Clicking any mapped country opens its current RSS-indexed headlines, publisher links, timestamps, geographic scope, and a plain-language score explanation.
 
-The hosted site keeps the map behind a live verification screen while it checks complete local and international feeds for every country. A broader live map search supplies a source-backed signal when a deeper feed returns no usable event. The completed country index then appears at once; clicking never starts a country request. No headline bundle ships with the application. The site reads headline-level public feed metadata and never scrapes or republishes article bodies.
+The hosted site keeps the map behind a live loading screen while it checks a current news index for every country. Only articles with an explicit country reference are eligible for that country's map signal. Each map response includes enough current articles to populate the country panel before the interface appears, so clicking never starts a country request. Selected-country refreshes and focused event searches can add newer or broader coverage without blocking the map. The site reads headline-level public feed metadata and leaves article bodies on publisher websites.
 
 ## Screenshots
 
@@ -15,7 +15,7 @@ The deployed application is the preferred live preview. A social preview is avai
 - **Hosted cache:** Cloudflare edge caching plus D1 persistence streams a recent live index immediately, refreshes it in the background, and provides resilience for deeper country and event feeds.
 - **Reference API:** FastAPI, Pydantic validation, SQLAlchemy 2, and PostgreSQL remain available for local full-stack development.
 - **Local orchestration:** Docker Compose starts PostgreSQL, migrates and seeds the API, then starts the web app with health checks.
-- **Hosted preview:** The browser starts complete local and international searches automatically, using five concurrent country requests plus a broader live verification sweep. The loading screen remains until the initial country index is complete. A deeper result is authoritative when available; otherwise a real attributed map-search result fills the signal gap. A country remains neutral only when neither live path produces a source-backed current match.
+- **Hosted preview:** The browser starts the batched live country sweep automatically. The loading screen remains until every map area has a completed live or neutral state. Results are occurrence-matched, publisher-deduplicated, and scored as one canonical event record used by the map, country panel, and global feed. The two uninhabited map areas remain neutral when no current reporting exists.
 
 The web app lives at the repository root to preserve the hosting runtime's required structure. `apps/api` contains the backend. See [architecture.md](docs/architecture.md) for details.
 
@@ -115,8 +115,8 @@ Scores are clamped to 0–100. Labels are `Major` (80–100), `Significant` (60�
 ## Responsible presentation
 
 - Every event links to its underlying attributed sources.
-- Automated metadata summaries are identified and are not presented as original reporting.
-- Demo copy avoids invented quotations and uses neutral language for political subjects.
+- Metadata summaries are concise and link directly to the underlying reporting.
+- Political reporting uses neutral interface language.
 - Timestamps, source counts, geographic scope, and affected countries are retained.
 - Countries with less digital reporting or fewer accessible sources may appear less active.
 - The map summary and live feeds retain canonical source links and publisher attribution.

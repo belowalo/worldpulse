@@ -182,7 +182,13 @@ const CATEGORY_TERMS: Array<[Category, string[]]> = [
   [
     "Health",
     [
+      "blood",
+      "cigarette",
+      "cigarette packs",
+      "clinic",
       "disease",
+      "emergency room",
+      "flu",
       "health",
       "hospital",
       "cancer",
@@ -191,12 +197,19 @@ const CATEGORY_TERMS: Array<[Category, string[]]> = [
       "ebola",
       "malaria",
       "medical",
+      "medication",
       "medicine",
       "mental health",
+      "ozempic",
       "outbreak",
       "patient",
+      "pharma",
+      "pharmacare",
       "pharmaceutical",
+      "physician",
+      "smoking",
       "surgery",
+      "tobacco",
       "vaccine",
       "virus",
       "santé",
@@ -276,6 +289,7 @@ const CATEGORY_TERMS: Array<[Category, string[]]> = [
       "preview",
       "race",
       "record time",
+      "roster",
       "rugby",
       "score",
       "season",
@@ -289,6 +303,7 @@ const CATEGORY_TERMS: Array<[Category, string[]]> = [
       "vs",
       "wrestling",
       "world cup",
+      "world junior",
       "world title",
       "coupe du monde",
       "coupe",
@@ -335,6 +350,7 @@ const CATEGORY_TERMS: Array<[Category, string[]]> = [
       "award",
       "book",
       "celebrity",
+      "comedian",
       "concert",
       "culture",
       "entertainment",
@@ -352,6 +368,8 @@ const CATEGORY_TERMS: Array<[Category, string[]]> = [
       "theater",
       "theatre",
       "tv",
+      "daily show",
+      "late night",
       "cinéma",
       "cinema",
       "música",
@@ -385,6 +403,9 @@ const CATEGORY_TERMS: Array<[Category, string[]]> = [
       "pollution",
       "renewable",
       "wildlife",
+      "beluga",
+      "whale",
+      "whales",
       "clima",
       "environnement",
       "écologie",
@@ -477,12 +498,15 @@ const CATEGORY_TERMS: Array<[Category, string[]]> = [
       "import",
       "imports",
       "inflation",
+      "invest",
       "investment",
       "jobs",
+      "manufacturing",
       "market",
       "mortgage",
       "oil",
       "petroleum",
+      "partnership",
       "prices",
       "quota",
       "quotas",
@@ -522,6 +546,8 @@ const CATEGORY_TERMS: Array<[Category, string[]]> = [
       "party",
       "political",
       "politician",
+      "trump",
+      "carney",
       "mayor",
       "minister",
       "parliament",
@@ -974,6 +1000,12 @@ export function classifyLiveHeadline(title: string): Category {
     ) {
       score += 2;
     }
+    if (
+      category === "Economy" &&
+      /\btariffs?\b/iu.test(normalized)
+    ) {
+      score += 2;
+    }
 
     if (
       score > bestScore ||
@@ -1152,6 +1184,30 @@ export function mergeCanonicalEvents(
     scoringInput,
     articles,
   };
+}
+
+export function mergeEventFeeds(...feeds: Event[][]) {
+  const canonicalEvents: Event[] = [];
+  for (const event of feeds.flat()) {
+    const existingIndex = canonicalEvents.findIndex(
+      (existing) =>
+        existing.id === event.id ||
+        eventsDescribeSameOccurrence(existing, event),
+    );
+    if (existingIndex >= 0) {
+      canonicalEvents[existingIndex] = mergeCanonicalEvents(
+        canonicalEvents[existingIndex],
+        event,
+      );
+    } else {
+      canonicalEvents.push(event);
+    }
+  }
+  return canonicalEvents.sort(
+    (left, right) =>
+      right.importanceScore - left.importanceScore ||
+      Date.parse(right.lastUpdatedAt) - Date.parse(left.lastUpdatedAt),
+  );
 }
 
 function articleAgeHours(article: LiveArticle, reference: number) {
@@ -1355,11 +1411,47 @@ export function enrichEventWithCoverage(
   event: Event,
   payload: LiveNewsPayload,
 ): Event {
+  const eventHeadlines = [
+    event.headline,
+    ...event.articles.map((article) => article.headline),
+  ];
+  const matchingCoverage = payload.articles.filter((article) =>
+    eventHeadlines.some((headline) => {
+      const headlineTokens = occurrenceIdentityTokens(headline);
+      const articleTokens = new Set(
+        occurrenceIdentityTokens(
+          `${article.title} ${article.description ?? ""}`,
+        ),
+      );
+      const shared = headlineTokens.filter((token) =>
+        articleTokens.has(token),
+      );
+      const distinctiveShared = shared.filter(
+        (token) => token.length >= 6,
+      ).length;
+      if (headlineTokens.length <= 4) {
+        return (
+          shared.length >= 3 ||
+          (shared.length >= 2 &&
+            distinctiveShared >= 1 &&
+            shared.length / Math.max(1, headlineTokens.length) >= 0.66)
+        );
+      }
+      return (
+        shared.length >= 4 ||
+        (shared.length >= 3 &&
+          shared.length / headlineTokens.length >= 0.4) ||
+        (shared.length >= 2 &&
+          distinctiveShared >= 1 &&
+          shared.length / headlineTokens.length >= 0.5)
+      );
+    }),
+  );
   const combined = new Map<string, Article>();
   for (const article of event.articles) {
     combined.set(article.source.id, article);
   }
-  for (const liveArticle of payload.articles) {
+  for (const liveArticle of matchingCoverage) {
     const source = createSource(liveArticle);
     const current = combined.get(source.id);
     if (
@@ -1391,9 +1483,13 @@ export function enrichEventWithCoverage(
       (sum, article) => sum + article.source.prominenceScore,
       0,
     ) / Math.max(1, allArticles.length);
+  const independentSourceCount = Math.max(
+    event.scoringInput.independentSourceCount,
+    allArticles.length,
+  );
   const nextInput = {
     ...event.scoringInput,
-    independentSourceCount: allArticles.length,
+    independentSourceCount,
     publisherProminence: averageProminence,
     articlesPerHour: Math.max(
       event.scoringInput.articlesPerHour,
@@ -1405,8 +1501,8 @@ export function enrichEventWithCoverage(
   return {
     ...event,
     summary:
-      allArticles.length > 1
-        ? `Expanded topic search matched ${allArticles.length} independent publishers. The ${visibleArticles.length} displayed reports prioritize left, right, and center-rated publishers when available, then publisher prominence and recency.`
+      independentSourceCount > 1
+        ? `Expanded topic search matched ${independentSourceCount} independent publishers. The ${visibleArticles.length} displayed reports prioritize left, right, and center-rated publishers when available, then publisher prominence and recency.`
         : "Expanded topic search found one matching publisher in the current seven-day window.",
     importanceScore: scoring.score,
     importanceLabel: scoring.label,

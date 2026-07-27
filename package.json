@@ -11,6 +11,7 @@
     "start": "vinext start",
     "test": "vitest run",
     "test:watch": "vitest",
+    "qa:live-countries": "set WORLD_PULSE_LIVE_QA=1&& vitest run tests/live-country-integrity.network.test.ts",
     "typecheck": "tsc --noEmit",
     "lint": "eslint . --ignore-pattern dist --ignore-pattern outputs --ignore-pattern .next --ignore-pattern apps/api/.venv"
   },

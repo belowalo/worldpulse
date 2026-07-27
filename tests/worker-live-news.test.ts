@@ -192,10 +192,20 @@ describe("worker live-news providers", () => {
 
   it("returns live results when one provider succeeds and the rest fail", async () => {
     vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const googleItem = `
+      <rss><channel><item>
+        <title>Canadian parliament approves clean-energy package - Example News</title>
+        <description>New measures will apply across Canada.</description>
+        <link>https://news.google.com/rss/articles/canada-energy</link>
+        <guid>canada-energy</guid>
+        <pubDate>Fri, 24 Jul 2026 20:00:00 GMT</pubDate>
+        <source url="https://publisher.example/">Example News</source>
+      </item></channel></rss>
+    `;
     const fetchMock = vi.fn(async (input: URL | RequestInfo) => {
       const url = String(input);
-      if (url.includes("theguardian.com/world/rss")) {
-        return new Response(rssItem, {
+      if (url.startsWith("https://news.google.com/rss/search")) {
+        return new Response(googleItem, {
           status: 200,
           headers: { "Content-Type": "application/rss+xml" },
         });
@@ -296,6 +306,56 @@ describe("worker live-news providers", () => {
     expect(
       payload.articles.some((article) => article.title.includes("lunar")),
     ).toBe(false);
+  });
+
+  it("does not assign the Rostov drone report to Kazakhstan in any feed", async () => {
+    vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const unrelatedFeed = `
+      <rss><channel><item>
+        <title>Ukrainian drones kill two in Russia's Rostov-on-Don, target Taganrog, governor says</title>
+        <description>Russian officials reported drone attacks in Rostov-on-Don and Taganrog.</description>
+        <link>https://publisher.example/rostov-drone-report</link>
+        <guid>rostov-drone-report</guid>
+        <pubDate>Sun, 26 Jul 2026 21:00:00 GMT</pubDate>
+        <News:Source>Example Wire</News:Source>
+      </item><item>
+        <title>Kazakhstan joins the global crypto reserve race</title>
+        <description>A report concerning Kazakhstan.</description>
+        <link>https://publisher.example/old-kazakhstan-report</link>
+        <guid>old-kazakhstan-report</guid>
+        <pubDate>Tue, 9 Sep 2025 02:50:00 GMT</pubDate>
+        <News:Source>Old Example Wire</News:Source>
+      </item></channel></rss>
+    `;
+    const fetchMock = vi.fn(async () =>
+      new Response(unrelatedFeed, { status: 200 }),
+    );
+
+    const countryResponse = await handleLiveNews(
+      new Request(
+        "https://worldpulse.test/api/live-news?country=Kazakhstan&iso2=KZ",
+      ),
+      fetchMock as typeof fetch,
+    );
+    const countryPayload = (await countryResponse.json()) as {
+      articles: unknown[];
+    };
+    expect(countryResponse.status).toBe(200);
+    expect(countryPayload.articles).toEqual([]);
+
+    const mapResponse = await handleLiveNews(
+      new Request(
+        "https://worldpulse.test/api/live-news?scope=map&countries=Kazakhstan",
+      ),
+      fetchMock as typeof fetch,
+    );
+    const mapPayload = (await mapResponse.json()) as {
+      countries: Array<{ available: boolean; articles: unknown[] }>;
+    };
+    expect(mapPayload.countries[0]).toMatchObject({
+      available: false,
+      articles: [],
+    });
   });
 
   it("resolves a local-news region for every country on the map", () => {
@@ -461,7 +521,16 @@ describe("worker live-news providers", () => {
         "Egypt urged to release detained Gen Z activists",
       ]),
     );
-    expect(requestedUrls).toHaveLength(1);
+    expect(
+      requestedUrls.filter((url) =>
+        url.startsWith("https://www.bing.com/news/search"),
+      ),
+    ).toHaveLength(1);
+    expect(
+      requestedUrls.some((url) =>
+        url.startsWith("https://news.google.com/rss/search"),
+      ),
+    ).toBe(true);
   });
 
   it("falls back to a latest-country search when the first has no results", async () => {
@@ -506,7 +575,7 @@ describe("worker live-news providers", () => {
       requestedUrls.filter((url) =>
         url.startsWith("https://www.bing.com/news/search"),
       ),
-    ).toHaveLength(2);
+    ).toHaveLength(3);
     expect(
       requestedUrls.some((url) =>
         new URL(url).searchParams
@@ -677,6 +746,24 @@ describe("worker live-news providers", () => {
             "Suspect in deadly Berlin Pride attack killed in confrontation with police, officials say",
         },
         "Suspect dies after Seattle Space Needle shooting leaves victim injured",
+      ),
+    ).toBe(false);
+    expect(
+      articleMatchesEvent(
+        {
+          searchableText:
+            "Trump vows wildfire smoke tariffs on Canada as fires spread",
+        },
+        "Canada reportedly scraps joint bridge celebration with US after Trump renews tariff threat",
+      ),
+    ).toBe(false);
+    expect(
+      articleMatchesEvent(
+        {
+          searchableText:
+            "Trump threatens Iran over frozen assets as US strikes continue",
+        },
+        "Canada reportedly scraps joint bridge celebration with US after Trump renews tariff threat",
       ),
     ).toBe(false);
   });

@@ -12,7 +12,9 @@ import { resolve } from "node:path";
 
 import { WorldPulseApp } from "@/components/world-pulse-app";
 import type { WorldMapProps } from "@/components/world-map";
+import { mapStyleForEvent } from "@/lib/scoring";
 import { countryPulses } from "@/lib/seed-data";
+import { CATEGORIES } from "@/lib/types";
 
 type TestLiveArticle = {
   id: string;
@@ -73,6 +75,7 @@ function TestMap({
   const japan = countryPulses.find((country) => country.iso2 === "JP");
   const egypt = countryPulses.find((country) => country.iso2 === "EG");
   const canada = countries.find((country) => country.iso2 === "CA");
+  const australia = countries.find((country) => country.iso2 === "AU");
   return (
     <>
       <span>{statusLabel}</span>
@@ -82,11 +85,37 @@ function TestMap({
       <span data-testid="countries-syncing">
         {countries.filter((country) => !country.signalReady).length}
       </span>
+      <span data-testid="countries-with-valid-color-contract">
+        {
+          countries.filter((country) => {
+            const topEvent = country.topEvent;
+            if (
+              !topEvent ||
+              country.events[0]?.id !== topEvent.id ||
+              !CATEGORIES.includes(topEvent.category)
+            ) {
+              return false;
+            }
+            return (
+              mapStyleForEvent(
+                topEvent.category,
+                topEvent.importanceScore,
+              ).fillColor !== "#303a47"
+            );
+          }).length
+        }
+      </span>
       <span data-testid="canada-map-category">
         {canada?.topEvent?.category ?? ""}
       </span>
       <span data-testid="canada-map-headline">
         {canada?.topEvent?.headline ?? ""}
+      </span>
+      <span data-testid="australia-map-category">
+        {australia?.topEvent?.category ?? ""}
+      </span>
+      <span data-testid="australia-map-headline">
+        {australia?.topEvent?.headline ?? ""}
       </span>
       <span data-testid="link-event-ids">
         {linkEvents?.map((event) => event.id).join(",") ?? ""}
@@ -97,6 +126,9 @@ function TestMap({
       </button>
       <button type="button" onClick={() => egypt && onSelect(egypt)}>
         Select Egypt on map
+      </button>
+      <button type="button" onClick={() => australia && onSelect(australia)}>
+        Select Australia on map
       </button>
       <button
         type="button"
@@ -510,7 +542,9 @@ describe("WorldPulse interactions", () => {
         });
       }
       if (url.includes("scope=map")) {
-        return liveMapResponse(url, { Canada: [countryArticle] });
+        return liveMapResponse(url, {
+          Canada: [countryArticle, ...globalArticles],
+        });
       }
       if (url.includes("scope=event")) {
         return Response.json({
@@ -556,7 +590,7 @@ describe("WorldPulse interactions", () => {
     render(<WorldPulseApp MapComponent={TestMap} />);
 
     const countryHeading = await screen.findByRole("heading", {
-      name: localHeadline,
+      name: globalHeadline,
     });
     const countryCard = countryHeading.closest("article");
     expect(countryCard).not.toBeNull();
@@ -586,6 +620,20 @@ describe("WorldPulse interactions", () => {
       if (url === "/countries.geojson") {
         return Response.json({
           features: [{ id: "124", properties: { name: "Canada" } }],
+        });
+      }
+      if (url.includes("scope=map")) {
+        return liveMapResponse(url, {
+          Canada: [
+            {
+              id: "canada-trade",
+              title: "Canada signs a new international trade agreement",
+              url: "https://publisher.example/canada-trade",
+              publisherName: "Test Publisher",
+              publisherUrl: "https://publisher.example/",
+              publishedAt: "2026-07-25T00:00:00.000Z",
+            },
+          ],
         });
       }
       return Response.json({
@@ -631,13 +679,16 @@ describe("WorldPulse interactions", () => {
     ).not.toBeInTheDocument();
   });
 
-  it("starts country hydration in the background and defers global news until opened", async () => {
+  it("loads the live map index without bulk country requests and defers global news until opened", async () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input);
       if (url === "/countries.geojson") {
         return Response.json({
           features: [{ id: "124", properties: { name: "Canada" } }],
         });
+      }
+      if (url.includes("scope=map")) {
+        return liveMapResponse(url, { Canada: [] });
       }
       if (url.startsWith("/api/live-news?country=Canada")) {
         return Response.json({
@@ -662,23 +713,14 @@ describe("WorldPulse interactions", () => {
 
     render(<WorldPulseApp MapComponent={TestMap} />);
 
-    await waitFor(() =>
-      expect(fetchMock).toHaveBeenCalledWith(
-        "/api/live-news?country=Canada&iso2=CA",
-      ),
-    );
+    await screen.findByText("Live country index complete");
     const requestedUrls = fetchMock.mock.calls.map(([input]) => String(input));
-    const countryRequests = requestedUrls.filter((url) =>
-      url.includes("/api/live-news?country="),
-    );
-    expect(countryRequests[0]).toBe(
-      "/api/live-news?country=Canada&iso2=CA",
-    );
+    expect(requestedUrls.some((url) => url.includes("scope=map"))).toBe(true);
     expect(
-      countryRequests.some(
-        (url) => url === "/api/live-news?country=Canada&iso2=CA&fresh=1",
+      requestedUrls.some((url) =>
+        url.includes("/api/live-news?country="),
       ),
-    ).toBe(true);
+    ).toBe(false);
     expect(requestedUrls).not.toContain("/api/live-news?scope=global");
 
     fireEvent.click(
@@ -689,13 +731,16 @@ describe("WorldPulse interactions", () => {
     );
   });
 
-  it("keeps a failed background country unresolved without calling the global endpoint", async () => {
+  it("keeps a country with no matched map reporting neutral without calling the global endpoint", async () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input);
       if (url === "/countries.geojson") {
         return Response.json({
           features: [{ id: "124", properties: { name: "Canada" } }],
         });
+      }
+      if (url.includes("scope=map")) {
+        return liveMapResponse(url, { Canada: [] });
       }
       if (url.includes("country=Canada")) {
         return new Response("Unavailable", { status: 503 });
@@ -713,15 +758,16 @@ describe("WorldPulse interactions", () => {
 
     render(<WorldPulseApp MapComponent={TestMap} />);
 
-    await waitFor(() =>
-      expect(fetchMock).toHaveBeenCalledWith(
-        "/api/live-news?country=Canada&iso2=CA",
-      ),
-    );
     expect(
       await screen.findByText("Live country index complete"),
     ).toBeInTheDocument();
-    expect(screen.getByTestId("countries-syncing")).toHaveTextContent("1");
+    expect(screen.getByTestId("countries-syncing")).toHaveTextContent("0");
+    expect(screen.getByTestId("countries-with-news")).toHaveTextContent("0");
+    expect(
+      fetchMock.mock.calls.some(([input]) =>
+        String(input).includes("/api/live-news?country="),
+      ),
+    ).toBe(false);
     expect(
       fetchMock.mock.calls.some(([input]) =>
         String(input).includes("scope=global"),
@@ -736,6 +782,20 @@ describe("WorldPulse interactions", () => {
       if (url === "/countries.geojson") {
         return Response.json({
           features: [{ id: "124", properties: { name: "Canada" } }],
+        });
+      }
+      if (url.includes("scope=map")) {
+        return liveMapResponse(url, {
+          Canada: [
+            {
+              id: "canada-archive",
+              title: oldHeadline,
+              url: "https://publisher.example/canada-archive",
+              publisherName: "Archive Publisher",
+              publisherUrl: "https://publisher.example/",
+              publishedAt: "2026-07-01T00:00:00.000Z",
+            },
+          ],
         });
       }
       const countryName = url.includes("country=Canada") ? "Canada" : null;
@@ -774,7 +834,7 @@ describe("WorldPulse interactions", () => {
     ).toBeInTheDocument();
   });
 
-  it("uses background-loaded country reporting without fetching on map click", async () => {
+  it("uses map-loaded country reporting without fetching on map click", async () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input);
       if (url === "/countries.geojson") {
@@ -784,6 +844,9 @@ describe("WorldPulse interactions", () => {
             { id: "686", properties: { name: "Senegal" } },
           ],
         });
+      }
+      if (url.includes("scope=map")) {
+        return liveMapResponse(url);
       }
       const countryName = url.includes("country=Senegal")
         ? "Senegal"
@@ -803,9 +866,7 @@ describe("WorldPulse interactions", () => {
 
     render(<WorldPulseApp MapComponent={TestMap} />);
     await waitFor(() =>
-      expect(fetchMock).toHaveBeenCalledWith(
-        "/api/live-news?country=Senegal&iso2=SN",
-      ),
+      expect(screen.getByTestId("countries-with-news")).toHaveTextContent("2"),
     );
     const requestsBeforeClick = fetchMock.mock.calls.filter(([input]) =>
       String(input).includes("country=Senegal"),
@@ -816,6 +877,11 @@ describe("WorldPulse interactions", () => {
 
     expect(
       screen.getByRole("heading", { name: "Senegal" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("heading", {
+        name: liveArticleFor("Senegal").title,
+      }),
     ).toBeInTheDocument();
     expect(
       fetchMock.mock.calls.filter(([input]) =>
@@ -833,6 +899,21 @@ describe("WorldPulse interactions", () => {
           features: [
             { id: "124", properties: { name: "Canada" } },
             { id: "818", properties: { name: "Egypt" } },
+          ],
+        });
+      }
+      if (url.includes("scope=map")) {
+        return liveMapResponse(url, {
+          Canada: [],
+          Egypt: [
+            {
+              id: "egypt-local",
+              title: arabicHeadline,
+              url: "https://publisher.example/egypt-local",
+              publisherName: "صحيفة مصرية",
+              publisherUrl: "https://publisher.example/",
+              publishedAt: "2026-07-24T22:00:00.000Z",
+            },
           ],
         });
       }
@@ -865,11 +946,7 @@ describe("WorldPulse interactions", () => {
     vi.stubGlobal("fetch", fetchMock);
 
     render(<WorldPulseApp MapComponent={TestMap} />);
-    await waitFor(() =>
-      expect(fetchMock).toHaveBeenCalledWith(
-        "/api/live-news?country=Egypt&iso2=EG",
-      ),
-    );
+    await screen.findByText("Live country index complete");
     const egyptRequestsBeforeClick = fetchMock.mock.calls.filter(([input]) =>
       String(input).includes("country=Egypt"),
     ).length;
@@ -897,7 +974,7 @@ describe("WorldPulse interactions", () => {
     ).toHaveLength(egyptRequestsBeforeClick);
   });
 
-  it("keeps the loading screen visible until every full country feed is checked", async () => {
+  it("keeps the loading screen visible until every live map batch is checked", async () => {
     let finishMexico: (() => void) | undefined;
     const mexicoReady = new Promise<void>((resolve) => {
       finishMexico = resolve;
@@ -908,26 +985,34 @@ describe("WorldPulse interactions", () => {
         return Response.json({
           features: [
             { id: "124", properties: { name: "Canada" } },
+            { id: "840", properties: { name: "United States" } },
+            { id: "250", properties: { name: "France" } },
+            { id: "276", properties: { name: "Germany" } },
+            { id: "380", properties: { name: "Italy" } },
+            { id: "724", properties: { name: "Spain" } },
+            { id: "392", properties: { name: "Japan" } },
+            { id: "818", properties: { name: "Egypt" } },
             { id: "484", properties: { name: "Mexico" } },
           ],
         });
       }
       if (url.includes("scope=map")) {
+        if (
+          new URL(url, "https://worldpulse.test")
+            .searchParams.get("countries")
+            ?.includes("Mexico")
+        ) {
+          await mexicoReady;
+        }
         return liveMapResponse(url);
       }
-      const countryName = url.includes("country=Mexico")
-        ? "Mexico"
-        : url.includes("country=Canada")
-          ? "Canada"
-          : null;
-      if (countryName === "Mexico") await mexicoReady;
       return Response.json({
-        countryName,
-        scope: countryName ? "country" : "global",
+        countryName: null,
+        scope: "global",
         generatedAt: "2026-07-25T00:00:00.000Z",
         refreshAfterSeconds: 600,
         provider: "Test live index",
-        articles: countryName ? [liveArticleFor(countryName)] : [],
+        articles: [],
       });
     });
     vi.stubGlobal("fetch", fetchMock);
@@ -940,7 +1025,7 @@ describe("WorldPulse interactions", () => {
       }),
     ).toBeInTheDocument();
     expect(
-      await screen.findByText(/1\/2 country feeds checked/),
+      await screen.findByText(/8\/9 country feeds checked/),
     ).toBeInTheDocument();
     expect(
       screen.queryByRole("button", { name: "Global feed" }),
@@ -954,7 +1039,7 @@ describe("WorldPulse interactions", () => {
     expect(
       await screen.findByText("Live country index complete"),
     ).toBeInTheDocument();
-    expect(screen.getByTestId("countries-with-news")).toHaveTextContent("2");
+    expect(screen.getByTestId("countries-with-news")).toHaveTextContent("9");
     expect(screen.getByTestId("countries-syncing")).toHaveTextContent("0");
   });
 
@@ -1195,9 +1280,12 @@ describe("WorldPulse interactions", () => {
       screen.getByText("Live country index complete"),
     ).toBeInTheDocument();
     expect(screen.getByTestId("countries-syncing")).toHaveTextContent("0");
+    expect(
+      screen.getByTestId("countries-with-valid-color-contract"),
+    ).toHaveTextContent("215");
   }, 20_000);
 
-  it("keeps the map signal aligned with the deeper country feed after it loads", async () => {
+  it("keeps the map signal aligned when a selected country is refreshed", async () => {
     const mapHeadline = "Canada trade exports rise after a new market agreement";
     const countryHeadline =
       "Canada military forces clash near a disputed border base";
@@ -1226,14 +1314,30 @@ describe("WorldPulse interactions", () => {
           ],
         });
       }
+      if (url.includes("scope=global")) {
+        return Response.json({
+          countryName: null,
+          scope: "global",
+          generatedAt: "2026-07-25T02:00:00.000Z",
+          refreshAfterSeconds: 600,
+          provider: "Test live index",
+          articles: [],
+        });
+      }
       return countryFeedResponse;
     });
     vi.stubGlobal("fetch", fetchMock);
 
     render(<WorldPulseApp MapComponent={TestMap} />);
 
-    await screen.findByText(/0\/1 country feeds checked/);
-    expect(screen.queryByTestId("canada-map-category")).not.toBeInTheDocument();
+    await screen.findByText("Live country index complete");
+    expect(
+      screen.getByRole("heading", { name: mapHeadline }),
+    ).toBeInTheDocument();
+    expect(screen.getByTestId("canada-map-category")).toHaveTextContent(
+      "Economy",
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Refresh" }));
     await act(async () => {
       resolveCountryFeed?.(
         Response.json({
@@ -1271,6 +1375,92 @@ describe("WorldPulse interactions", () => {
     fireEvent.click(screen.getByRole("button", { name: "Global feed" }));
     expect(screen.getByTestId("canada-map-category")).toHaveTextContent(
       "Conflict and security",
+    );
+  });
+
+  it("keeps Australia's top-story color category stable through selection", async () => {
+    const mapHeadline =
+      "Australia airport opens a new international travel route";
+    const deepHeadline =
+      "Australia parliament schedules a national election";
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === "/countries.geojson") {
+        return Response.json({
+          features: [
+            { id: "036", properties: { name: "Australia" } },
+            { id: "124", properties: { name: "Canada" } },
+          ],
+        });
+      }
+      if (url.includes("scope=map")) {
+        return liveMapResponse(url, {
+          Australia: [
+            {
+              ...liveArticleFor("Australia"),
+              id: "australia-map-travel",
+              title: mapHeadline,
+              publishedAt: "2026-07-25T02:00:00.000Z",
+            },
+          ],
+        });
+      }
+      const countryName = new URL(
+        url,
+        "https://worldpulse.test",
+      ).searchParams.get("country");
+      return Response.json({
+        countryName,
+        scope: "country",
+        generatedAt: "2026-07-25T02:00:00.000Z",
+        refreshAfterSeconds: 600,
+        provider: "Test live index",
+        articles:
+          countryName === "Australia"
+            ? [
+                {
+                  ...liveArticleFor("Australia"),
+                  id: "australia-deep-politics",
+                  title: deepHeadline,
+                  publishedAt: "2026-07-25T00:00:00.000Z",
+                },
+              ]
+            : countryName
+              ? [liveArticleFor(countryName)]
+              : [],
+      });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<WorldPulseApp MapComponent={TestMap} />);
+
+    await waitFor(() =>
+      expect(screen.getByTestId("australia-map-category")).toHaveTextContent(
+        "Travel and transport",
+      ),
+    );
+    expect(screen.getByTestId("australia-map-headline")).toHaveTextContent(
+      mapHeadline,
+    );
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "Select Australia on map" }),
+    );
+    expect(
+      await screen.findByRole("heading", { name: mapHeadline }),
+    ).toBeInTheDocument();
+    expect(screen.getByTestId("australia-map-category")).toHaveTextContent(
+      "Travel and transport",
+    );
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "Select Japan on map" }),
+    );
+    expect(screen.getByTestId("australia-map-category")).toHaveTextContent(
+      "Travel and transport",
+    );
+    expect(screen.getByTestId("australia-map-headline")).toHaveTextContent(
+      mapHeadline,
     );
   });
 });

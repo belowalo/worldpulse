@@ -135,7 +135,12 @@ const COUNTRY_RELATED_TERMS: Record<string, string[]> = {
     "Ascension Island",
     "Tristan da Cunha",
   ],
-  "Saint Pierre and Miquelon": ["Saint Pierre", "Miquelon"],
+  "Saint Pierre and Miquelon": [
+    "Saint Pierre",
+    "Miquelon",
+    "Saint-Pierre",
+    "Saint-Pierre-et-Miquelon",
+  ],
   "Saudi Arabia": ["Saudi"],
   Senegal: ["Senegalese", "Sénégal", "Sénégalais", "Dakar"],
   Serbia: ["Serbian"],

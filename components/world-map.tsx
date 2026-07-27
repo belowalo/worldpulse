@@ -427,7 +427,7 @@ export function WorldMap({
             </>
           ) : (
             <p className="mt-2 text-xs text-[#8f9caf]">
-              No current source-backed match was returned for this country.
+              No current coverage matched this country.
             </p>
           )}
         </div>

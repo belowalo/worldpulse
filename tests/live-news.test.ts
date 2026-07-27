@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 
 import {
@@ -9,8 +9,10 @@ import {
   enrichEventWithCoverage,
   eventsDescribeSameOccurrence,
   mergeCanonicalEvents,
+  mergeEventFeeds,
   newsTextTokens,
 } from "@/lib/live-news";
+import { canonicalCountryName } from "@/lib/country-terms";
 import {
   biasDistributionForArticles,
   canonicalPublisherKey,
@@ -45,6 +47,58 @@ const payload: LiveNewsPayload = {
 };
 
 describe("live news normalization", () => {
+  it("rejects the Rostov drone report for Kazakhstan and keeps its actual countries", () => {
+    const droneReport: LiveNewsPayload = {
+      ...payload,
+      countryName: "Kazakhstan",
+      articles: [
+        {
+          ...payload.articles[0],
+          id: "rostov-drone-report",
+          title:
+            "Ukrainian drones kill two in Russia's Rostov-on-Don, target Taganrog, governor says",
+          description:
+            "Russian officials reported drone attacks in Rostov-on-Don and Taganrog.",
+        },
+      ],
+    };
+
+    expect(articlesMentioningCountry(droneReport, "Kazakhstan")).toHaveLength(0);
+    expect(articlesMentioningCountry(droneReport, "Russia")).toHaveLength(1);
+    expect(articlesMentioningCountry(droneReport, "Ukraine")).toHaveLength(1);
+  });
+
+  it("recognizes an explicit country reference for every map country", () => {
+    const geojson = JSON.parse(
+      readFileSync(resolve("public/countries.geojson"), "utf8"),
+    ) as {
+      features: Array<{ properties?: { name?: string } }>;
+    };
+
+    expect(geojson.features).toHaveLength(215);
+    for (const feature of geojson.features) {
+      const countryName = feature.properties?.name;
+      expect(countryName).toBeTruthy();
+      const canonicalName = canonicalCountryName(countryName!);
+      const countryPayload: LiveNewsPayload = {
+        ...payload,
+        countryName: countryName!,
+        articles: [
+          {
+            ...payload.articles[0],
+            id: `country-${countryName}`,
+            title: `${canonicalName} government announces a national update`,
+            description: `The report concerns ${canonicalName}.`,
+          },
+        ],
+      };
+      expect(
+        articlesMentioningCountry(countryPayload, countryName!),
+        countryName,
+      ).toHaveLength(1);
+    }
+  });
+
   it("classifies representative live headlines", () => {
     expect(classifyLiveHeadline("Parliament approves new election rules")).toBe(
       "Politics",
@@ -62,12 +116,47 @@ describe("live news normalization", () => {
     );
     expect(
       classifyLiveHeadline(
+        "Trump vows tariffs on Canada over wildfire smoke",
+      ),
+    ).toBe("Economy");
+    expect(
+      classifyLiveHeadline(
         "Trump issues 50% tariffs on Canada ahead of Gordie Howe Bridge opening",
       ),
     ).toBe("Economy");
     expect(
       classifyLiveHeadline(
         "Canada marks Gordie Howe bridge opening after trade war deepens",
+      ),
+    ).toBe("Economy");
+    expect(
+      classifyLiveHeadline(
+        "‘The Daily Show’ tackles Trump’s latest move in his ‘war on Canada’",
+      ),
+    ).toBe("Culture and entertainment");
+    expect(
+      classifyLiveHeadline(
+        "Canada announces roster for 2026 World Junior Summer Showcase",
+      ),
+    ).toBe("Sports");
+    expect(
+      classifyLiveHeadline(
+        "Aspen Pharmacare wins Canada approval for generic Ozempic",
+      ),
+    ).toBe("Health");
+    expect(
+      classifyLiveHeadline(
+        "Beluga whales from closed Canada park arrive in new US homes",
+      ),
+    ).toBe("Environment");
+    expect(
+      classifyLiveHeadline(
+        "Airbus signs strategic partnership for advanced UAS in Canada",
+      ),
+    ).toBe("Economy");
+    expect(
+      classifyLiveHeadline(
+        "Pratt & Whitney Canada to invest $275 million in its facility",
       ),
     ).toBe("Economy");
     expect(
@@ -89,6 +178,8 @@ describe("live news normalization", () => {
     ["Court convicts former mayor in corruption trial", "Crime and justice"],
     ["Powerful earthquake triggers tsunami evacuation", "Weather and disasters"],
     ["Hospital launches new cancer vaccine trial", "Health"],
+    ["Canada rolls out new graphic warnings on cigarette packs", "Health"],
+    ["Emergency physicians warn that blood supplies are falling", "Health"],
     ["University students win expanded education rights", "Society and education"],
     ["Airline adds flights after airport rail opening", "Travel and transport"],
     ["National football team reaches World Cup final", "Sports"],
@@ -199,6 +290,12 @@ describe("live news normalization", () => {
 
   it("does not ship a static news snapshot", () => {
     expect(existsSync(resolve("public/map-news-summary.json"))).toBe(false);
+    const countryMetadata = readFileSync(
+      resolve("lib/seed-data.ts"),
+      "utf8",
+    );
+    expect(countryMetadata).not.toMatch(/\b(?:headline|summary|makeEvent)\b/u);
+    expect(countryMetadata).not.toContain("example.com");
   });
 
   it("clusters related reporting and preserves publisher links", () => {
@@ -326,6 +423,42 @@ describe("live news normalization", () => {
     expect(canonicalEvent.articles).toHaveLength(2);
   });
 
+  it("uses one sorted canonical event set for deep and world-search feeds", () => {
+    const deepEvent = buildLiveEvents(
+      {
+        ...payload,
+        articles: [
+          {
+            ...payload.articles[0],
+            id: "deep-politics",
+            title: "Australia parliament schedules a national election",
+            publishedAt: "2026-07-24T20:00:00.000Z",
+          },
+        ],
+      },
+      { name: "Australia", iso2: "AU" },
+    )[0];
+    const worldEvent = buildLiveEvents(
+      {
+        ...payload,
+        articles: [
+          {
+            ...payload.articles[0],
+            id: "world-travel",
+            title: "Australia airport opens a new international travel route",
+            publishedAt: "2026-07-24T23:00:00.000Z",
+          },
+        ],
+      },
+      { name: "Australia", iso2: "AU" },
+    )[0];
+
+    const canonical = mergeEventFeeds([deepEvent], [worldEvent]);
+    expect(canonical).toHaveLength(2);
+    expect(canonical[0].headline).toBe(worldEvent.headline);
+    expect(canonical[0].category).toBe("Travel and transport");
+  });
+
   it("does not merge unrelated crime reports that share generic wording", () => {
     const [seattleEvent] = buildLiveEvents(
       {
@@ -433,6 +566,66 @@ describe("live news normalization", () => {
     expect(
       expanded.articles.map((article) => article.source.publisherName),
     ).toEqual(expect.arrayContaining(["Reuters", "Associated Press"]));
+  });
+
+  it("rejects unrelated articles returned by a broader event search", () => {
+    const bridgePayload: LiveNewsPayload = {
+      ...payload,
+      articles: [
+        {
+          ...payload.articles[0],
+          id: "bridge-original",
+          title:
+            "Canada reportedly scraps joint bridge celebration with US after Trump renews tariff threat",
+          description:
+            "The dispute concerns the opening celebration for a Canada-US bridge.",
+        },
+      ],
+    };
+    const [event] = buildLiveEvents(bridgePayload, {
+      name: "Canada",
+      iso2: "CA",
+    });
+    const expanded = enrichEventWithCoverage(event, {
+      ...bridgePayload,
+      scope: "event",
+      articles: [
+        {
+          ...bridgePayload.articles[0],
+          id: "bridge-match",
+          title:
+            "Trump tariff threat prompts Canada to cancel joint bridge ceremony",
+          publisherName: "BBC News",
+          publisherUrl: "https://bbc.com/",
+        },
+        {
+          ...bridgePayload.articles[0],
+          id: "wildfire-tariffs",
+          title:
+            "Trump vows wildfire smoke tariffs on Canada as fires spread",
+          description:
+            "The president proposed tariffs tied to Canadian wildfire smoke.",
+          publisherName: "CBC News",
+          publisherUrl: "https://cbc.ca/",
+        },
+        {
+          ...bridgePayload.articles[0],
+          id: "iran-strikes",
+          title:
+            "Trump threatens Iran over frozen assets as US strikes continue",
+          description:
+            "The latest statement concerned Iran and military strikes.",
+          publisherName: "Fox News",
+          publisherUrl: "https://foxnews.com/",
+        },
+      ],
+    });
+
+    expect(
+      expanded.articles.map((article) => article.source.publisherName),
+    ).toEqual(expect.arrayContaining(["BBC News", "Reuters"]));
+    expect(expanded.articles).toHaveLength(2);
+    expect(expanded.summary).toContain("2 independent publishers");
   });
 
   it("builds a Ground News publisher mix and excludes unrated outlets", () => {
