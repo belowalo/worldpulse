@@ -866,7 +866,7 @@ export function WorldPulseApp({
         <section className="relative min-h-[54vh] border-b border-[#222d3e] lg:h-[calc(100vh-4rem)] lg:border-b-0 lg:border-r">
           <MapComponent
             countries={mapCountries}
-            selectedMapId={selectedCountry.mapId}
+            selectedMapId={globalView ? null : selectedCountry.mapId}
             onSelect={handleSelect}
             linkEvents={mapLinkEvents}
             statusLabel={
@@ -893,8 +893,8 @@ export function WorldPulseApp({
               <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[9px] text-[#647286]">
                 <span>Intensity = estimated importance</span>
                 <span className="inline-flex items-center gap-1.5">
-                  <span className="h-2 w-5 rounded-[50%] border-t border-[#73e2cc]" />
-                  Curves = selected event connections
+                  <span className="h-2 w-5 rounded-[50%] border-t-2 border-[#d8fff7] shadow-[0_0_6px_#73e2cc]" />
+                  Glowing curves = selected event connections
                 </span>
               </div>
             </div>

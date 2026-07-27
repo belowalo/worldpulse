@@ -37,6 +37,7 @@ const LINE_LAYER = "country-line";
 const EVENT_LINK_SOURCE = "event-links";
 const EVENT_LINK_GLOW_LAYER = "event-link-glow";
 const EVENT_LINK_LAYER = "event-link-line";
+const EVENT_LINK_HIGHLIGHT_LAYER = "event-link-highlight";
 const SELECTED_LAYER = "selected-country";
 
 maplibregl.setWorkerUrl(maplibreWorkerUrl);
@@ -187,17 +188,17 @@ export function WorldMap({
           "line-join": "round",
         },
         paint: {
-          "line-blur": 3.5,
+          "line-blur": 5,
           "line-color": ["get", "color"],
-          "line-opacity": 0.24,
+          "line-opacity": 0.42,
           "line-width": [
             "interpolate",
             ["linear"],
             ["get", "importanceScore"],
             0,
-            3,
+            5,
             100,
-            8,
+            13,
           ],
         },
       });
@@ -211,15 +212,45 @@ export function WorldMap({
         },
         paint: {
           "line-color": ["get", "color"],
-          "line-opacity": 0.8,
+          "line-opacity": 0.96,
           "line-width": [
             "interpolate",
             ["linear"],
             ["get", "importanceScore"],
             0,
-            1,
+            1.8,
             100,
-            2.8,
+            4.2,
+          ],
+        },
+      });
+      map.addLayer({
+        id: EVENT_LINK_HIGHLIGHT_LAYER,
+        type: "line",
+        source: EVENT_LINK_SOURCE,
+        layout: {
+          "line-cap": "round",
+          "line-join": "round",
+        },
+        paint: {
+          "line-color": "#ecfffb",
+          "line-opacity": [
+            "interpolate",
+            ["linear"],
+            ["get", "importanceScore"],
+            0,
+            0.38,
+            100,
+            0.76,
+          ],
+          "line-width": [
+            "interpolate",
+            ["linear"],
+            ["get", "importanceScore"],
+            0,
+            0.55,
+            100,
+            1.15,
           ],
         },
       });

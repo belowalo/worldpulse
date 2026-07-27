@@ -15,6 +15,7 @@ afterEach(() => {
 function TestMap({
   countries,
   onSelect,
+  selectedMapId,
   statusLabel,
   linkEvents,
 }: WorldMapProps) {
@@ -29,6 +30,7 @@ function TestMap({
       <span data-testid="link-event-ids">
         {linkEvents?.map((event) => event.id).join(",") ?? ""}
       </span>
+      <span data-testid="selected-map-id">{selectedMapId ?? ""}</span>
       <button type="button" onClick={() => japan && onSelect(japan)}>
         Select Japan on map
       </button>
@@ -68,6 +70,20 @@ describe("WorldPulse interactions", () => {
       screen.getByRole("button", { name: "Select Japan on map" }),
     );
     expect(screen.getByRole("heading", { name: "Japan" })).toBeInTheDocument();
+  });
+
+  it("clears the country highlight in global feed and restores it in map view", () => {
+    render(<WorldPulseApp MapComponent={TestMap} liveUpdates={false} />);
+    fireEvent.click(
+      screen.getByRole("button", { name: "Select Japan on map" }),
+    );
+    expect(screen.getByTestId("selected-map-id")).toHaveTextContent("392");
+
+    fireEvent.click(screen.getByRole("button", { name: "Global feed" }));
+    expect(screen.getByTestId("selected-map-id")).toBeEmptyDOMElement();
+
+    fireEvent.click(screen.getByRole("button", { name: "Map view" }));
+    expect(screen.getByTestId("selected-map-id")).toHaveTextContent("392");
   });
 
   it("shows all country connections until a specific event is selected", async () => {
