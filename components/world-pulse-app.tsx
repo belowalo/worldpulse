@@ -1168,7 +1168,14 @@ export function WorldPulseApp({
           )
             .map((event) => {
               const payload = coverageForEvent(event, eventCoverage)?.payload;
-              return payload ? enrichEventWithCoverage(event, payload) : event;
+              const enrichedEvent = payload
+                ? enrichEventWithCoverage(event, payload)
+                : event;
+              return applyDetectedGeography(
+                enrichedEvent,
+                countryDirectory,
+                country,
+              );
             })
             .sort(
               (left, right) =>
