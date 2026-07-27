@@ -179,9 +179,7 @@ async function storeLiveResponse(
   }
   let payload = await response.text();
   const cachedAt = Date.now();
-  const isMapSearch =
-    new URL(cacheKey.url).searchParams.get("scope") === "map";
-  if (db && !isMapSearch) {
+  if (db) {
     try {
       const stored = await readStoredNewsFeed(db, cacheKey.url);
       if (stored) payload = mergeCachedPayloads(payload, stored.payload);

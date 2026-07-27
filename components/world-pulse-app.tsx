@@ -1415,7 +1415,7 @@ export function WorldPulseApp({
               worldLoad.total
                 ? worldLoad.loaded === worldLoad.total
                   ? worldLoad.retrying
-                    ? `${worldLoad.loaded}/${worldLoad.total} countries indexed · retrying ${worldLoad.retrying} without results`
+                    ? `${worldLoad.loaded}/${worldLoad.total} countries indexed · ${worldLoad.retrying} awaiting a current match`
                     : `${worldLoad.loaded}/${worldLoad.total} countries live indexed${
                         worldLoad.refreshed
                           ? ` · ${worldLoad.refreshed} refreshed`
