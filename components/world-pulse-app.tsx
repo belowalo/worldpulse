@@ -1335,17 +1335,29 @@ export function WorldPulseApp({
   const fullCountryFeed = countryFeeds[activeCountry.name];
   const liveCountryFeed = liveCountryFeeds[activeCountry.name];
   const combinedCountryFeed = useMemo(
-    () =>
-      fullCountryFeed && !fullCountryFeed.error
-        ? {
-            ...fullCountryFeed,
-            events: mergeEventFeeds(
-              fullCountryFeed.events,
-              liveCountryFeed?.events ?? [],
-            ),
-          }
-        : liveCountryFeed ?? fullCountryFeed,
-    [fullCountryFeed, liveCountryFeed],
+    () => {
+      const combined =
+        fullCountryFeed && !fullCountryFeed.error
+          ? {
+              ...fullCountryFeed,
+              events: mergeEventFeeds(
+                fullCountryFeed.events,
+                liveCountryFeed?.events ?? [],
+              ),
+            }
+          : liveCountryFeed ?? fullCountryFeed;
+      if (!combined || !activeCountry.signalReady) return combined;
+      return {
+        ...combined,
+        events: activeCountry.events,
+      };
+    },
+    [
+      activeCountry.events,
+      activeCountry.signalReady,
+      fullCountryFeed,
+      liveCountryFeed,
+    ],
   );
   const activeCountrySignal = countrySignalFeeds[activeCountry.name];
   const countryFeedPending =
@@ -1462,6 +1474,7 @@ export function WorldPulseApp({
   ]);
   const baseEvents = useMemo(
     () => {
+      if (!globalView) return activeFeed.events;
       const canonicalById = new Map(
         canonicalEvents.map((event) => [event.id, event]),
       );
