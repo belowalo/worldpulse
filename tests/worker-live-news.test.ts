@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 
 import {
@@ -261,36 +261,11 @@ describe("worker live-news providers", () => {
     expect(unresolved).toEqual([]);
   });
 
-  it("ships a lightweight headline summary for every mapped country", () => {
-    const geojson = JSON.parse(
-      readFileSync(resolve("public/countries.geojson"), "utf8"),
-    ) as { features: Array<{ properties: { name: string } }> };
-    const snapshot = JSON.parse(
-      readFileSync(resolve("public/map-news-summary.json"), "utf8"),
-    ) as {
-      countries: Array<{
-        countryName: string;
-        available: boolean;
-        articles: unknown[];
-      }>;
-    };
-    const mapCountries = geojson.features.map(
-      (feature) => feature.properties.name,
-    );
-    const snapshotCountries = snapshot.countries.map(
-      (country) => country.countryName,
-    );
-
-    expect(snapshotCountries).toEqual(mapCountries);
-    expect(new Set(snapshotCountries).size).toBe(mapCountries.length);
-    expect(
-      snapshot.countries.every(
-        (country) => country.available && country.articles.length === 1,
-      ),
-    ).toBe(true);
+  it("ships no static headline summary", () => {
+    expect(existsSync(resolve("public/map-news-summary.json"))).toBe(false);
   });
 
-  it("preloads a batch of country headlines in one map request", async () => {
+  it("loads a batch of current country headlines in one map request", async () => {
     vi.spyOn(console, "warn").mockImplementation(() => undefined);
     const requestedUrls: string[] = [];
     const googleItem = `
@@ -342,7 +317,7 @@ describe("worker live-news providers", () => {
     ).toBe(true);
   });
 
-  it("mixes local, current, latest, and rights reporting in country preloads", async () => {
+  it("mixes local, current, latest, and rights reporting in map searches", async () => {
     vi.spyOn(console, "warn").mockImplementation(() => undefined);
     const requestedUrls: string[] = [];
     const feed = (id: string, title: string, publisher: string) => `

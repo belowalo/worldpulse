@@ -24,7 +24,7 @@ interface ExecutionContext {
   passThroughOnException(): void;
 }
 
-const LIVE_CACHE_NAME = "worldpulse-live-v4";
+const LIVE_CACHE_NAME = "worldpulse-live-v5";
 const LIVE_CACHE_FRESH_MS = 5 * 60_000;
 const LIVE_CACHE_RETENTION_SECONDS = 24 * 60 * 60;
 const ARTICLE_RETENTION_MS = 8 * 24 * 60 * 60_000;
@@ -144,7 +144,8 @@ function normalizedLiveCacheKey(request: Request) {
   const url = new URL(request.url);
   url.hash = "";
   url.searchParams.delete("release");
-  url.searchParams.set("__wp_cache", "4");
+  url.searchParams.delete("fresh");
+  url.searchParams.set("__wp_cache", "5");
   url.searchParams.sort();
   return new Request(url.toString(), { method: "GET" });
 }
@@ -169,7 +170,12 @@ async function storeLiveResponse(
   response: Response,
   db?: D1Database,
 ) {
-  if (!response.ok) return;
+  if (
+    !response.ok ||
+    response.headers.get("Cache-Control")?.toLowerCase().includes("no-store")
+  ) {
+    return;
+  }
   let payload = await response.text();
   const cachedAt = Date.now();
   if (db) {
@@ -236,6 +242,19 @@ async function handleCachedLiveNews(
 
   const cache = await caches.open(LIVE_CACHE_NAME);
   const cacheKey = normalizedLiveCacheKey(request);
+  const requestUrl = new URL(request.url);
+  const forceFreshMapSearch =
+    requestUrl.searchParams.get("scope") === "map" &&
+    requestUrl.searchParams.get("fresh") === "1";
+  if (forceFreshMapSearch) {
+    requestUrl.searchParams.delete("fresh");
+    const fresh = await handleLiveNews(new Request(requestUrl, request));
+    ctx.waitUntil(
+      storeLiveResponse(cache, cacheKey, fresh.clone(), env.DB),
+    );
+    return responseWithCacheState(fresh, "miss");
+  }
+
   const cached = await cache.match(cacheKey);
   if (cached) {
     const cachedAt = Number(cached.headers.get("X-WorldPulse-Cached-At"));

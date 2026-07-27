@@ -2,7 +2,7 @@
 
 WorldPulse is a production-quality MVP for exploring recent world news through an interactive map. Each country's hue represents the category of its highest-impact active event, while intensity represents a deterministic 0–100 importance estimate. Clicking any mapped country loads current RSS-indexed headlines, publisher links, timestamps, geographic scope, and a plain-language score explanation.
 
-The hosted site opens with a compact, real-headline map summary, fetches the selected country live, loads the global feed only when requested, and refreshes country signals in small background batches. It reads headline-level public RSS metadata and never scrapes or republishes article bodies. Fresh results are cached at the edge and in the hosted database so later visits do not repeat slow upstream work.
+The hosted site opens with a blocking live world sweep that searches current reporting directly for every mapped country before the map becomes interactive. No headline bundle ships with the application, and startup map requests bypass stored feed reads. It reads headline-level public RSS metadata and never scrapes or republishes article bodies. Successful live results are cached at the edge and in the hosted database for deeper country and event queries and for temporary provider resilience.
 
 ## Screenshots
 

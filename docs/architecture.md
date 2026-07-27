@@ -34,7 +34,7 @@ The web app is at the repository root because the deployable Sites runtime expec
 - `lib/seed-data.ts` retains deterministic data for backend development and tests.
 - `public/countries.geojson` is a local, deployment-safe country dataset derived from the ISC-licensed `geojson-world-map` package.
 
-The map canvas supports pointer navigation and direct country selection across all 215 geometries in the bundled dataset. Startup loads one current headline per country, while the selected country receives a full focused query. Five-country background batches progressively refresh map signals, and the global feed remains deferred until the user requests it.
+The map canvas supports pointer navigation and direct country selection across all 215 geometries in the bundled dataset. Startup performs live searches in small concurrent country batches and keeps the interface behind a progress screen until every country has current reporting. The complete live results for each country are immediately available when the map opens, while the selected country receives an additional focused query. Ten-minute live sweeps keep country signals current, and the global feed remains deferred until the user requests it.
 
 ## API boundaries
 
@@ -59,4 +59,4 @@ The API validates pagination bounds and returns a consistent `{"error": ...}` en
 
 ## Deployment
 
-Docker Compose is the full local reference deployment. The hosted app packages the Next.js surface, rolling map summary, cached RSS-metadata proxy, and D1 migration as a Cloudflare-compatible worker. Full country feeds load only when needed; background map batches and ten-minute active-feed refreshes keep the interface current without blocking startup.
+Docker Compose is the full local reference deployment. The hosted app packages the Next.js surface, cached RSS-metadata proxy, and D1 migration as a Cloudflare-compatible worker. It contains no static news snapshot: a blocking startup sweep builds the complete country index from live endpoints, followed by ten-minute refresh sweeps and focused active-feed updates.

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { readFileSync } from "node:fs";
+import { existsSync } from "node:fs";
 import { resolve } from "node:path";
 
 import {
@@ -15,10 +15,7 @@ import {
   biasDistributionForArticles,
   publisherBiasRating,
 } from "@/lib/publisher-bias";
-import type {
-  LiveNewsPayload,
-  MapNewsPayload,
-} from "@/lib/types";
+import type { LiveNewsPayload } from "@/lib/types";
 
 const payload: LiveNewsPayload = {
   countryName: "Canada",
@@ -136,74 +133,9 @@ describe("live news normalization", () => {
     );
   });
 
-  it("keeps Other as a narrow fallback in the real map summary", () => {
-    const snapshot = JSON.parse(
-      readFileSync(resolve("public/map-news-summary.json"), "utf8"),
-    ) as MapNewsPayload;
-    const titles = snapshot.countries.flatMap((country) =>
-      country.articles.map((article) => article.title),
-    );
-    const otherCount = titles.filter(
-      (title) => classifyLiveHeadline(title) === "Other",
-    ).length;
-    const categoryCounts = titles.reduce<Record<string, number>>(
-      (counts, title) => {
-        const category = classifyLiveHeadline(title);
-        counts[category] = (counts[category] ?? 0) + 1;
-        return counts;
-      },
-      {},
-    );
-    const largestCategoryCount = Math.max(...Object.values(categoryCounts));
-
-    expect(
-      otherCount / titles.length,
-      `${otherCount} of ${titles.length} current headlines fell back to Other`,
-    ).toBeLessThan(0.25);
-    expect(
-      Object.keys(categoryCounts).length,
-      JSON.stringify(categoryCounts),
-    ).toBeGreaterThanOrEqual(12);
-    expect(
-      largestCategoryCount / titles.length,
-      JSON.stringify(categoryCounts),
-    ).toBeLessThan(0.55);
-
-    const countryEvents = snapshot.countries.map((country) =>
-      buildLiveEvents(
-        {
-          countryName: country.countryName,
-          scope: "country",
-          generatedAt: country.generatedAt,
-          refreshAfterSeconds: snapshot.refreshAfterSeconds,
-          provider: snapshot.provider,
-          articles: country.articles,
-        },
-        { name: country.countryName },
-      ),
-    );
-    const topCategoryCounts = countryEvents.reduce<Record<string, number>>(
-      (counts, events) => {
-        const category = events[0]?.category ?? "Missing";
-        counts[category] = (counts[category] ?? 0) + 1;
-        return counts;
-      },
-      {},
-    );
-
-    expect(
-      countryEvents.every((events) => events.length > 0),
-      JSON.stringify(topCategoryCounts),
-    ).toBe(true);
-    expect(
-      Object.keys(topCategoryCounts).length,
-      JSON.stringify(topCategoryCounts),
-    ).toBeGreaterThanOrEqual(8);
-
-    expect(
-      snapshot.countries.every((country) => country.articles.length === 1),
-    ).toBe(true);
-  }, 20_000);
+  it("does not ship a static news snapshot", () => {
+    expect(existsSync(resolve("public/map-news-summary.json"))).toBe(false);
+  });
 
   it("clusters related reporting and preserves publisher links", () => {
     const events = buildLiveEvents(payload, {

@@ -634,14 +634,14 @@ async function fetchMapCountry(
   const countryName = canonicalCountryName(requestedCountry);
   const terms = countrySearchTerms(requestedCountry);
   const googleProviders = countryGoogleProviders(countryName, "");
-  const preloadProviders = [
+  const mapProviders = [
     googleProviders[1],
     googleProviders[3],
     googleProviders[4],
     googleProviders[5],
   ];
   const results = await Promise.all(
-    preloadProviders.map((provider) =>
+    mapProviders.map((provider) =>
       fetchProvider(
         provider,
         "country",
