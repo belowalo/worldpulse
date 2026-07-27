@@ -1,5 +1,8 @@
 import { calculateImportance } from "./scoring";
-import { canonicalPublisherKey } from "./publisher-bias";
+import {
+  canonicalPublisherKey,
+  publisherBiasRating,
+} from "./publisher-bias";
 import {
   countrySearchTerms,
   textMatchesCountry,
@@ -120,6 +123,8 @@ const CATEGORY_TERMS: Array<[Category, string[]]> = [
       "evacuation",
       "fire",
       "flood",
+      "heat",
+      "heat dome",
       "heatwave",
       "hurricane",
       "landslide",
@@ -128,11 +133,14 @@ const CATEGORY_TERMS: Array<[Category, string[]]> = [
       "rescue",
       "snow",
       "storm",
+      "temperature",
       "tornado",
       "tsunami",
       "typhoon",
       "volcano",
       "weather",
+      "weather alert",
+      "warning",
       "wildfire",
       "inondation",
       "séisme",
@@ -617,6 +625,7 @@ const STOP_WORDS = new Set([
   "at",
   "be",
   "by",
+  "extraordinarily",
   "for",
   "from",
   "has",
@@ -636,11 +645,13 @@ const STOP_WORDS = new Set([
   "report",
   "reports",
   "says",
+  "still",
   "that",
   "the",
   "their",
   "this",
   "to",
+  "under",
   "update",
   "was",
   "were",
@@ -651,19 +662,31 @@ const STOP_WORDS = new Set([
 const SHORT_SIGNAL_TOKENS = new Set(["ai", "eu", "fc", "uk", "un", "us", "vs"]);
 
 const TOKEN_EQUIVALENTS: Record<string, string> = {
+  advisories: "warning",
+  advisory: "warning",
+  alerts: "warning",
+  alert: "warning",
   american: "usa",
   america: "usa",
+  americans: "usa",
   bombard: "attack",
   canadian: "canada",
   chinese: "china",
+  heatwave: "heat",
+  hot: "heat",
   iranian: "iran",
   israeli: "israel",
   pummel: "attack",
   russian: "russia",
+  scorching: "heat",
+  sweltering: "heat",
   taiwanese: "taiwan",
+  temperature: "heat",
+  temperatures: "heat",
   turkish: "turkey",
   ukrainian: "ukraine",
   us: "usa",
+  warnings: "warning",
 };
 
 function stableId(value: string) {
@@ -687,10 +710,14 @@ function stemToken(token: string) {
 }
 
 function textTokens(value: string) {
+  const prepared = value
+    .toLowerCase()
+    .replace(/\bu\.?\s*s\.?\b/g, " usa ")
+    .replace(/\bunited\s+states\b/g, " usa ")
+    .replace(/\bunited\s+kingdom\b/g, " uk ");
   return [
     ...new Set(
-      value
-        .toLowerCase()
+      prepared
         .replace(/[^\p{L}\p{N}\s]/gu, " ")
         .split(/\s+/)
         .filter(
@@ -753,6 +780,63 @@ function articleSimilarity(left: LiveArticle, right: LiveArticle) {
   return 0;
 }
 
+function normalizedHeadline(value: string) {
+  return textTokens(value).sort().join(" ");
+}
+
+export function eventsDescribeSameOccurrence(left: Event, right: Event) {
+  const leftNormalized = normalizedHeadline(left.headline);
+  const rightNormalized = normalizedHeadline(right.headline);
+  if (leftNormalized && leftNormalized === rightNormalized) {
+    return true;
+  }
+  const timeDifference = Math.abs(
+    Date.parse(left.lastUpdatedAt) - Date.parse(right.lastUpdatedAt),
+  );
+  if (!Number.isFinite(timeDifference) || timeDifference > 96 * 3_600_000) {
+    return false;
+  }
+  const leftHeadlines = [
+    left.headline,
+    ...left.articles.map((article) => article.headline),
+  ];
+  const rightHeadlines = [
+    right.headline,
+    ...right.articles.map((article) => article.headline),
+  ];
+  const matchingPair = leftHeadlines.some((leftHeadline) =>
+    rightHeadlines.some(
+      (rightHeadline) =>
+        articleSimilarity(
+          {
+            id: "left",
+            title: leftHeadline,
+            url: "",
+            publisherName: "",
+            publisherUrl: "",
+            publishedAt: left.lastUpdatedAt,
+          },
+          {
+            id: "right",
+            title: rightHeadline,
+            url: "",
+            publisherName: "",
+            publisherUrl: "",
+            publishedAt: right.lastUpdatedAt,
+          },
+        ) > 0,
+      ),
+  );
+  const rightTokenSet = new Set(rightNormalized.split(" "));
+  return (
+    matchingPair &&
+    (left.category === right.category ||
+      leftNormalized
+        .split(" ")
+        .filter((token) => rightTokenSet.has(token)).length >= 4)
+  );
+}
+
 export function classifyLiveHeadline(title: string): Category {
   const normalized = title.normalize("NFKC").toLowerCase();
   const tokens = new Set(textTokens(normalized));
@@ -797,6 +881,159 @@ export function publisherProminence(name: string) {
     if (normalized.includes(publisher)) return score;
   }
   return 58;
+}
+
+function selectBalancedSources<T>(
+  items: T[],
+  publisherName: (item: T) => string,
+  publishedAt: (item: T) => string,
+  limit = 5,
+) {
+  const ranked = [...items].sort(
+    (left, right) =>
+      publisherProminence(publisherName(right)) -
+        publisherProminence(publisherName(left)) ||
+      Date.parse(publishedAt(right)) - Date.parse(publishedAt(left)),
+  );
+  const selected: T[] = [];
+  const selectedItems = new Set<T>();
+  const takeFirst = (bucket: "left" | "center" | "right") => {
+    const match = ranked.find(
+      (item) =>
+        !selectedItems.has(item) &&
+        publisherBiasRating(publisherName(item))?.bucket === bucket,
+    );
+    if (match) {
+      selected.push(match);
+      selectedItems.add(match);
+    }
+  };
+
+  takeFirst("left");
+  takeFirst("right");
+  for (const item of ranked) {
+    if (selected.length >= limit) break;
+    if (
+      !selectedItems.has(item) &&
+      publisherBiasRating(publisherName(item))?.bucket === "center"
+    ) {
+      selected.push(item);
+      selectedItems.add(item);
+    }
+  }
+  for (const item of ranked) {
+    if (selected.length >= limit) break;
+    if (!selectedItems.has(item)) {
+      selected.push(item);
+      selectedItems.add(item);
+    }
+  }
+  return selected.sort(
+    (left, right) =>
+      publisherProminence(publisherName(right)) -
+        publisherProminence(publisherName(left)) ||
+      Date.parse(publishedAt(right)) - Date.parse(publishedAt(left)),
+  );
+}
+
+export function mergeCanonicalEvents(
+  canonicalEvent: Event,
+  duplicateEvent: Event,
+): Event {
+  const distinctArticles = new Map<string, Article>();
+  for (const article of [
+    ...canonicalEvent.articles,
+    ...duplicateEvent.articles,
+  ].sort(
+    (left, right) =>
+      right.source.prominenceScore - left.source.prominenceScore ||
+      Date.parse(right.publishedAt) - Date.parse(left.publishedAt),
+  )) {
+    const publisherKey = canonicalPublisherKey(article.source.publisherName);
+    if (!distinctArticles.has(publisherKey)) {
+      distinctArticles.set(publisherKey, {
+        ...article,
+        eventId: canonicalEvent.id,
+      });
+    }
+  }
+  const allArticles = [...distinctArticles.values()];
+  const articles = selectBalancedSources(
+    allArticles,
+    (article) => article.source.publisherName,
+    (article) => article.publishedAt,
+  );
+  const affectedCountries = [
+    ...new Set(
+      [
+        ...canonicalEvent.affectedCountries,
+        ...duplicateEvent.affectedCountries,
+      ].filter((country) => country && country !== "GLOBAL"),
+    ),
+  ];
+  const independentSourceCount = Math.max(
+    canonicalEvent.scoringInput.independentSourceCount,
+    duplicateEvent.scoringInput.independentSourceCount,
+    allArticles.length,
+  );
+  const publisherProminence =
+    allArticles.reduce(
+      (total, article) => total + article.source.prominenceScore,
+      0,
+    ) / Math.max(1, allArticles.length);
+  const scoringInput = {
+    independentSourceCount,
+    sourceCountryCount: Math.max(
+      canonicalEvent.scoringInput.sourceCountryCount,
+      duplicateEvent.scoringInput.sourceCountryCount,
+    ),
+    affectedCountryCount: Math.max(1, affectedCountries.length),
+    countrySignificance: Math.max(
+      canonicalEvent.scoringInput.countrySignificance,
+      duplicateEvent.scoringInput.countrySignificance,
+    ),
+    publisherProminence,
+    ageHours: Math.min(
+      canonicalEvent.scoringInput.ageHours,
+      duplicateEvent.scoringInput.ageHours,
+    ),
+    articlesPerHour: Math.max(
+      canonicalEvent.scoringInput.articlesPerHour,
+      duplicateEvent.scoringInput.articlesPerHour,
+    ),
+  };
+  const scoring = calculateImportance(scoringInput);
+  return {
+    ...canonicalEvent,
+    summary:
+      independentSourceCount > 1
+        ? `${independentSourceCount} independent publishers matched this occurrence. The displayed reports prioritize viewpoint diversity, publisher prominence, and recency.`
+        : canonicalEvent.summary,
+    geographicScope:
+      affectedCountries.length > 1
+        ? "International"
+        : canonicalEvent.geographicScope,
+    primaryCountry:
+      canonicalEvent.primaryCountry === "GLOBAL" && affectedCountries[0]
+        ? affectedCountries[0]
+        : canonicalEvent.primaryCountry,
+    affectedCountries,
+    firstSeenAt:
+      Date.parse(canonicalEvent.firstSeenAt) <=
+      Date.parse(duplicateEvent.firstSeenAt)
+        ? canonicalEvent.firstSeenAt
+        : duplicateEvent.firstSeenAt,
+    lastUpdatedAt:
+      Date.parse(canonicalEvent.lastUpdatedAt) >=
+      Date.parse(duplicateEvent.lastUpdatedAt)
+        ? canonicalEvent.lastUpdatedAt
+        : duplicateEvent.lastUpdatedAt,
+    importanceScore: scoring.score,
+    importanceLabel: scoring.label,
+    scoringComponents: scoring.components,
+    scoringInput,
+    articles,
+  };
 }
 
 function articleAgeHours(article: LiveArticle, reference: number) {
@@ -887,14 +1124,11 @@ export function buildLiveEvents(
   return clusterArticles(payload.articles)
     .map((cluster): Event => {
       const sourceArticles = distinctPublisherArticles(cluster);
-      const visibleSourceArticles = [...sourceArticles]
-        .sort(
-          (left, right) =>
-            publisherProminence(right.publisherName) -
-              publisherProminence(left.publisherName) ||
-            Date.parse(right.publishedAt) - Date.parse(left.publishedAt),
-        )
-        .slice(0, 5);
+      const visibleSourceArticles = selectBalancedSources(
+        sourceArticles,
+        (article) => article.publisherName,
+        (article) => article.publishedAt,
+      );
       const representative = representativeArticle(cluster);
       const headline = representative?.title ?? "Current report";
       const eventId = `live-event-${stableId(headline.toLowerCase())}`;
@@ -939,14 +1173,14 @@ export function buildLiveEvents(
         ageHours: youngestAge,
         articlesPerHour: Math.max(0.2, cluster.length / 6),
       });
-      const publisherNames = [...sources.values()]
-        .slice(0, 5)
-        .map((source) => source.publisherName);
+      const publisherNames = visibleSourceArticles.map(
+        (article) => article.publisherName,
+      );
       const summary =
         sources.size > 1
           ? `${sources.size} independent publishers matched this occurrence, including ${publisherNames.join(
               ", ",
-            )}. The five strongest available reports are linked below.`
+            )}. The displayed reports prioritize viewpoint diversity, publisher prominence, and recency.`
           : `Current reporting indexed from ${
               publisherNames[0] ?? "the original publisher"
             }. Open the source for the complete report.`;
@@ -1019,13 +1253,11 @@ export function enrichEventWithCoverage(
   }
 
   const allArticles = [...combined.values()];
-  const visibleArticles = [...allArticles]
-    .sort(
-      (left, right) =>
-        right.source.prominenceScore - left.source.prominenceScore ||
-        Date.parse(right.publishedAt) - Date.parse(left.publishedAt),
-    )
-    .slice(0, 5);
+  const visibleArticles = selectBalancedSources(
+    allArticles,
+    (article) => article.source.publisherName,
+    (article) => article.publishedAt,
+  );
   const averageProminence =
     allArticles.reduce(
       (sum, article) => sum + article.source.prominenceScore,
@@ -1046,7 +1278,7 @@ export function enrichEventWithCoverage(
     ...event,
     summary:
       allArticles.length > 1
-        ? `Expanded topic search matched ${allArticles.length} independent publishers. The top ${visibleArticles.length} are ranked by publisher prominence and recency.`
+        ? `Expanded topic search matched ${allArticles.length} independent publishers. The ${visibleArticles.length} displayed reports prioritize left, right, and center-rated publishers when available, then publisher prominence and recency.`
         : "Expanded topic search found one matching publisher in the current seven-day window.",
     importanceScore: scoring.score,
     importanceLabel: scoring.label,

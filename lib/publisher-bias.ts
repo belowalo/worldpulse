@@ -55,6 +55,57 @@ const GROUND_RATINGS: Array<{
     },
   },
   {
+    aliases: [
+      "abc news",
+      "abc news breaking news latest news and videos",
+    ],
+    rating: {
+      bucket: "left",
+      label: "Lean Left",
+      groundNewsUrl: "https://ground.news/interest/abc-news_409efb",
+    },
+  },
+  {
+    aliases: ["nbc news"],
+    rating: {
+      bucket: "left",
+      label: "Lean Left",
+      groundNewsUrl: "https://ground.news/interest/nbc-news",
+    },
+  },
+  {
+    aliases: ["usa today"],
+    rating: {
+      bucket: "left",
+      label: "Lean Left",
+      groundNewsUrl: "https://ground.news/interest/usa-today",
+    },
+  },
+  {
+    aliases: ["the washington post", "washington post"],
+    rating: {
+      bucket: "left",
+      label: "Lean Left",
+      groundNewsUrl: "https://ground.news/interest/the-washington-post",
+    },
+  },
+  {
+    aliases: ["cbs news"],
+    rating: {
+      bucket: "center",
+      label: "Center",
+      groundNewsUrl: "https://ground.news/interest/cbs-news",
+    },
+  },
+  {
+    aliases: ["newsweek"],
+    rating: {
+      bucket: "center",
+      label: "Center",
+      groundNewsUrl: "https://ground.news/interest/newsweek",
+    },
+  },
+  {
     aliases: ["al jazeera", "al jazeera english"],
     rating: {
       bucket: "left",

@@ -13,6 +13,8 @@ import {
   articlesMentioningCountry,
   buildLiveEvents,
   enrichEventWithCoverage,
+  eventsDescribeSameOccurrence,
+  mergeCanonicalEvents,
 } from "@/lib/live-news";
 import {
   biasDistributionForArticles,
@@ -118,6 +120,53 @@ const mergeEventFeeds = (...feeds: Event[][]) => {
         Date.parse(right.lastUpdatedAt) - Date.parse(left.lastUpdatedAt),
     );
 };
+
+function applyDetectedGeography(
+  event: Event,
+  countries: MapCountry[],
+  anchorCountry?: MapCountry,
+) {
+  const mentionedCountries = countriesMentionedByEvent(
+    event,
+    countries,
+    anchorCountry,
+  );
+  const detectedCountries = mentionedCountries.map(
+    (country) => country.iso2 ?? country.name,
+  );
+  const affectedCountries = [
+    ...new Set(
+      detectedCountries.length
+        ? detectedCountries
+        : event.affectedCountries.length
+          ? event.affectedCountries
+          : event.primaryCountry !== "GLOBAL"
+            ? [event.primaryCountry]
+            : [],
+    ),
+  ];
+  const scoringInput = {
+    ...event.scoringInput,
+    affectedCountryCount: Math.max(1, affectedCountries.length),
+  };
+  const scoring = calculateImportance(scoringInput);
+  return {
+    ...event,
+    geographicScope:
+      affectedCountries.length > 1
+        ? ("International" as const)
+        : event.geographicScope,
+    primaryCountry:
+      event.primaryCountry === "GLOBAL" && affectedCountries[0]
+        ? affectedCountries[0]
+        : event.primaryCountry,
+    affectedCountries,
+    importanceScore: scoring.score,
+    importanceLabel: scoring.label,
+    scoringComponents: scoring.components,
+    scoringInput,
+  };
+}
 
 function ImportancePill({ event }: { event: Event }) {
   return (
@@ -319,7 +368,9 @@ function EventCard({
         )}
         <p className="mt-2 text-[9px] leading-4 text-[#68778a]">
           Publication-level ratings, not a rating of this event. Unrated local
-          outlets are excluded.{" "}
+          outlets are excluded. When available, the five displayed sources
+          include at least one left-rated and one right-rated publisher, then
+          favor center-rated publishers before prominence and recency.{" "}
           <a
             href="https://ground.news/rating-system"
             target="_blank"
@@ -866,9 +917,15 @@ export function WorldPulseApp({
           scope: "event",
           headline: event.headline,
         });
-        if (!globalView) {
-          parameters.set("country", activeCountry.name);
-          if (activeCountry.iso2) parameters.set("iso2", activeCountry.iso2);
+        const eventCountry = mapCountries.find(
+          (country) =>
+            country.iso2 === event.primaryCountry ||
+            country.name === event.primaryCountry ||
+            event.affectedCountries.includes(country.iso2 ?? country.name),
+        );
+        if (eventCountry) {
+          parameters.set("country", eventCountry.name);
+          if (eventCountry.iso2) parameters.set("iso2", eventCountry.iso2);
         }
         const response = await fetch(
           `/api/live-news?${parameters.toString()}`,
@@ -900,20 +957,23 @@ export function WorldPulseApp({
         }));
       }
     },
-    [activeCountry.iso2, activeCountry.name, globalView],
+    [mapCountries],
   );
   const fullCountryFeed = countryFeeds[activeCountry.name];
   const preloadedCountryFeed = preloadedCountryFeeds[activeCountry.name];
-  const combinedCountryFeed =
-    fullCountryFeed && !fullCountryFeed.error
-      ? {
-          ...fullCountryFeed,
-          events: mergeEventFeeds(
-            fullCountryFeed.events,
-            preloadedCountryFeed?.events ?? [],
-          ),
-        }
-      : preloadedCountryFeed ?? fullCountryFeed;
+  const combinedCountryFeed = useMemo(
+    () =>
+      fullCountryFeed && !fullCountryFeed.error
+        ? {
+            ...fullCountryFeed,
+            events: mergeEventFeeds(
+              fullCountryFeed.events,
+              preloadedCountryFeed?.events ?? [],
+            ),
+          }
+        : preloadedCountryFeed ?? fullCountryFeed,
+    [fullCountryFeed, preloadedCountryFeed],
+  );
   const activeFeed = globalView
     ? globalFeed
     : combinedCountryFeed ?? {
@@ -923,38 +983,80 @@ export function WorldPulseApp({
           loading: fullCountryFeed?.loading ?? globalFeed.loading,
           error: fullCountryFeed?.error ?? globalFeed.error,
         };
+  const canonicalEvents = useMemo(() => {
+    const registry: Event[] = [];
+    const addEvents = (events: Event[], anchorCountry?: MapCountry) => {
+      for (const event of events) {
+        const prepared = applyDetectedGeography(
+          event,
+          mapCountries,
+          anchorCountry,
+        );
+        const canonicalIndex = registry.findIndex(
+          (canonicalEvent) =>
+            canonicalEvent.id === prepared.id ||
+            (canonicalEvent.category === prepared.category &&
+              eventsDescribeSameOccurrence(canonicalEvent, prepared)),
+        );
+        if (canonicalIndex >= 0) {
+          registry[canonicalIndex] = mergeCanonicalEvents(
+            registry[canonicalIndex],
+            prepared,
+          );
+        } else {
+          registry.push(prepared);
+        }
+      }
+    };
+
+    addEvents(globalFeed.events);
+    for (const [countryName, feed] of Object.entries(countryFeeds)) {
+      addEvents(
+        feed.events,
+        mapCountries.find((country) => country.name === countryName),
+      );
+    }
+    addEvents(activeFeed.events, globalView ? undefined : activeCountry);
+    return registry;
+  }, [
+    activeCountry,
+    activeFeed.events,
+    countryFeeds,
+    globalFeed.events,
+    globalView,
+    mapCountries,
+  ]);
   const baseEvents = useMemo(
-    () =>
-      activeFeed.events.map((event) => {
-        const mentionedCountries = countriesMentionedByEvent(
+    () => {
+      const canonicalized = activeFeed.events.map((event) => {
+        const prepared = applyDetectedGeography(
           event,
           mapCountries,
           globalView ? undefined : activeCountry,
         );
-        if (mentionedCountries.length < 2) return event;
-        const affectedCountries = mentionedCountries.map(
-          (country) => country.iso2 ?? country.name,
+        return (
+          canonicalEvents.find(
+            (canonicalEvent) =>
+              canonicalEvent.id === prepared.id ||
+              (canonicalEvent.category === prepared.category &&
+                eventsDescribeSameOccurrence(canonicalEvent, prepared)),
+          ) ?? prepared
         );
-        const scoringInput = {
-          ...event.scoringInput,
-          affectedCountryCount: affectedCountries.length,
-        };
-        const scoring = calculateImportance(scoringInput);
-        return {
-          ...event,
-          geographicScope: "International" as const,
-          primaryCountry:
-            event.primaryCountry === "GLOBAL"
-              ? affectedCountries[0]
-              : event.primaryCountry,
-          affectedCountries,
-          importanceScore: scoring.score,
-          importanceLabel: scoring.label,
-          scoringComponents: scoring.components,
-          scoringInput,
-        };
-      }),
-    [activeCountry, activeFeed.events, globalView, mapCountries],
+      });
+      const seenEventIds = new Set<string>();
+      return canonicalized.filter((event) => {
+        if (seenEventIds.has(event.id)) return false;
+        seenEventIds.add(event.id);
+        return true;
+      });
+    },
+    [
+      activeCountry,
+      activeFeed.events,
+      canonicalEvents,
+      globalView,
+      mapCountries,
+    ],
   );
   const expandedEvents = useMemo(
     () =>

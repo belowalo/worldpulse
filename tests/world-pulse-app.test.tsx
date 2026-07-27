@@ -1,4 +1,10 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import {
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+  within,
+} from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
@@ -355,6 +361,138 @@ describe("WorldPulse interactions", () => {
     expect(screen.getByText("Left 25%")).toBeInTheDocument();
     expect(screen.getByText("Center 50%")).toBeInTheDocument();
     expect(screen.getByText("Right 25%")).toBeInTheDocument();
+  });
+
+  it("uses the same canonical event score and bias mix in country and global views", async () => {
+    const globalHeadline =
+      "Heat dome expands across central Canada, creating dangerous conditions for millions";
+    const localHeadline =
+      "‘Extraordinarily hot’: Canada heatwave stretches on with millions still under warnings";
+    const globalArticles = [
+      ["Associated Press", "https://apnews.com/"],
+      ["Reuters", "https://reuters.com/"],
+      ["BBC News", "https://bbc.com/"],
+      ["New York Post", "https://nypost.com/"],
+      ["Local Desk", "https://local.example/"],
+    ].map(([publisherName, publisherUrl], index) => ({
+      id: `global-heat-${index}`,
+      title: globalHeadline,
+      description:
+        "A dangerous Canadian heat wave is affecting millions of people.",
+      url: `${publisherUrl}heat-${index}`,
+      publisherName,
+      publisherUrl,
+      publishedAt: `2026-07-25T${23 - index}:00:00.000Z`,
+    }));
+    const countryArticle = {
+      id: "country-heat",
+      title: localHeadline,
+      description:
+        "Millions across Canada remain under extreme heat warnings.",
+      url: "https://theguardian.com/canada-heat",
+      publisherName: "The Guardian",
+      publisherUrl: "https://theguardian.com/",
+      publishedAt: "2026-07-25T22:00:00.000Z",
+    };
+    const coverageArticles = [
+      ...globalArticles,
+      {
+        ...globalArticles[0],
+        id: "cnn-heat",
+        url: "https://cnn.com/heat",
+        publisherName: "CNN",
+        publisherUrl: "https://cnn.com/",
+      },
+      {
+        ...globalArticles[0],
+        id: "bbc-alias-heat",
+        url: "https://bbc.co.uk/heat",
+        publisherName: "BBC",
+        publisherUrl: "https://bbc.co.uk/",
+      },
+    ];
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === "/countries.geojson") {
+        return Response.json({
+          features: [{ id: "124", properties: { name: "Canada" } }],
+        });
+      }
+      if (url === "/map-news-seed.json" || url.includes("scope=map")) {
+        return Response.json({
+          scope: "map",
+          generatedAt: "2026-07-25T23:30:00.000Z",
+          refreshAfterSeconds: 600,
+          provider: "Test map index",
+          countries: [],
+        });
+      }
+      if (url.includes("scope=event")) {
+        return Response.json({
+          countryName: "Canada",
+          scope: "event",
+          generatedAt: "2026-07-25T23:30:00.000Z",
+          refreshAfterSeconds: 600,
+          provider: "Test topic index",
+          articles: coverageArticles,
+        });
+      }
+      const countryName = url.includes("country=Canada") ? "Canada" : null;
+      return Response.json({
+        countryName,
+        scope: countryName ? "country" : "global",
+        generatedAt: "2026-07-25T23:30:00.000Z",
+        refreshAfterSeconds: 600,
+        provider: "Test live index",
+        articles: countryName ? [countryArticle] : globalArticles,
+      });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    vi.stubGlobal(
+      "IntersectionObserver",
+      class {
+        private readonly callback: IntersectionObserverCallback;
+
+        constructor(callback: IntersectionObserverCallback) {
+          this.callback = callback;
+        }
+
+        observe(target: Element) {
+          this.callback(
+            [{ isIntersecting: true, target } as IntersectionObserverEntry],
+            this as unknown as IntersectionObserver,
+          );
+        }
+
+        disconnect() {}
+      },
+    );
+
+    render(<WorldPulseApp MapComponent={TestMap} />);
+
+    const countryHeading = await screen.findByRole("heading", {
+      name: globalHeadline,
+    });
+    const countryCard = countryHeading.closest("article");
+    expect(countryCard).not.toBeNull();
+    expect(
+      await within(countryCard!).findByText("5 shown · 6 matched"),
+    ).toBeInTheDocument();
+    const countryScore = within(countryCard!).getByText(
+      /^(Major|Significant|Developing|Routine) · \d+$/,
+    ).textContent;
+    const countryMix = within(countryCard!).getByText(/\d+\/5 rated/).textContent;
+
+    fireEvent.click(screen.getByRole("button", { name: "Global feed" }));
+
+    const globalCard = (
+      await screen.findByRole("heading", { name: globalHeadline })
+    ).closest("article");
+    expect(globalCard).not.toBeNull();
+    expect(
+      within(globalCard!).getByText(countryScore ?? ""),
+    ).toBeInTheDocument();
+    expect(within(globalCard!).getByText(countryMix ?? "")).toBeInTheDocument();
   });
 
   it("filters the visible events by search", () => {

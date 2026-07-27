@@ -7,6 +7,8 @@ import {
   buildLiveEvents,
   classifyLiveHeadline,
   enrichEventWithCoverage,
+  eventsDescribeSameOccurrence,
+  mergeCanonicalEvents,
 } from "@/lib/live-news";
 import {
   biasDistributionForArticles,
@@ -245,17 +247,57 @@ describe("live news normalization", () => {
     expect(events[0].summary).toContain("6 independent publishers");
   });
 
-  it("uses the same event identity in country and global feeds", () => {
-    const countryEvent = buildLiveEvents(payload, {
-      name: "Canada",
-      iso2: "CA",
-    })[0];
+  it("matches rewritten country and global headlines to one occurrence", () => {
+    const countryEvent = buildLiveEvents(
+      {
+        ...payload,
+        countryName: "United States",
+        articles: [
+          {
+            ...payload.articles[0],
+            id: "guardian-heat",
+            title:
+              "‘Extraordinarily hot’: US heatwave stretches on with millions still under warnings",
+            description:
+              "Millions across the United States remain under heat warnings.",
+            publisherName: "The Guardian",
+            publisherUrl: "https://theguardian.com/",
+          },
+        ],
+      },
+      {
+        name: "United States",
+        iso2: "US",
+      },
+    )[0];
     const globalEvent = buildLiveEvents(
-      { ...payload, countryName: null, scope: "global" },
+      {
+        ...payload,
+        countryName: null,
+        scope: "global",
+        articles: [
+          {
+            ...payload.articles[0],
+            id: "ap-heat",
+            title:
+              "Heat dome expands across the central United States, creating dangerous conditions for millions",
+            description:
+              "The US heat wave is putting millions of people at risk.",
+            publisherName: "AP News",
+            publisherUrl: "https://apnews.com/",
+          },
+        ],
+      },
       null,
     )[0];
 
-    expect(countryEvent.id).toBe(globalEvent.id);
+    expect(countryEvent.id).not.toBe(globalEvent.id);
+    expect(eventsDescribeSameOccurrence(countryEvent, globalEvent)).toBe(true);
+    const canonicalEvent = mergeCanonicalEvents(globalEvent, countryEvent);
+    expect(canonicalEvent.id).toBe(globalEvent.id);
+    expect(canonicalEvent.affectedCountries).toContain("US");
+    expect(canonicalEvent.scoringInput.independentSourceCount).toBe(2);
+    expect(canonicalEvent.articles).toHaveLength(2);
   });
 
   it("merges an event-specific search and ranks five distinct publishers", () => {
@@ -325,6 +367,22 @@ describe("live news normalization", () => {
       bucket: "left",
       label: "Lean Left",
     });
+    expect(
+      publisherBiasRating(
+        "ABC News - Breaking News, Latest News and Videos",
+      ),
+    ).toMatchObject({
+      bucket: "left",
+      label: "Lean Left",
+    });
+    expect(publisherBiasRating("Newsweek")).toMatchObject({
+      bucket: "center",
+      label: "Center",
+    });
+    expect(publisherBiasRating("New York Post")).toMatchObject({
+      bucket: "right",
+      label: "Lean Right",
+    });
     expect(publisherBiasRating("Unknown Local Desk")).toBeNull();
     expect(distribution).toMatchObject({
       left: 1,
@@ -377,5 +435,40 @@ describe("live news normalization", () => {
       rated: 3,
       total: 3,
     });
+  });
+
+  it("prioritizes left, right, and center publishers in the displayed five", () => {
+    const [event] = buildLiveEvents(
+      {
+        ...payload,
+        articles: [
+          ["Reuters", "https://reuters.com/"],
+          ["BBC News", "https://bbc.com/"],
+          ["Associated Press", "https://apnews.com/"],
+          ["CNN", "https://cnn.com/"],
+          ["New York Post", "https://nypost.com/"],
+          ["Local Desk", "https://local.example/"],
+        ].map(([publisherName, publisherUrl], index) => ({
+          id: `balanced-${index}`,
+          title: `Canada wildfire response expands across western provinces ${index}`,
+          description:
+            "Canada is expanding its response to major western wildfires.",
+          url: `${publisherUrl}story-${index}`,
+          publisherName,
+          publisherUrl,
+          publishedAt: `2026-07-24T${23 - index}:00:00.000Z`,
+        })),
+      },
+      { name: "Canada", iso2: "CA" },
+    );
+    const distribution = biasDistributionForArticles(event.articles);
+
+    expect(event.articles).toHaveLength(5);
+    expect(distribution.left).toBeGreaterThanOrEqual(1);
+    expect(distribution.right).toBeGreaterThanOrEqual(1);
+    expect(distribution.center).toBeGreaterThanOrEqual(1);
+    expect(
+      event.articles.map((article) => article.source.publisherName),
+    ).toContain("New York Post");
   });
 });
