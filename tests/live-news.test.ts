@@ -13,6 +13,7 @@ import {
 } from "@/lib/live-news";
 import {
   biasDistributionForArticles,
+  canonicalPublisherKey,
   publisherBiasRating,
 } from "@/lib/publisher-bias";
 import type { LiveNewsPayload } from "@/lib/types";
@@ -414,6 +415,28 @@ describe("live news normalization", () => {
       bucket: "right",
       label: "Right",
     });
+    expect(publisherBiasRating("NPR")).toMatchObject({
+      bucket: "left",
+      label: "Lean Left",
+    });
+    expect(publisherBiasRating("France 24")).toMatchObject({
+      bucket: "center",
+      label: "Center",
+    });
+    expect(publisherBiasRating("Euronews")).toMatchObject({
+      bucket: "center",
+      label: "Center",
+    });
+    expect(publisherBiasRating("Sky News UK")).toMatchObject({
+      bucket: "center",
+      label: "Center",
+    });
+    expect(canonicalPublisherKey("CBC.ca")).toBe(
+      canonicalPublisherKey("CBC"),
+    );
+    expect(canonicalPublisherKey("BBC.co.uk")).toBe(
+      canonicalPublisherKey("BBC News"),
+    );
     expect(publisherBiasRating("ABC News Australia")).toBeNull();
     expect(publisherBiasRating("Unknown Local Desk")).toBeNull();
     expect(distribution).toMatchObject({

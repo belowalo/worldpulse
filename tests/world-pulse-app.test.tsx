@@ -269,6 +269,43 @@ describe("WorldPulse interactions", () => {
     expect(screen.getByTestId("link-event-ids")).toBeEmptyDOMElement();
   });
 
+  it("renders a large global index progressively without hiding results from filters", async () => {
+    const globalArticles = Array.from({ length: 45 }, (_, index) => ({
+      id: `global-${index}`,
+      title: `Distinct event marker${index} topic${index} dispatch${index}`,
+      url: `https://publisher-${index}.example/story`,
+      publisherName: `Publisher ${index}`,
+      publisherUrl: `https://publisher-${index}.example/`,
+      publishedAt: "2026-07-25T00:00:00.000Z",
+    }));
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === "/countries.geojson") {
+        return Response.json({ features: [] });
+      }
+      const countryName = url.includes("country=Canada") ? "Canada" : null;
+      return Response.json({
+        countryName,
+        scope: countryName ? "country" : "global",
+        generatedAt: "2026-07-25T00:00:00.000Z",
+        refreshAfterSeconds: 600,
+        provider: "Test live index",
+        articles: countryName ? [] : globalArticles,
+      });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<WorldPulseApp MapComponent={TestMap} />);
+    fireEvent.click(screen.getByRole("button", { name: "Global feed" }));
+
+    expect(
+      await screen.findByText("Showing 40 of 45 matching events"),
+    ).toBeInTheDocument();
+    expect(screen.getAllByRole("article")).toHaveLength(40);
+    fireEvent.click(screen.getByRole("button", { name: "Load 40 more" }));
+    expect(screen.getAllByRole("article")).toHaveLength(45);
+  });
+
   it("automatically expands a visible event to five publishers and shows rated coverage mix", async () => {
     const headline = "Canada and Mexico agree cross-border trade accord";
     const originalArticle = {
@@ -378,6 +415,26 @@ describe("WorldPulse interactions", () => {
     expect(screen.getByText("Left 25%")).toBeInTheDocument();
     expect(screen.getByText("Center 50%")).toBeInTheDocument();
     expect(screen.getByText("Right 25%")).toBeInTheDocument();
+    expect(
+      screen.getByRole("link", {
+        name: "Open Associated Press source. Publisher rating: Lean Left.",
+      }),
+    ).toHaveAttribute("data-bias", "left");
+    expect(
+      screen.getByRole("link", {
+        name: "Open Reuters source. Publisher rating: Center.",
+      }),
+    ).toHaveAttribute("data-bias", "center");
+    expect(
+      screen.getByRole("link", {
+        name: "Open New York Post source. Publisher rating: Lean Right.",
+      }),
+    ).toHaveAttribute("data-bias", "right");
+    expect(
+      screen.getByRole("link", {
+        name: "Open Local Desk source. Publisher bias unrated.",
+      }),
+    ).toHaveAttribute("data-bias", "unrated");
   });
 
   it("uses the same canonical event score and bias mix in country and global views", async () => {
@@ -848,7 +905,7 @@ describe("WorldPulse interactions", () => {
     vi.stubGlobal("fetch", fetchMock);
 
     render(<WorldPulseApp MapComponent={TestMap} />);
-    await screen.findByText(/2\/2 countries checked live/);
+    await screen.findByText(/2\/2 countries live indexed/);
     fireEvent.click(
       screen.getByRole("button", { name: "Select Egypt on map" }),
     );
@@ -859,7 +916,7 @@ describe("WorldPulse interactions", () => {
     ).not.toBeInTheDocument();
   });
 
-  it("opens after the first live batch while the remaining countries continue loading", async () => {
+  it("opens immediately while live country batches continue loading", async () => {
     let finishSecondBatch: (() => void) | undefined;
     const secondBatchReady = new Promise<void>((resolve) => {
       finishSecondBatch = resolve;
@@ -911,15 +968,15 @@ describe("WorldPulse interactions", () => {
     render(<WorldPulseApp MapComponent={TestMap} />);
 
     expect(
-      screen.getByRole("heading", {
+      screen.getByRole("button", { name: "Global feed" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("heading", {
         name: "Gathering current reporting worldwide",
       }),
-    ).toBeInTheDocument();
+    ).not.toBeInTheDocument();
     expect(
-      await screen.findByRole("button", { name: "Global feed" }),
-    ).toBeInTheDocument();
-    expect(
-      screen.getByText(/8\/16 countries checked live · loading the rest/),
+      await screen.findByText(/8\/16 countries indexed · refreshing the rest/),
     ).toBeInTheDocument();
 
     await act(async () => {
@@ -931,7 +988,7 @@ describe("WorldPulse interactions", () => {
       await screen.findByRole("button", { name: "Global feed" }),
     ).toBeInTheDocument();
     expect(
-      screen.getByText(/16\/16 countries checked live/),
+      screen.getByText(/16\/16 countries live indexed/),
     ).toBeInTheDocument();
   });
 
@@ -973,7 +1030,7 @@ describe("WorldPulse interactions", () => {
     render(<WorldPulseApp MapComponent={TestMap} />);
 
     expect(
-      await screen.findByText(/1\/1 countries checked live/),
+      await screen.findByText(/1\/1 countries indexed/),
     ).toBeInTheDocument();
     expect(screen.getByTestId("countries-with-news")).toHaveTextContent("0");
   });
@@ -1035,7 +1092,7 @@ describe("WorldPulse interactions", () => {
 
     await waitFor(() =>
       expect(
-        screen.getByText(/2\/2 countries checked live/),
+        screen.getByText(/2\/2 countries live indexed/),
       ).toBeInTheDocument(),
     );
     expect(screen.getByTestId("countries-with-news")).toHaveTextContent("2");
@@ -1107,7 +1164,7 @@ describe("WorldPulse interactions", () => {
       { timeout: 15_000 },
     );
     expect(
-      screen.getByText(/215\/215 countries checked live/),
+      screen.getByText(/215\/215 countries live indexed/),
     ).toBeInTheDocument();
   }, 20_000);
 });

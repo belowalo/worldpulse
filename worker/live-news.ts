@@ -922,7 +922,7 @@ export async function handleLiveNews(
         countries,
       },
       200,
-      countries.every((country) => country.available),
+      true,
     );
   }
 

@@ -2,7 +2,7 @@
 
 WorldPulse is a production-quality MVP for exploring recent world news through an interactive map. Each country's hue represents the category of its highest-impact active event, while intensity represents a deterministic 0–100 importance estimate. Clicking any mapped country loads current RSS-indexed headlines, publisher links, timestamps, geographic scope, and a plain-language score explanation.
 
-The hosted site starts a live world sweep immediately and opens the map after the first country batch or three seconds, whichever comes first. The remaining countries continue loading visibly in the background. No headline bundle ships with the application. Recent live map results may be reused for up to five minutes; older map snapshots are skipped and rebuilt from current searches. It reads headline-level public RSS metadata and never scrapes or republishes article bodies.
+The hosted site opens the map and controls immediately, then fills the world index progressively from live country searches. No headline bundle ships with the application. A recent server-side live index can appear immediately for up to 30 minutes while a fresh sweep replaces it in the background; genuinely old map data is skipped. The site reads headline-level public RSS metadata and never scrapes or republishes article bodies.
 
 ## Screenshots
 
@@ -12,7 +12,7 @@ The deployed application is the preferred live preview. A social preview is avai
 
 - **Web:** Next.js 16, React 19, strict TypeScript, Tailwind CSS, MapLibre GL JS, and local country geometry.
 - **Hosted news API:** A same-origin Cloudflare Worker endpoint queries public RSS indexes, validates and deduplicates articles, and returns country, global, map-summary, and event-coverage feeds.
-- **Hosted cache:** Cloudflare edge caching plus D1 persistence reuses recent live results and provides resilience for deeper country and event feeds.
+- **Hosted cache:** Cloudflare edge caching plus D1 persistence streams a recent live index immediately, refreshes it in the background, and provides resilience for deeper country and event feeds.
 - **Reference API:** FastAPI, Pydantic validation, SQLAlchemy 2, and PostgreSQL remain available for local full-stack development.
 - **Local orchestration:** Docker Compose starts PostgreSQL, migrates and seeds the API, then starts the web app with health checks.
 - **Hosted preview:** The browser initially downloads one current map signal per country rather than the complete world article index. Full reporting is fetched when needed and the map is refreshed progressively without blocking interaction.

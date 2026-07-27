@@ -155,6 +155,38 @@ const GROUND_RATINGS: Array<{
     },
   },
   {
+    aliases: ["npr"],
+    rating: {
+      bucket: "left",
+      label: "Lean Left",
+      groundNewsUrl: "https://ground.news/interest/npr",
+    },
+  },
+  {
+    aliases: ["france24", "france 24"],
+    rating: {
+      bucket: "center",
+      label: "Center",
+      groundNewsUrl: "https://ground.news/interest/france24",
+    },
+  },
+  {
+    aliases: ["euronews"],
+    rating: {
+      bucket: "center",
+      label: "Center",
+      groundNewsUrl: "https://ground.news/interest/euronews",
+    },
+  },
+  {
+    aliases: ["sky news", "sky news uk"],
+    rating: {
+      bucket: "center",
+      label: "Center",
+      groundNewsUrl: "https://ground.news/interest/sky-news",
+    },
+  },
+  {
     aliases: ["cnbc"],
     rating: {
       bucket: "left",
@@ -224,10 +256,19 @@ const GROUND_RATINGS: Array<{
 
 const PUBLISHER_ALIASES = new Map<string, string>([
   ["abc news breaking news latest news and videos", "abc news"],
+  ["ap news com", "associated press"],
   ["ap news", "associated press"],
   ["associated press news", "associated press"],
   ["bbc", "bbc news"],
+  ["bbc co uk", "bbc news"],
+  ["bbc com", "bbc news"],
+  ["cbc ca", "cbc"],
   ["dw", "deutsche welle"],
+  ["fox news com", "fox news"],
+  ["france 24", "france24"],
+  ["npr org", "npr"],
+  ["reuters com", "reuters"],
+  ["sky news uk", "sky news"],
   ["the wall street journal", "wall street journal"],
 ]);
 

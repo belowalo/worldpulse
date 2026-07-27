@@ -26,6 +26,7 @@ interface ExecutionContext {
 
 const LIVE_CACHE_NAME = "worldpulse-live-v14";
 const LIVE_CACHE_FRESH_MS = 5 * 60_000;
+const LIVE_MAP_STALE_MS = 30 * 60_000;
 const LIVE_CACHE_RETENTION_SECONDS = 24 * 60 * 60;
 const ARTICLE_RETENTION_MS = 8 * 24 * 60 * 60_000;
 
@@ -260,9 +261,14 @@ async function handleCachedLiveNews(
   const cached = await cache.match(cacheKey);
   if (cached) {
     const cachedAt = Number(cached.headers.get("X-WorldPulse-Cached-At"));
+    const cacheAge = Number.isFinite(cachedAt)
+      ? Date.now() - cachedAt
+      : Number.POSITIVE_INFINITY;
     const isFresh =
-      Number.isFinite(cachedAt) && Date.now() - cachedAt < LIVE_CACHE_FRESH_MS;
-    if (!isFresh && isMapSearch) {
+      Number.isFinite(cachedAt) && cacheAge < LIVE_CACHE_FRESH_MS;
+    const canStreamMapWhileRefreshing =
+      isMapSearch && cacheAge < LIVE_MAP_STALE_MS;
+    if (!isFresh && isMapSearch && !canStreamMapWhileRefreshing) {
       const fresh = await handleLiveNews(cacheKey);
       ctx.waitUntil(
         storeLiveResponse(cache, cacheKey, fresh.clone(), env.DB),
@@ -289,11 +295,16 @@ async function handleCachedLiveNews(
           "X-WorldPulse-Cached-At": String(stored.generated_at),
         });
         const persistentResponse = new Response(stored.payload, { headers });
+        const storedAge = Date.now() - stored.generated_at;
         const isFresh =
-          Date.now() - stored.generated_at < LIVE_CACHE_FRESH_MS;
-        if (!isFresh && isMapSearch) {
-          // Map startup never uses an old persisted snapshot. It continues to
-          // the direct live request below.
+          storedAge < LIVE_CACHE_FRESH_MS;
+        if (
+          !isFresh &&
+          isMapSearch &&
+          storedAge >= LIVE_MAP_STALE_MS
+        ) {
+          // A genuinely old map index is not shown. Continue to a direct live
+          // request below instead.
         } else {
           ctx.waitUntil(
             isFresh
