@@ -24,7 +24,7 @@ interface ExecutionContext {
   passThroughOnException(): void;
 }
 
-const LIVE_CACHE_NAME = "worldpulse-live-v17";
+const LIVE_CACHE_NAME = "worldpulse-live-v18";
 const LIVE_CACHE_FRESH_MS = 5 * 60_000;
 const LIVE_MAP_STALE_MS = 30 * 60_000;
 const LIVE_CACHE_RETENTION_SECONDS = 24 * 60 * 60;
@@ -146,7 +146,7 @@ function normalizedLiveCacheKey(request: Request) {
   url.hash = "";
   url.searchParams.delete("release");
   url.searchParams.delete("fresh");
-  url.searchParams.set("__wp_cache", "17");
+  url.searchParams.set("__wp_cache", "18");
   url.searchParams.sort();
   return new Request(url.toString(), { method: "GET" });
 }
