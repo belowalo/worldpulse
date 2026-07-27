@@ -679,7 +679,7 @@ describe("WorldPulse interactions", () => {
     ).not.toBeInTheDocument();
   });
 
-  it("loads the live map index without bulk country requests and defers global news until opened", async () => {
+  it("deep-checks only unresolved map countries and defers global news until opened", async () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input);
       if (url === "/countries.geojson") {
@@ -720,7 +720,7 @@ describe("WorldPulse interactions", () => {
       requestedUrls.some((url) =>
         url.includes("/api/live-news?country="),
       ),
-    ).toBe(false);
+    ).toBe(true);
     expect(requestedUrls).not.toContain("/api/live-news?scope=global");
 
     fireEvent.click(
@@ -731,7 +731,7 @@ describe("WorldPulse interactions", () => {
     );
   });
 
-  it("keeps a country with no matched map reporting neutral without calling the global endpoint", async () => {
+  it("keeps a country neutral when both map and deep reporting are unavailable", async () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input);
       if (url === "/countries.geojson") {
@@ -767,7 +767,7 @@ describe("WorldPulse interactions", () => {
       fetchMock.mock.calls.some(([input]) =>
         String(input).includes("/api/live-news?country="),
       ),
-    ).toBe(false);
+    ).toBe(true);
     expect(
       fetchMock.mock.calls.some(([input]) =>
         String(input).includes("scope=global"),

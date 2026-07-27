@@ -1124,6 +1124,52 @@ export function WorldPulseApp({
           pass,
         }));
       }
+      if (!cancelled && missingCountries.size) {
+        for (
+          let deepPass = 5;
+          !cancelled && missingCountries.size && deepPass <= 6;
+          deepPass += 1
+        ) {
+          if (deepPass > 5) await wait(testRuntime ? 0 : 1_500);
+          const pending = countryDirectory.filter((country) =>
+            missingCountries.has(country.name),
+          );
+          setWorldLoad((current) => ({
+            ...current,
+            retrying: pending.length,
+            pass: deepPass,
+          }));
+          let cursor = 0;
+          const deepWorker = async () => {
+            while (!cancelled && cursor < pending.length) {
+              const country = pending[cursor];
+              cursor += 1;
+              const matched = await fetchCountryNews(country, {
+                promoteToPanel: false,
+              });
+              if (cancelled) return;
+              if (matched) {
+                matchedCountries.add(country.name);
+                missingCountries.delete(country.name);
+              }
+              setWorldLoad((current) => ({
+                ...current,
+                matched: matchedCountries.size,
+                retrying: missingCountries.size,
+                pass: deepPass,
+              }));
+            }
+          };
+          await Promise.all(
+            Array.from(
+              {
+                length: Math.min(deepPass === 5 ? 3 : 2, pending.length),
+              },
+              () => deepWorker(),
+            ),
+          );
+        }
+      }
       if (!cancelled) {
         setInitialMapScanReady(true);
         refreshTimer = window.setTimeout(() => void refreshWorld(), 120_000);
@@ -1135,7 +1181,12 @@ export function WorldPulseApp({
       cancelled = true;
       if (refreshTimer !== undefined) window.clearTimeout(refreshTimer);
     };
-  }, [countryDirectory, countryDirectoryReady, liveUpdates]);
+  }, [
+    countryDirectory,
+    countryDirectoryReady,
+    fetchCountryNews,
+    liveUpdates,
+  ]);
 
   useEffect(() => {
     if (!liveUpdates) return;
