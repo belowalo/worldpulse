@@ -630,6 +630,7 @@ function providersForRequest(
 async function fetchMapCountry(
   requestedCountry: string,
   fetchImpl: FetchImplementation,
+  getSharedResults: () => Promise<ProviderResult[]>,
 ) {
   const countryName = canonicalCountryName(requestedCountry);
   const terms = countrySearchTerms(requestedCountry);
@@ -653,6 +654,13 @@ async function fetchMapCountry(
   );
   let relevantResults = countryRelevantResults(results, terms);
   if (!hasProviderArticles(relevantResults)) {
+    const sharedResults = countryRelevantResults(
+      await getSharedResults(),
+      terms,
+    );
+    relevantResults = [...relevantResults, ...sharedResults];
+  }
+  if (!hasProviderArticles(relevantResults)) {
     results.push(
       await fetchProvider(
         GDELT_PROVIDER,
@@ -662,7 +670,10 @@ async function fetchMapCountry(
         fetchImpl,
       ),
     );
-    relevantResults = countryRelevantResults(results, terms);
+    relevantResults = [
+      ...relevantResults,
+      ...countryRelevantResults([results.at(-1)!], terms),
+    ];
   }
   const selectedResults = hasProviderArticles(relevantResults)
     ? relevantResults
@@ -890,10 +901,21 @@ export async function handleLiveNews(
       );
     }
     const generatedAt = new Date().toISOString();
+    let sharedResultsPromise: Promise<ProviderResult[]> | undefined;
+    const getSharedResults = () => {
+      sharedResultsPromise ??= mapWithConcurrency(
+        [...CORE_PROVIDERS, GDELT_PROVIDER, GOOGLE_WORLD_PROVIDER],
+        6,
+        (provider) =>
+          fetchProvider(provider, "global", null, [], fetchImpl),
+      );
+      return sharedResultsPromise;
+    };
     const countries = await mapWithConcurrency(
       requestedCountries,
       1,
-      (country) => fetchMapCountry(country, fetchImpl),
+      (country) =>
+        fetchMapCountry(country, fetchImpl, getSharedResults),
     );
     return json(
       {

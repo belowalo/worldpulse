@@ -317,6 +317,43 @@ describe("worker live-news providers", () => {
     ).toBe(true);
   });
 
+  it("uses shared international feeds when direct map searches are unavailable", async () => {
+    vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const internationalFeed = `
+      <rss><channel><item>
+        <title>Canada parliament approves a new national housing package</title>
+        <description>Canadian lawmakers passed the measure on Friday.</description>
+        <link>https://bbc.example/canada-housing</link>
+        <guid>canada-housing</guid>
+        <pubDate>Fri, 24 Jul 2026 21:00:00 GMT</pubDate>
+      </item></channel></rss>
+    `;
+    const fetchMock = vi.fn(async (input: URL | RequestInfo) =>
+      String(input).includes("feeds.bbci.co.uk/news/world/rss.xml")
+        ? new Response(internationalFeed, { status: 200 })
+        : new Response("Unavailable", { status: 503 }),
+    );
+
+    const response = await handleLiveNews(
+      new Request(
+        "https://worldpulse.test/api/live-news?scope=map&countries=Canada",
+      ),
+      fetchMock as typeof fetch,
+    );
+    const payload = (await response.json()) as {
+      countries: Array<{
+        available: boolean;
+        articles: Array<{ title: string; publisherName: string }>;
+      }>;
+    };
+
+    expect(payload.countries[0].available).toBe(true);
+    expect(payload.countries[0].articles[0]).toMatchObject({
+      title: "Canada parliament approves a new national housing package",
+      publisherName: "BBC News",
+    });
+  });
+
   it("mixes local, current, latest, and rights reporting in map searches", async () => {
     vi.spyOn(console, "warn").mockImplementation(() => undefined);
     const requestedUrls: string[] = [];
