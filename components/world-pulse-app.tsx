@@ -11,7 +11,12 @@ import {
 import {
   articlesMentioningCountry,
   buildLiveEvents,
+  enrichEventWithCoverage,
 } from "@/lib/live-news";
+import {
+  biasDistributionForArticles,
+  publisherBiasRating,
+} from "@/lib/publisher-bias";
 import { countriesMentionedByEvent } from "@/lib/map-links";
 import { countryCodeForName } from "@/lib/country-locale";
 import {
@@ -54,6 +59,12 @@ interface FeedState {
   events: Event[];
   updatedAt: string | null;
   provider: string | null;
+  loading: boolean;
+  error: string | null;
+}
+
+interface CoverageState {
+  event?: Event;
   loading: boolean;
   error: string | null;
 }
@@ -124,54 +135,49 @@ function ImportancePill({ event }: { event: Event }) {
 function EventCard({
   event,
   connectionFocused,
-  onConnectionFocus,
+  coverageLoading,
+  coverageError,
+  coverageExpanded,
+  onActivate,
 }: {
   event: Event;
   connectionFocused: boolean;
-  onConnectionFocus: () => void;
+  coverageLoading: boolean;
+  coverageError: string | null;
+  coverageExpanded: boolean;
+  onActivate: () => void;
 }) {
   const [expanded, setExpanded] = useState(false);
   const hasConnections = event.affectedCountries.length > 1;
+  const bias = biasDistributionForArticles(event.articles);
 
   return (
     <article
-      className={`border-b border-[#273246] py-5 transition first:pt-0 last:border-0 ${
-        hasConnections ? "cursor-pointer" : ""
-      } ${
+      className={`cursor-pointer border-b border-[#273246] py-5 transition first:pt-0 last:border-0 ${
         connectionFocused
           ? "-mx-3 rounded-xl border border-[#3c6d70] bg-[#13262c] px-3"
           : ""
       }`}
-      onClick={
-        hasConnections
-          ? (clickEvent) => {
-              if ((clickEvent.target as HTMLElement).closest("a, button")) {
-                return;
-              }
-              onConnectionFocus();
-            }
-          : undefined
-      }
-      onKeyDown={
-        hasConnections
-          ? (keyEvent) => {
-              if (
-                keyEvent.target !== keyEvent.currentTarget ||
-                (keyEvent.key !== "Enter" && keyEvent.key !== " ")
-              ) {
-                return;
-              }
-              keyEvent.preventDefault();
-              onConnectionFocus();
-            }
-          : undefined
-      }
-      tabIndex={hasConnections ? 0 : undefined}
-      aria-label={
-        hasConnections
-          ? `${event.headline}. Press Enter to toggle this event's map connections.`
-          : undefined
-      }
+      onClick={(clickEvent) => {
+        if ((clickEvent.target as HTMLElement).closest("a, button")) {
+          return;
+        }
+        onActivate();
+      }}
+      onKeyDown={(keyEvent) => {
+        if (
+          keyEvent.target !== keyEvent.currentTarget ||
+          (keyEvent.key !== "Enter" && keyEvent.key !== " ")
+        ) {
+          return;
+        }
+        keyEvent.preventDefault();
+        onActivate();
+      }}
+      tabIndex={0}
+      aria-label={`${event.headline}. Press Enter to search for broader coverage${
+        hasConnections ? " and toggle this event's map connections" : ""
+      }.`}
     >
       <div className="flex flex-wrap items-center gap-2">
         <span
@@ -183,6 +189,15 @@ function EventCard({
           {event.category}
         </span>
         <ImportancePill event={event} />
+        {coverageLoading ? (
+          <span className="font-mono text-[8px] uppercase tracking-[0.12em] text-[#73e2cc]">
+            Finding coverage…
+          </span>
+        ) : coverageExpanded ? (
+          <span className="font-mono text-[8px] uppercase tracking-[0.12em] text-[#73e2cc]">
+            Topic search complete
+          </span>
+        ) : null}
       </div>
       <h3
         dir="auto"
@@ -207,25 +222,100 @@ function EventCard({
           label="Sources"
           value={
             event.scoringInput.independentSourceCount > event.articles.length
-              ? `${event.articles.length} shown · ${event.scoringInput.independentSourceCount} total`
+              ? `${event.articles.length} shown · ${event.scoringInput.independentSourceCount} matched`
               : `${event.articles.length} independent`
           }
         />
       </div>
       <div className="mt-4 flex flex-wrap items-center gap-2">
-        {event.articles.map((article) => (
+        {event.articles.map((article) => {
+          const rating = publisherBiasRating(article.source.publisherName);
+          return (
+            <a
+              key={article.id}
+              href={article.originalUrl}
+              target="_blank"
+              rel="noreferrer"
+              dir="auto"
+              title={
+                rating
+                  ? `Ground News publisher rating: ${rating.label}`
+                  : "No Ground News publisher rating mapped"
+              }
+              className="max-w-full break-words rounded-md border border-[#344157] px-2.5 py-1.5 text-[10px] text-[#d4dbe5] transition hover:border-[#60708a] hover:bg-[#1a2537]"
+            >
+              {article.source.publisherName}
+              {rating ? ` · ${rating.label}` : ""} ↗
+            </a>
+          );
+        })}
+      </div>
+      <div className="mt-4 rounded-lg border border-[#29384b] bg-[#0c1522] p-3">
+        <div className="flex items-center justify-between gap-3">
+          <span className="font-mono text-[9px] uppercase tracking-[0.14em] text-[#aab6c5]">
+            Ground News publisher mix
+          </span>
+          <span className="text-[9px] text-[#718096]">
+            {bias.rated}/{bias.total} rated
+          </span>
+        </div>
+        {bias.rated ? (
+          <>
+            <div
+              className="mt-2 flex h-2 overflow-hidden rounded-full bg-[#263247]"
+              aria-label={`Publisher ratings: ${bias.percentages.left}% left, ${bias.percentages.center}% center, ${bias.percentages.right}% right`}
+            >
+              <span
+                className="bg-[#e65b64]"
+                style={{ width: `${bias.percentages.left}%` }}
+              />
+              <span
+                className="bg-[#e7edf4]"
+                style={{ width: `${bias.percentages.center}%` }}
+              />
+              <span
+                className="bg-[#4f8ee8]"
+                style={{ width: `${bias.percentages.right}%` }}
+              />
+            </div>
+            <div className="mt-2 grid grid-cols-3 text-[9px]">
+              <span className="text-[#e8878e]">
+                Left {bias.percentages.left}%
+              </span>
+              <span className="text-center text-[#d9e0e8]">
+                Center {bias.percentages.center}%
+              </span>
+              <span className="text-right text-[#78a9ed]">
+                Right {bias.percentages.right}%
+              </span>
+            </div>
+          </>
+        ) : (
+          <p className="mt-2 text-[10px] text-[#77869a]">
+            No displayed publisher has a mapped rating.
+          </p>
+        )}
+        <p className="mt-2 text-[9px] leading-4 text-[#68778a]">
+          Publication-level ratings, not a rating of this event. Unrated local
+          outlets are excluded.{" "}
           <a
-            key={article.id}
-            href={article.originalUrl}
+            href="https://ground.news/rating-system"
             target="_blank"
             rel="noreferrer"
-            dir="auto"
-            className="max-w-full break-words rounded-md border border-[#344157] px-2.5 py-1.5 text-[10px] text-[#d4dbe5] transition hover:border-[#60708a] hover:bg-[#1a2537]"
+            className="text-[#8fcfc4] hover:underline"
           >
-            {article.source.publisherName} ↗
+            Ground News methodology ↗
           </a>
-        ))}
+        </p>
       </div>
+      {coverageError ? (
+        <p className="mt-3 text-[10px] text-[#d58a96]">{coverageError}</p>
+      ) : !coverageExpanded && !coverageLoading ? (
+        <p className="mt-3 text-[10px] text-[#7f8da1]">
+          Select this event to search the current seven-day news index for
+          broader coverage.
+        </p>
+      ) : null}
       <button
         type="button"
         className="mt-4 flex w-full items-center justify-between rounded-lg bg-[#182234] px-3 py-2.5 text-left text-xs font-medium text-[#d9e0e9] transition hover:bg-[#1d2a3e]"
@@ -368,6 +458,15 @@ function MethodologyModal({ onClose }: { onClose: () => void }) {
           wording. Live headlines and publisher links come from public RSS
           metadata; WorldPulse does not reproduce article bodies.
         </p>
+        <p className="mt-3 text-xs leading-5 text-[#8996a8]">
+          Selecting an event runs an exact and keyword topic search across
+          local and international Google News editions, deduplicates
+          publishers, and displays up to five prominent recent matches.
+          Publisher lean labels use a checked Ground News ratings snapshot
+          (July 26, 2026). They describe publications—not individual articles
+          or the event—and unrated publishers are excluded from the percentage
+          bar.
+        </p>
       </section>
     </div>
   );
@@ -411,6 +510,9 @@ export function WorldPulseApp({
   const [timeRange, setTimeRange] = useState<TimeFilter>("7 days");
   const [search, setSearch] = useState("");
   const [showMethodology, setShowMethodology] = useState(false);
+  const [eventCoverage, setEventCoverage] = useState<
+    Record<string, CoverageState>
+  >({});
 
   const fetchGlobalNews = useCallback(async () => {
     setGlobalFeed((current) => ({
@@ -724,6 +826,56 @@ export function WorldPulseApp({
   const activeCountry =
     mapCountries.find((country) => country.mapId === selectedCountry.mapId) ??
     selectedCountry;
+  const fetchEventCoverage = useCallback(
+    async (event: Event) => {
+      setEventCoverage((current) => ({
+        ...current,
+        [event.id]: {
+          ...current[event.id],
+          loading: true,
+          error: null,
+        },
+      }));
+      try {
+        const parameters = new URLSearchParams({
+          scope: "event",
+          headline: event.headline,
+        });
+        if (!globalView) {
+          parameters.set("country", activeCountry.name);
+          if (activeCountry.iso2) parameters.set("iso2", activeCountry.iso2);
+        }
+        const response = await fetch(
+          `/api/live-news?${parameters.toString()}`,
+        );
+        if (!response.ok) {
+          throw new Error("Broader coverage search is temporarily unavailable.");
+        }
+        const payload = (await response.json()) as LiveNewsPayload;
+        setEventCoverage((current) => ({
+          ...current,
+          [event.id]: {
+            event: enrichEventWithCoverage(event, payload),
+            loading: false,
+            error: null,
+          },
+        }));
+      } catch (error) {
+        setEventCoverage((current) => ({
+          ...current,
+          [event.id]: {
+            ...current[event.id],
+            loading: false,
+            error:
+              error instanceof Error
+                ? error.message
+                : "Broader coverage search is temporarily unavailable.",
+          },
+        }));
+      }
+    },
+    [activeCountry.iso2, activeCountry.name, globalView],
+  );
   const fullCountryFeed = countryFeeds[activeCountry.name];
   const preloadedCountryFeed = preloadedCountryFeeds[activeCountry.name];
   const combinedCountryFeed =
@@ -773,11 +925,16 @@ export function WorldPulseApp({
       }),
     [activeCountry, activeFeed.events, globalView, mapCountries],
   );
+  const expandedEvents = useMemo(
+    () =>
+      baseEvents.map((event) => eventCoverage[event.id]?.event ?? event),
+    [baseEvents, eventCoverage],
+  );
   const filteredEvents = (() => {
     const limitHours =
       timeRange === "24 hours" ? 24 : timeRange === "3 days" ? 72 : 168;
     const reference = Date.now();
-    return baseEvents.filter((event) => {
+    return expandedEvents.filter((event) => {
       const matchesCategory = category === "All" || event.category === category;
       const matchesImportance =
         importance === "All" || event.importanceLabel === importance;
@@ -814,6 +971,17 @@ export function WorldPulseApp({
     setImportance("All");
     setTimeRange("7 days");
     setSearch("");
+  };
+  const handleEventActivate = (event: Event) => {
+    if (event.affectedCountries.length > 1) {
+      setConnectionEventId((current) =>
+        current === event.id ? null : event.id,
+      );
+    }
+    const coverage = eventCoverage[event.id];
+    if (!coverage?.loading && !coverage?.event) {
+      void fetchEventCoverage(event);
+    }
   };
   const hasActiveFilters =
     category !== "All" ||
@@ -1075,11 +1243,12 @@ export function WorldPulseApp({
                   key={event.id}
                   event={event}
                   connectionFocused={connectionEventId === event.id}
-                  onConnectionFocus={() =>
-                    setConnectionEventId((current) =>
-                      current === event.id ? null : event.id,
-                    )
+                  coverageLoading={
+                    eventCoverage[event.id]?.loading ?? false
                   }
+                  coverageError={eventCoverage[event.id]?.error ?? null}
+                  coverageExpanded={Boolean(eventCoverage[event.id]?.event)}
+                  onActivate={() => handleEventActivate(event)}
                 />
               ))
             ) : (

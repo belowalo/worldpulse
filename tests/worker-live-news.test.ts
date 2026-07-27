@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 
 import {
+  articleMatchesEvent,
   articleMatchesCountry,
   handleLiveNews,
   parseGdeltJson,
@@ -399,6 +400,82 @@ describe("worker live-news providers", () => {
     });
     expect(requestedUrls.some((url) => url.includes("gl=ST"))).toBe(true);
     expect(requestedUrls.some((url) => url.includes("gl=US"))).toBe(true);
+  });
+
+  it("runs focused local and international searches for one event", async () => {
+    vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const requestedUrls: string[] = [];
+    const item = (
+      id: string,
+      title: string,
+      publisher: string,
+      publisherDomain: string,
+    ) => `
+      <item>
+        <title>${title} - ${publisher}</title>
+        <description>${
+          id === "unrelated"
+            ? "A spacecraft entered lunar orbit."
+            : "Canada and Mexico reached a cross-border trade agreement."
+        }</description>
+        <link>https://news.google.com/rss/articles/${id}</link>
+        <guid>${id}</guid>
+        <pubDate>Fri, 24 Jul 2026 21:00:00 GMT</pubDate>
+        <source url="https://${publisherDomain}/">${publisher}</source>
+      </item>
+    `;
+    const eventFeed = `<rss><channel>
+      ${item("one", "Canada and Mexico agree cross-border trade accord", "Reuters", "reuters.com")}
+      ${item("two", "Mexico backs new Canada cross-border trade agreement", "BBC News", "bbc.com")}
+      ${item("three", "Canada-Mexico trade accord receives approval", "Associated Press", "apnews.com")}
+      ${item("four", "Leaders approve Canada Mexico cross-border trade deal", "CBC News", "cbc.ca")}
+      ${item("five", "New accord expands trade between Mexico and Canada", "Local Desk", "local.example")}
+      ${item("six", "Canada Mexico trade pact enters force", "Regional Desk", "regional.example")}
+      ${item("unrelated", "Japan launches a new lunar research mission", "Science Desk", "science.example")}
+    </channel></rss>`;
+    const fetchMock = vi.fn(async (input: URL | RequestInfo) => {
+      requestedUrls.push(String(input));
+      return new Response(eventFeed, { status: 200 });
+    });
+
+    const response = await handleLiveNews(
+      new Request(
+        "https://worldpulse.test/api/live-news?scope=event&headline=Canada%20and%20Mexico%20agree%20a%20cross-border%20trade%20accord&country=Canada&iso2=CA",
+      ),
+      fetchMock as typeof fetch,
+    );
+    const payload = (await response.json()) as {
+      scope: string;
+      provider: string;
+      articles: Array<{ publisherName: string; title: string }>;
+    };
+
+    expect(response.status).toBe(200);
+    expect(payload.scope).toBe("event");
+    expect(payload.provider).toContain("Expanded topic search");
+    expect(payload.articles).toHaveLength(6);
+    expect(
+      payload.articles.some((article) => article.title.includes("lunar")),
+    ).toBe(false);
+    expect(requestedUrls).toHaveLength(4);
+    expect(requestedUrls.some((url) => url.includes("gl=CA"))).toBe(true);
+    expect(requestedUrls.some((url) => url.includes("gl=US"))).toBe(true);
+    expect(
+      requestedUrls.some((url) =>
+        new URL(url).searchParams
+          .get("q")
+          ?.includes('"Canada and Mexico agree a cross-border trade accord"'),
+      ),
+    ).toBe(true);
+    expect(
+      articleMatchesEvent(
+        {
+          searchableText:
+            "Mexico backs a new Canada cross-border trade agreement",
+        },
+        "Canada and Mexico agree a cross-border trade accord",
+      ),
+    ).toBe(true);
   });
 
   it("returns an explicit outage only when every provider fails", async () => {

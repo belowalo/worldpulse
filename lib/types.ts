@@ -115,7 +115,7 @@ export interface LiveArticle {
 
 export interface LiveNewsPayload {
   countryName: string | null;
-  scope: "country" | "global";
+  scope: "country" | "global" | "event";
   generatedAt: string;
   refreshAfterSeconds: number;
   provider: string;

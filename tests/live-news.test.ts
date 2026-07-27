@@ -6,7 +6,12 @@ import {
   articlesMentioningCountry,
   buildLiveEvents,
   classifyLiveHeadline,
+  enrichEventWithCoverage,
 } from "@/lib/live-news";
+import {
+  biasDistributionForArticles,
+  publisherBiasRating,
+} from "@/lib/publisher-bias";
 import type {
   LiveNewsPayload,
   MapNewsPayload,
@@ -205,7 +210,7 @@ describe("live news normalization", () => {
     );
   });
 
-  it("groups differently worded coverage and exposes the first four sources", () => {
+  it("groups differently worded coverage and exposes the top five sources", () => {
     const headlines = [
       "US launches fresh strikes on Iranian military sites",
       "American attacks hit Iran military facilities overnight",
@@ -235,8 +240,72 @@ describe("live news normalization", () => {
     });
 
     expect(events).toHaveLength(1);
-    expect(events[0].articles).toHaveLength(4);
+    expect(events[0].articles).toHaveLength(5);
     expect(events[0].scoringInput.independentSourceCount).toBe(6);
     expect(events[0].summary).toContain("6 independent publishers");
+  });
+
+  it("merges an event-specific search and ranks five distinct publishers", () => {
+    const [event] = buildLiveEvents(
+      { ...payload, articles: [payload.articles[0]] },
+      { name: "Canada", iso2: "CA" },
+    );
+    const expanded = enrichEventWithCoverage(event, {
+      ...payload,
+      scope: "event",
+      articles: [
+        payload.articles[0],
+        payload.articles[1],
+        ...["BBC News", "CBC News", "Local Desk", "Another Local Desk"].map(
+          (publisherName, index) => ({
+            id: `expanded-${index}`,
+            title: `Canada wildfire response expands across western provinces ${index}`,
+            url: `https://expanded${index}.example/story`,
+            publisherName,
+            publisherUrl: `https://expanded${index}.example`,
+            publishedAt: `2026-07-24T${20 - index}:00:00.000Z`,
+          }),
+        ),
+      ],
+    });
+
+    expect(expanded.articles).toHaveLength(5);
+    expect(expanded.scoringInput.independentSourceCount).toBe(6);
+    expect(expanded.summary).toContain("Expanded topic search matched 6");
+    expect(
+      new Set(
+        expanded.articles.map((article) => article.source.publisherName),
+      ).size,
+    ).toBe(5);
+  });
+
+  it("builds a Ground News publisher mix and excludes unrated outlets", () => {
+    const [event] = buildLiveEvents(payload, {
+      name: "Canada",
+      iso2: "CA",
+    });
+    const distribution = biasDistributionForArticles(event.articles);
+
+    expect(publisherBiasRating("Reuters")).toMatchObject({
+      bucket: "center",
+      label: "Center",
+    });
+    expect(publisherBiasRating("Associated Press")).toMatchObject({
+      bucket: "left",
+      label: "Lean Left",
+    });
+    expect(publisherBiasRating("Unknown Local Desk")).toBeNull();
+    expect(distribution).toMatchObject({
+      left: 1,
+      center: 1,
+      right: 0,
+      rated: 2,
+      total: 2,
+    });
+    expect(
+      distribution.percentages.left +
+        distribution.percentages.center +
+        distribution.percentages.right,
+    ).toBe(100);
   });
 });

@@ -782,7 +782,7 @@ export function classifyLiveHeadline(title: string): Category {
     : "Local affairs";
 }
 
-function publisherProminence(name: string) {
+export function publisherProminence(name: string) {
   const normalized = name.toLowerCase();
   for (const [publisher, score] of PROMINENT_PUBLISHERS) {
     if (normalized.includes(publisher)) return score;
@@ -883,7 +883,7 @@ export function buildLiveEvents(
               publisherProminence(left.publisherName) ||
             Date.parse(right.publishedAt) - Date.parse(left.publishedAt),
         )
-        .slice(0, 4);
+        .slice(0, 5);
       const representative = representativeArticle(cluster);
       const headline = representative?.title ?? "Current report";
       const eventId = `live-event-${stableId(
@@ -931,13 +931,13 @@ export function buildLiveEvents(
         articlesPerHour: Math.max(0.2, cluster.length / 6),
       });
       const publisherNames = [...sources.values()]
-        .slice(0, 4)
+        .slice(0, 5)
         .map((source) => source.publisherName);
       const summary =
         sources.size > 1
           ? `${sources.size} independent publishers matched this occurrence, including ${publisherNames.join(
               ", ",
-            )}. The first four reports are linked below.`
+            )}. The five strongest available reports are linked below.`
           : `Current reporting indexed from ${
               publisherNames[0] ?? "the original publisher"
             }. Open the source for the complete report.`;
@@ -976,6 +976,78 @@ export function buildLiveEvents(
         right.importanceScore - left.importanceScore ||
         Date.parse(right.lastUpdatedAt) - Date.parse(left.lastUpdatedAt),
     );
+}
+
+export function enrichEventWithCoverage(
+  event: Event,
+  payload: LiveNewsPayload,
+): Event {
+  const combined = new Map<string, Article>();
+  for (const article of event.articles) {
+    combined.set(article.source.id, article);
+  }
+  for (const liveArticle of payload.articles) {
+    const source = createSource(liveArticle);
+    const current = combined.get(source.id);
+    if (
+      current &&
+      Date.parse(current.publishedAt) >= Date.parse(liveArticle.publishedAt)
+    ) {
+      continue;
+    }
+    combined.set(source.id, {
+      id: `live-article-${liveArticle.id}`,
+      headline: liveArticle.title,
+      originalUrl: liveArticle.url,
+      source,
+      publishedAt: liveArticle.publishedAt,
+      extractedCountries: event.affectedCountries,
+      category: classifyLiveHeadline(liveArticle.title),
+      eventId: event.id,
+    });
+  }
+
+  const allArticles = [...combined.values()];
+  const visibleArticles = [...allArticles]
+    .sort(
+      (left, right) =>
+        right.source.prominenceScore - left.source.prominenceScore ||
+        Date.parse(right.publishedAt) - Date.parse(left.publishedAt),
+    )
+    .slice(0, 5);
+  const averageProminence =
+    allArticles.reduce(
+      (sum, article) => sum + article.source.prominenceScore,
+      0,
+    ) / Math.max(1, allArticles.length);
+  const nextInput = {
+    ...event.scoringInput,
+    independentSourceCount: allArticles.length,
+    publisherProminence: averageProminence,
+    articlesPerHour: Math.max(
+      event.scoringInput.articlesPerHour,
+      allArticles.length / 6,
+    ),
+  };
+  const scoring = calculateImportance(nextInput);
+
+  return {
+    ...event,
+    summary:
+      allArticles.length > 1
+        ? `Expanded topic search matched ${allArticles.length} independent publishers. The top ${visibleArticles.length} are ranked by publisher prominence and recency.`
+        : "Expanded topic search found one matching publisher in the current seven-day window.",
+    importanceScore: scoring.score,
+    importanceLabel: scoring.label,
+    scoringComponents: scoring.components,
+    scoringInput: nextInput,
+    articles: visibleArticles,
+    lastUpdatedAt:
+      allArticles
+        .map((article) => article.publishedAt)
+        .sort((left, right) => Date.parse(right) - Date.parse(left))[0] ??
+      event.lastUpdatedAt,
+  };
 }
 
 export function articlesMentioningCountry(

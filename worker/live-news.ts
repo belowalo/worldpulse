@@ -37,7 +37,7 @@ interface NewsProvider {
   publisherUrl: string;
   timeoutMs: number;
   filterByCountry: boolean;
-  url(scope: "country" | "global", countryName: string | null): URL;
+  url(scope: "country" | "global" | "event", countryName: string | null): URL;
   parse(body: string): CandidateArticle[];
 }
 
@@ -46,10 +46,35 @@ type FetchImplementation = typeof fetch;
 const MAX_PROVIDER_BYTES = 1_500_000;
 const MAX_COUNTRY_ARTICLES = 180;
 const MAX_GLOBAL_ARTICLES = 700;
+const MAX_EVENT_ARTICLES = 40;
 const MAX_MAP_BATCH_COUNTRIES = 40;
 const MAX_MAP_ARTICLES_PER_COUNTRY = 32;
 const CACHE_SECONDS = 300;
 const VALID_COUNTRY_NAME = /^[\p{L}\p{M}\d .,'’()&-]+$/u;
+const EVENT_STOP_WORDS = new Set([
+  "about",
+  "after",
+  "again",
+  "against",
+  "amid",
+  "and",
+  "are",
+  "but",
+  "for",
+  "from",
+  "has",
+  "have",
+  "into",
+  "its",
+  "new",
+  "over",
+  "says",
+  "the",
+  "their",
+  "this",
+  "that",
+  "with",
+]);
 
 function decodeXml(value: string) {
   return value
@@ -437,6 +462,98 @@ function countryGoogleProviders(countryName: string, requestedRegion: string) {
   ];
 }
 
+function eventTokens(value: string) {
+  return [
+    ...new Set(
+      value
+        .normalize("NFKC")
+        .toLowerCase()
+        .match(/[\p{L}\p{N}]{3,}/gu)
+        ?.filter((token) => !EVENT_STOP_WORDS.has(token)) ?? [],
+    ),
+  ];
+}
+
+export function articleMatchesEvent(
+  article: Pick<CandidateArticle, "searchableText">,
+  headline: string,
+) {
+  const headlineTokens = eventTokens(headline);
+  const articleTokenSet = new Set(eventTokens(article.searchableText));
+  if (!headlineTokens.length) return false;
+  const shared = headlineTokens.filter((token) =>
+    articleTokenSet.has(token),
+  ).length;
+  const required = headlineTokens.length <= 4 ? 2 : 3;
+  return shared >= required || shared / headlineTokens.length >= 0.45;
+}
+
+function eventGoogleProviders(
+  headline: string,
+  countryName: string | null,
+  requestedRegion: string,
+) {
+  const locale = googleNewsLocaleForCountry(
+    countryName ?? "United States",
+    requestedRegion,
+  );
+  const cleanHeadline = headline
+    .replace(/["“”]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  const focusedTerms = eventTokens(cleanHeadline).slice(0, 8);
+  const exactQuery = `"${cleanHeadline.slice(0, 220)}" when:7d`;
+  const focusedQuery = `${focusedTerms
+    .map((term) => `"${term}"`)
+    .join(" ")} when:7d`;
+  const searchProvider = (
+    name: string,
+    query: string,
+    hl: string,
+    region: string,
+    ceid: string,
+  ) =>
+    googleNewsProvider(name, () => {
+      const url = new URL("https://news.google.com/rss/search");
+      url.searchParams.set("q", query);
+      url.searchParams.set("hl", hl);
+      url.searchParams.set("gl", region);
+      url.searchParams.set("ceid", ceid);
+      return url;
+    });
+
+  return [
+    searchProvider(
+      "Google News · exact topic",
+      exactQuery,
+      locale.hl,
+      locale.region,
+      locale.ceid,
+    ),
+    searchProvider(
+      "Google News · related local coverage",
+      focusedQuery,
+      locale.hl,
+      locale.region,
+      locale.ceid,
+    ),
+    searchProvider(
+      "Google News · exact international topic",
+      exactQuery,
+      "en-US",
+      "US",
+      "US:en",
+    ),
+    searchProvider(
+      "Google News · related international coverage",
+      focusedQuery,
+      "en-US",
+      "US",
+      "US:en",
+    ),
+  ];
+}
+
 function providersForRequest(
   scope: "country" | "global",
   countryName: string | null,
@@ -510,7 +627,7 @@ export function articleMatchesCountry(
 
 async function fetchProvider(
   provider: NewsProvider,
-  scope: "country" | "global",
+  scope: "country" | "global" | "event",
   countryName: string | null,
   terms: string[],
   fetchImpl: FetchImplementation,
@@ -703,14 +820,33 @@ export async function handleLiveNews(
     );
   }
 
-  const scope = requestedScope === "global" ? "global" : "country";
+  const scope =
+    requestedScope === "global"
+      ? "global"
+      : requestedScope === "event"
+        ? "event"
+        : "country";
   const requestedCountry = url.searchParams.get("country")?.trim() ?? "";
   const requestedRegion =
     url.searchParams.get("iso2")?.trim().toUpperCase() ?? "";
+  const requestedHeadline = url.searchParams.get("headline")?.trim() ?? "";
   if (
     scope === "country" &&
     (!requestedCountry ||
       requestedCountry.length > 80 ||
+      !VALID_COUNTRY_NAME.test(requestedCountry))
+  ) {
+    return json({ error: "A valid country name is required." }, 400);
+  }
+  if (
+    scope === "event" &&
+    (requestedHeadline.length < 8 || requestedHeadline.length > 300)
+  ) {
+    return json({ error: "A valid event headline is required." }, 400);
+  }
+  if (
+    requestedCountry &&
+    (requestedCountry.length > 80 ||
       !VALID_COUNTRY_NAME.test(requestedCountry))
   ) {
     return json({ error: "A valid country name is required." }, 400);
@@ -720,17 +856,33 @@ export async function handleLiveNews(
   }
 
   const countryName =
-    scope === "country" ? canonicalCountryName(requestedCountry) : null;
+    scope !== "global" && requestedCountry
+      ? canonicalCountryName(requestedCountry)
+      : null;
   const terms =
     scope === "country" && countryName
       ? countrySearchTerms(requestedCountry)
       : [];
-  const providers = providersForRequest(scope, countryName, requestedRegion);
+  const providers =
+    scope === "event"
+      ? eventGoogleProviders(
+          requestedHeadline,
+          countryName,
+          requestedRegion,
+        )
+      : providersForRequest(scope, countryName, requestedRegion);
   const results = await Promise.all(
     providers.map((provider) =>
       fetchProvider(provider, scope, countryName, terms, fetchImpl),
     ),
   );
+  if (scope === "event") {
+    for (const result of results) {
+      result.articles = result.articles.filter((article) =>
+        articleMatchesEvent(article, requestedHeadline),
+      );
+    }
+  }
   const successful = results.filter((result) => result.ok);
   if (!successful.length) {
     return json(
@@ -748,16 +900,23 @@ export async function handleLiveNews(
     articleCount: result.articles.length,
   }));
   return json({
-    countryName: scope === "country" ? requestedCountry : null,
+    countryName: scope === "global" ? null : requestedCountry || null,
     scope,
     generatedAt: new Date().toISOString(),
     refreshAfterSeconds: CACHE_SECONDS,
-    provider: `WorldPulse live index · ${successful.length} feeds`,
+    provider:
+      scope === "event"
+        ? `Expanded topic search · ${successful.length} feeds`
+        : `WorldPulse live index · ${successful.length} feeds`,
     providers: diagnostics,
     degraded: successful.length < providers.length,
     articles: mergeArticles(
       successful,
-      scope === "global" ? MAX_GLOBAL_ARTICLES : MAX_COUNTRY_ARTICLES,
+      scope === "global"
+        ? MAX_GLOBAL_ARTICLES
+        : scope === "event"
+          ? MAX_EVENT_ARTICLES
+          : MAX_COUNTRY_ARTICLES,
     ),
   });
 }
