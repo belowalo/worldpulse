@@ -248,6 +248,8 @@ function EventCard({
   const cardRef = useRef<HTMLElement | null>(null);
   const hasConnections = event.affectedCountries.length > 1;
   const bias = biasDistributionForArticles(event.articles);
+  const hasFullBiasRange =
+    bias.left > 0 && bias.center > 0 && bias.right > 0;
 
   useEffect(() => {
     if (coverageExpanded || coverageLoading || coverageError) return;
@@ -372,6 +374,7 @@ function EventCard({
             Ground News publisher mix
           </span>
           <span className="text-[9px] text-[#718096]">
+            {hasFullBiasRange ? "Left · center · right" : "Viewpoint gap"} ·{" "}
             {bias.rated}/{bias.total} rated
           </span>
         </div>
@@ -576,9 +579,9 @@ function MethodologyModal({ onClose }: { onClose: () => void }) {
         <p className="mt-5 text-xs leading-5 text-[#8996a8]">
           Every displayed headline and publisher link comes from a real public
           news feed. On startup, WorldPulse searches current reporting for
-          every country before opening the interactive map. No bundled
-          headlines are used. Opening a country also runs a deeper local and
-          international search. WorldPulse never invents headlines or sources.
+          every country as the interactive map opens. No bundled headlines are
+          used. Opening a country also runs a deeper local and international
+          search. WorldPulse never invents headlines or sources.
         </p>
         <p className="mt-3 text-xs leading-5 text-[#8996a8]">
           Coverage is uneven. Countries with less digital reporting or fewer
@@ -588,10 +591,11 @@ function MethodologyModal({ onClose }: { onClose: () => void }) {
           metadata; WorldPulse does not reproduce article bodies.
         </p>
         <p className="mt-3 text-xs leading-5 text-[#8996a8]">
-          Visible events automatically run an exact and keyword topic search
-          across local and international Google News editions. WorldPulse
-          groups rewritten headlines into one occurrence, deduplicates
-          publishers by identity, and displays up to five recent matches.
+          Visible events automatically run exact, keyword, and
+          viewpoint-targeted topic searches across local and international news
+          results. WorldPulse groups rewritten headlines into one occurrence,
+          deduplicates publishers by identity, and displays up to five recent
+          matches.
           Publisher lean labels use a checked Ground News ratings snapshot
           (July 26, 2026). They describe publications—not individual articles
           or the event—use a U.S.-political reference frame, and exclude
@@ -782,6 +786,7 @@ export function WorldPulseApp({
     let cancelled = false;
     let refreshTimer: number | undefined;
     const loadedCountries = new Set<string>();
+    const missingCountries = new Set<string>();
     const countriesByName = new Map(
       countryDirectory.map((country) => [country.name, country]),
     );
@@ -808,7 +813,6 @@ export function WorldPulseApp({
         const parameters = new URLSearchParams({
           scope: "map",
           countries: batch.map((country) => country.name).join("|"),
-          fresh: "1",
         });
         const response = await fetch(`/api/live-news?${parameters.toString()}`);
         if (!response.ok) throw new Error("Country live search failed.");
@@ -821,7 +825,10 @@ export function WorldPulseApp({
           if (!country) continue;
           if (phase === "initial") loadedCountries.add(country.name);
           else refreshedCountries.add(country.name);
-          if (!countryPayload.articles.length) continue;
+          if (!countryPayload.articles.length) {
+            if (phase === "initial") missingCountries.add(country.name);
+            continue;
+          }
           const livePayload: LiveNewsPayload = {
             countryName: country.name,
             scope: "country",
@@ -831,7 +838,11 @@ export function WorldPulseApp({
             articles: countryPayload.articles,
           };
           const events = buildLiveEvents(livePayload, country);
-          if (!events.length) continue;
+          if (!events.length) {
+            if (phase === "initial") missingCountries.add(country.name);
+            continue;
+          }
+          if (phase === "initial") missingCountries.delete(country.name);
           nextFeeds[country.name] = {
             events,
             updatedAt: countryPayload.generatedAt,
@@ -843,6 +854,12 @@ export function WorldPulseApp({
 
         if (Object.keys(nextFeeds).length) {
           setLiveCountryFeeds((current) => ({ ...current, ...nextFeeds }));
+        }
+        if (
+          phase === "initial" &&
+          loadedCountries.size >= Math.min(8, countryDirectory.length)
+        ) {
+          setMapSnapshotReady(true);
         }
         setWorldLoad((current) => ({
           ...current,
@@ -864,8 +881,8 @@ export function WorldPulseApp({
       phase: "initial" | "refresh",
     ) => {
       const batches: MapCountry[][] = [];
-      for (let index = 0; index < countries.length; index += 2) {
-        batches.push(countries.slice(index, index + 2));
+      for (let index = 0; index < countries.length; index += 8) {
+        batches.push(countries.slice(index, index + 8));
       }
       let cursor = 0;
       const refreshedCountries = new Set<string>();
@@ -878,7 +895,7 @@ export function WorldPulseApp({
       };
       await Promise.all(
         Array.from(
-          { length: Math.min(3, batches.length) },
+          { length: Math.min(2, batches.length) },
           () => worker(),
         ),
       );
@@ -894,36 +911,46 @@ export function WorldPulseApp({
     };
 
     const loadWorld = async () => {
-      let pass = 1;
-      while (!cancelled && loadedCountries.size < countryDirectory.length) {
-        const pending = countryDirectory.filter(
-          (country) => !loadedCountries.has(country.name),
-        );
-        setWorldLoad((current) => ({
-          ...current,
-          retrying: pass === 1 ? 0 : pending.length,
-          pass,
-        }));
-        await runBatches(pending, "initial");
-        if (loadedCountries.size < countryDirectory.length) {
-          pass += 1;
-          await wait(Math.min(5_000, 1_000 * 2 ** Math.min(pass - 2, 3)));
-        }
-      }
+      await runBatches(countryDirectory, "initial");
       if (cancelled) return;
       setWorldLoad((current) => ({
         ...current,
         loaded: countryDirectory.length,
-        retrying: 0,
+        retrying: missingCountries.size,
       }));
       setMapSnapshotReady(true);
       refreshTimer = window.setTimeout(() => void refreshWorld(), 600_000);
+
+      let pass = 2;
+      while (!cancelled && missingCountries.size) {
+        await wait(Math.min(30_000, 5_000 * 2 ** Math.min(pass - 2, 3)));
+        if (cancelled) return;
+        const pending = countryDirectory.filter((country) =>
+          missingCountries.has(country.name),
+        );
+        setWorldLoad((current) => ({
+          ...current,
+          retrying: pending.length,
+          pass,
+        }));
+        await runBatches(pending, "initial");
+        pass += 1;
+        setWorldLoad((current) => ({
+          ...current,
+          retrying: missingCountries.size,
+          pass,
+        }));
+      }
     };
 
+    const revealTimer = window.setTimeout(() => {
+      if (!cancelled) setMapSnapshotReady(true);
+    }, 3_000);
     void loadWorld();
     return () => {
       cancelled = true;
       if (refreshTimer !== undefined) window.clearTimeout(refreshTimer);
+      window.clearTimeout(revealTimer);
     };
   }, [countryDirectory, countryDirectoryReady, liveUpdates]);
 
@@ -1328,8 +1355,8 @@ export function WorldPulseApp({
           </h1>
           <p className="mt-3 max-w-lg text-sm leading-6 text-[#9ca9ba]">
             WorldPulse is searching live local and international news sources
-            for every country. The map opens only when the complete world sweep
-            is ready—no stored headline bundle is being loaded.
+            for every country. The map opens after the first live batches,
+            while the rest of the world continues loading automatically.
           </p>
 
           <div className="mt-8">
@@ -1370,8 +1397,8 @@ export function WorldPulseApp({
                 : "Connecting to live sources"}
           </div>
           <p className="mt-5 text-xs leading-5 text-[#728096]">
-            The first full sweep can take several minutes because every country
-            is being checked directly before the map opens.
+            Recent live results are reused for up to five minutes, then
+            refreshed from the source. No bundled headline snapshot is used.
           </p>
         </section>
       </main>
@@ -1443,12 +1470,14 @@ export function WorldPulseApp({
             statusLabel={
               worldLoad.total
                 ? worldLoad.loaded === worldLoad.total
-                  ? `${worldLoad.loaded}/${worldLoad.total} countries checked live${
-                      worldLoad.refreshed
-                        ? ` · ${worldLoad.refreshed} refreshed`
-                        : ""
-                    }`
-                  : `${worldLoad.loaded}/${worldLoad.total} countries checked live`
+                  ? worldLoad.retrying
+                    ? `${worldLoad.loaded}/${worldLoad.total} countries checked live · retrying ${worldLoad.retrying} without results`
+                    : `${worldLoad.loaded}/${worldLoad.total} countries checked live${
+                        worldLoad.refreshed
+                          ? ` · ${worldLoad.refreshed} refreshed`
+                          : ""
+                      }`
+                  : `${worldLoad.loaded}/${worldLoad.total} countries checked live · loading the rest`
                 : globalFeed.loading
                 ? "Refreshing live feed…"
                 : "Live · auto-refresh 10 min"

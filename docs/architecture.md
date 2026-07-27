@@ -34,7 +34,7 @@ The web app is at the repository root because the deployable Sites runtime expec
 - `lib/seed-data.ts` retains deterministic data for backend development and tests.
 - `public/countries.geojson` is a local, deployment-safe country dataset derived from the ISC-licensed `geojson-world-map` package.
 
-The map canvas supports pointer navigation and direct country selection across all 215 geometries in the bundled dataset. Startup performs live searches in small concurrent country batches and keeps the interface behind a progress screen until every country has been checked. Live results are immediately available when the map opens, while countries with no current matching headline remain neutral instead of receiving invented content. The selected country receives an additional focused query. Ten-minute live sweeps keep country signals current, and the global feed remains deferred until the user requests it.
+The map canvas supports pointer navigation and direct country selection across all 215 geometries in the bundled dataset. Startup performs live searches in concurrent country batches and opens the interface after the first completed batch or three seconds. The rest of the world index continues loading visibly in the background. Countries with no result from the first search receive a second latest-news search and automatic background retries with increasing backoff; unrelated headlines are never used merely to color a country. The selected country receives an additional focused multi-provider query. Ten-minute live sweeps keep country signals current, and the global feed remains deferred until the user requests it.
 
 ## API boundaries
 
@@ -51,7 +51,7 @@ FastAPI exposes OpenAPI documentation at `/docs` and its schema at `/openapi.jso
 
 Articles remain separate from events. An event can have many articles, each with one source. Events have a primary country and many affected countries through `event_countries`. This supports future clustering without inflating event importance from duplicate articles.
 
-The hosted worker also stores successful JSON feed snapshots in D1 by normalized request identity. Edge cache hits return immediately; records older than five minutes are served safely while the worker refreshes them in the background. The 24-hour persistent fallback keeps real attributed reporting visible during temporary upstream failures.
+The hosted worker also stores successful JSON feed snapshots in D1 by normalized request identity. Edge cache hits younger than five minutes return immediately. Older map snapshots are not served; the worker waits for a new live country scan. Deeper country, global, and event queries may use stale-while-refresh results for temporary upstream resilience.
 
 ## Failure behavior
 
@@ -59,4 +59,4 @@ The API validates pagination bounds and returns a consistent `{"error": ...}` en
 
 ## Deployment
 
-Docker Compose is the full local reference deployment. The hosted app packages the Next.js surface, cached RSS-metadata proxy, and D1 migration as a Cloudflare-compatible worker. It contains no static news snapshot: a blocking startup sweep builds the complete country index from live endpoints, followed by ten-minute refresh sweeps and focused active-feed updates.
+Docker Compose is the full local reference deployment. The hosted app packages the Next.js surface, cached RSS-metadata proxy, and D1 migration as a Cloudflare-compatible worker. It contains no static news snapshot: a progressive startup sweep builds the country index from live endpoints, followed by ten-minute refresh sweeps and focused active-feed updates.

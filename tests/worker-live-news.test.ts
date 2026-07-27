@@ -7,6 +7,7 @@ import {
   articleMatchesCountry,
   articleHeadlineMatchesCountry,
   handleLiveNews,
+  parseBingNewsFeed,
   parseGdeltJson,
   parseGoogleNewsFeed,
   parsePublisherRss,
@@ -111,6 +112,30 @@ describe("worker live-news providers", () => {
     expect(articleMatchesCountry(article, ["Canada", "Canadian"])).toBe(false);
   });
 
+  it("parses Bing News publisher attribution and restores the article URL", () => {
+    const originalUrl = "https://example.com/tuvalu-climate-report";
+    const redirectUrl = new URL("https://www.bing.com/news/apiclick.aspx");
+    redirectUrl.searchParams.set("url", originalUrl);
+    const xml = `
+      <rss><channel><item>
+        <title>Tuvalu presents a new climate resilience plan</title>
+        <description>Current reporting from the Pacific island nation.</description>
+        <link>${redirectUrl.toString().replace(/&/g, "&amp;")}</link>
+        <guid>tuvalu-climate</guid>
+        <pubDate>Fri, 24 Jul 2026 21:00:00 GMT</pubDate>
+        <News:Source>Example News on MSN</News:Source>
+      </item></channel></rss>
+    `;
+
+    const [article] = parseBingNewsFeed(xml);
+    expect(article).toMatchObject({
+      title: "Tuvalu presents a new climate resilience plan",
+      url: originalUrl,
+      publisherName: "Example News",
+      publisherUrl: "https://example.com/",
+    });
+  });
+
   it("parses GDELT results and ignores non-English entries", () => {
     const articles = parseGdeltJson(
       JSON.stringify({
@@ -166,31 +191,31 @@ describe("worker live-news providers", () => {
     expect(payload.provider).toContain("1 feeds");
   });
 
-  it("uses a country's local Google News edition and local-language search", async () => {
+  it("uses broad and latest live searches for a country", async () => {
     vi.spyOn(console, "warn").mockImplementation(() => undefined);
     const requestedUrls: string[] = [];
-    const googleItem = `
+    const bingItems = `
       <rss><channel><item>
-        <title>Le Sénégal lance un nouveau programme - APS</title>
+        <title>Le Sénégal lance un nouveau programme</title>
         <description>Une annonce faite à Dakar.</description>
-        <link>https://news.google.com/rss/articles/senegal-local</link>
+        <link>https://www.bing.com/news/apiclick.aspx?ref=FexRss&amp;url=https%3A%2F%2Faps.sn%2Fsenegal-local</link>
         <guid>senegal-local</guid>
         <pubDate>Fri, 24 Jul 2026 21:00:00 GMT</pubDate>
-        <source url="https://aps.sn/">APS</source>
+        <News:Source>APS</News:Source>
       </item><item>
-        <title>Japan launches a lunar research mission - Science Desk</title>
+        <title>Japan launches a lunar research mission</title>
         <description>A spacecraft entered lunar orbit.</description>
-        <link>https://news.google.com/rss/articles/unrelated-space</link>
+        <link>https://science.example/unrelated-space</link>
         <guid>unrelated-space</guid>
         <pubDate>Fri, 24 Jul 2026 20:00:00 GMT</pubDate>
-        <source url="https://science.example/">Science Desk</source>
+        <News:Source>Science Desk</News:Source>
       </item></channel></rss>
     `;
     const fetchMock = vi.fn(async (input: URL | RequestInfo) => {
       const url = String(input);
       requestedUrls.push(url);
-      if (url.startsWith("https://news.google.com/rss")) {
-        return new Response(googleItem, { status: 200 });
+      if (url.startsWith("https://www.bing.com/news/search")) {
+        return new Response(bingItems, { status: 200 });
       }
       return new Response("Unavailable", { status: 503 });
     });
@@ -226,22 +251,17 @@ describe("worker live-news providers", () => {
     expect(
       requestedUrls.some(
         (url) =>
-          url.startsWith("https://news.google.com/rss?") &&
-          url.includes("gl=SN") &&
-          url.includes("ceid=SN%3Afr"),
+          url.startsWith("https://www.bing.com/news/search?") &&
+          new URL(url).searchParams.get("q") === "Senegal news",
       ),
     ).toBe(true);
     expect(
       requestedUrls.some(
         (url) =>
-          url.includes("/rss/search?") &&
-          url.includes("gl=SN") &&
-          decodeURIComponent(url).includes('"Dakar"'),
-      ),
-    ).toBe(true);
-    expect(
-      requestedUrls.some(
-        (url) => url.includes("/rss/search?") && url.includes("gl=US"),
+          url.startsWith("https://www.bing.com/news/search?") &&
+          new URL(url).searchParams
+            .get("q")
+            ?.includes("Senegal latest"),
       ),
     ).toBe(true);
     expect(payload.articles[0].publisherName).toBe("APS");
@@ -268,19 +288,27 @@ describe("worker live-news providers", () => {
   it("loads a batch of current country headlines in one map request", async () => {
     vi.spyOn(console, "warn").mockImplementation(() => undefined);
     const requestedUrls: string[] = [];
-    const googleItem = `
+    const bingFeed = (country: string) => `
       <rss><channel><item>
-        <title>Current local headline - Local Desk</title>
-        <description>Current local reporting.</description>
-        <link>https://news.google.com/rss/articles/local-map-story</link>
-        <guid>local-map-story</guid>
+        <title>${country} current local headline</title>
+        <description>Current reporting from ${country}.</description>
+        <link>https://local.example/${country.toLowerCase()}</link>
+        <guid>local-map-story-${country}</guid>
         <pubDate>Fri, 24 Jul 2026 21:00:00 GMT</pubDate>
-        <source url="https://local.example/">Local Desk</source>
+        <News:Source>${country} Local Desk</News:Source>
       </item></channel></rss>
     `;
     const fetchMock = vi.fn(async (input: URL | RequestInfo) => {
-      requestedUrls.push(String(input));
-      return new Response(googleItem, { status: 200 });
+      const url = String(input);
+      requestedUrls.push(url);
+      if (!url.startsWith("https://www.bing.com/news/search")) {
+        return new Response("Unavailable", { status: 503 });
+      }
+      const query = new URL(url).searchParams.get("q") ?? "";
+      return new Response(
+        bingFeed(query.includes("Senegal") ? "Senegal" : "Japan"),
+        { status: 200 },
+      );
     });
 
     const response = await handleLiveNews(
@@ -307,17 +335,21 @@ describe("worker live-news providers", () => {
     );
     expect(
       requestedUrls.some(
-        (url) => url.includes("gl=SN") && url.includes("ceid=SN%3Afr"),
+        (url) =>
+          url.startsWith("https://www.bing.com/news/search?") &&
+          new URL(url).searchParams.get("q") === "Senegal news",
       ),
     ).toBe(true);
     expect(
       requestedUrls.some(
-        (url) => url.includes("gl=JP") && url.includes("ceid=JP%3Aja"),
+        (url) =>
+          url.startsWith("https://www.bing.com/news/search?") &&
+          new URL(url).searchParams.get("q") === "Japan news",
       ),
     ).toBe(true);
   });
 
-  it("uses shared international feeds when direct map searches are unavailable", async () => {
+  it("does not substitute an unrelated feed when both country searches fail", async () => {
     vi.spyOn(console, "warn").mockImplementation(() => undefined);
     const internationalFeed = `
       <rss><channel><item>
@@ -347,65 +379,35 @@ describe("worker live-news providers", () => {
       }>;
     };
 
-    expect(payload.countries[0].available).toBe(true);
-    expect(payload.countries[0].articles[0]).toMatchObject({
-      title: "Canada parliament approves a new national housing package",
-      publisherName: "BBC News",
-    });
+    expect(payload.countries[0].available).toBe(false);
+    expect(payload.countries[0].articles).toEqual([]);
   });
 
-  it("mixes local, current, latest, and rights reporting in map searches", async () => {
+  it("returns multiple current stories from one country search", async () => {
     vi.spyOn(console, "warn").mockImplementation(() => undefined);
     const requestedUrls: string[] = [];
-    const feed = (id: string, title: string, publisher: string) => `
-      <rss><channel><item>
-        <title>${title} - ${publisher}</title>
+    const item = (id: string, title: string, publisher: string) => `
+      <item>
+        <title>${title}</title>
         <description>Current reporting from Egypt.</description>
-        <link>https://news.google.com/rss/articles/${id}</link>
+        <link>https://${id}.example/story</link>
         <guid>${id}</guid>
         <pubDate>Fri, 24 Jul 2026 21:00:00 GMT</pubDate>
-        <source url="https://${id}.example/">${publisher}</source>
-      </item></channel></rss>
+        <News:Source>${publisher}</News:Source>
+      </item>
     `;
+    const feed = `<rss><channel>
+      ${item("egypt-local", "Egypt announces a new local infrastructure project", "Local Desk")}
+      ${item("egypt-tunnels", "Egypt-Gaza border tunnel mapping draws scrutiny", "Regional Desk")}
+      ${item("egypt-visa", "Egypt launches a digital visa-on-arrival system", "Travel Desk")}
+      ${item("egypt-rights", "Egypt urged to release detained Gen Z activists", "Rights Monitor")}
+    </channel></rss>`;
     const fetchMock = vi.fn(async (input: URL | RequestInfo) => {
       const url = String(input);
       requestedUrls.push(url);
-      const parsed = new URL(url);
-      const query = parsed.searchParams.get("q") ?? "";
-      if (query.includes("human rights")) {
-        return new Response(
-          feed(
-            "egypt-rights",
-            "Egypt urged to release detained Gen Z activists",
-            "Rights Monitor",
-          ),
-        );
-      }
-      if (query.includes("latest")) {
-        return new Response(
-          feed(
-            "egypt-visa",
-            "Egypt launches a digital visa-on-arrival system",
-            "Travel Desk",
-          ),
-        );
-      }
-      if (query.includes("news")) {
-        return new Response(
-          feed(
-            "egypt-tunnels",
-            "Egypt-Gaza border tunnel mapping draws scrutiny",
-            "Regional Desk",
-          ),
-        );
-      }
-      return new Response(
-        feed(
-          "egypt-local",
-          "Egypt announces a new local infrastructure project",
-          "Local Desk",
-        ),
-      );
+      return url.startsWith("https://www.bing.com/news/search")
+        ? new Response(feed)
+        : new Response("Unavailable", { status: 503 });
     });
 
     const response = await handleLiveNews(
@@ -431,28 +433,31 @@ describe("worker live-news providers", () => {
         "Egypt urged to release detained Gen Z activists",
       ]),
     );
-    expect(requestedUrls).toHaveLength(4);
+    expect(requestedUrls).toHaveLength(1);
   });
 
-  it("falls back to international search when a local country edition fails", async () => {
+  it("falls back to a latest-country search when the first has no results", async () => {
     vi.spyOn(console, "warn").mockImplementation(() => undefined);
     const requestedUrls: string[] = [];
-    const googleItem = `
+    const bingItem = `
       <rss><channel><item>
-        <title>São Tomé current affairs - Regional Desk</title>
+        <title>São Tomé current affairs</title>
         <description>Current reporting from São Tomé and Principe.</description>
-        <link>https://news.google.com/rss/articles/sao-tome-story</link>
+        <link>https://regional.example/sao-tome-story</link>
         <guid>sao-tome-story</guid>
         <pubDate>Fri, 24 Jul 2026 21:00:00 GMT</pubDate>
-        <source url="https://regional.example/">Regional Desk</source>
+        <News:Source>Regional Desk</News:Source>
       </item></channel></rss>
     `;
     const fetchMock = vi.fn(async (input: URL | RequestInfo) => {
       const url = String(input);
       requestedUrls.push(url);
-      return url.includes("gl=ST")
-        ? new Response("Unavailable", { status: 503 })
-        : new Response(googleItem, { status: 200 });
+      const query = url.startsWith("https://www.bing.com/news/search")
+        ? new URL(url).searchParams.get("q") ?? ""
+        : "";
+      return query.includes("latest")
+        ? new Response(bingItem, { status: 200 })
+        : new Response("Unavailable", { status: 503 });
     });
 
     const response = await handleLiveNews(
@@ -469,8 +474,18 @@ describe("worker live-news providers", () => {
       available: true,
       articles: [expect.any(Object)],
     });
-    expect(requestedUrls.some((url) => url.includes("gl=ST"))).toBe(true);
-    expect(requestedUrls.some((url) => url.includes("gl=US"))).toBe(true);
+    expect(
+      requestedUrls.filter((url) =>
+        url.startsWith("https://www.bing.com/news/search"),
+      ),
+    ).toHaveLength(2);
+    expect(
+      requestedUrls.some((url) =>
+        new URL(url).searchParams
+          .get("q")
+          ?.includes("latest"),
+      ),
+    ).toBe(true);
   });
 
   it("runs focused local and international searches for one event", async () => {
@@ -483,16 +498,16 @@ describe("worker live-news providers", () => {
       publisherDomain: string,
     ) => `
       <item>
-        <title>${title} - ${publisher}</title>
+        <title>${title}</title>
         <description>${
           id === "unrelated"
             ? "A spacecraft entered lunar orbit."
             : "Canada and Mexico reached a cross-border trade agreement."
         }</description>
-        <link>https://news.google.com/rss/articles/${id}</link>
+        <link>https://${publisherDomain}/${id}</link>
         <guid>${id}</guid>
         <pubDate>Fri, 24 Jul 2026 21:00:00 GMT</pubDate>
-        <source url="https://${publisherDomain}/">${publisher}</source>
+        <News:Source>${publisher}</News:Source>
       </item>
     `;
     const eventFeed = `<rss><channel>
@@ -500,13 +515,16 @@ describe("worker live-news providers", () => {
       ${item("two", "Mexico backs new Canada cross-border trade agreement", "BBC News", "bbc.com")}
       ${item("three", "Canada-Mexico trade accord receives approval", "Associated Press", "apnews.com")}
       ${item("four", "Leaders approve Canada Mexico cross-border trade deal", "CBC News", "cbc.ca")}
-      ${item("five", "New accord expands trade between Mexico and Canada", "Local Desk", "local.example")}
+      ${item("five", "New accord expands trade between Mexico and Canada", "Fox News", "foxnews.com")}
       ${item("six", "Canada Mexico trade pact enters force", "Regional Desk", "regional.example")}
       ${item("unrelated", "Japan launches a new lunar research mission", "Science Desk", "science.example")}
     </channel></rss>`;
     const fetchMock = vi.fn(async (input: URL | RequestInfo) => {
-      requestedUrls.push(String(input));
-      return new Response(eventFeed, { status: 200 });
+      const url = String(input);
+      requestedUrls.push(url);
+      return url.startsWith("https://www.bing.com/news/search")
+        ? new Response(eventFeed, { status: 200 })
+        : new Response("Unavailable", { status: 503 });
     });
 
     const response = await handleLiveNews(
@@ -525,12 +543,27 @@ describe("worker live-news providers", () => {
     expect(payload.scope).toBe("event");
     expect(payload.provider).toContain("Expanded topic search");
     expect(payload.articles).toHaveLength(6);
+    expect(payload.articles.map((article) => article.publisherName)).toEqual(
+      expect.arrayContaining(["Associated Press", "Reuters", "Fox News"]),
+    );
     expect(
       payload.articles.some((article) => article.title.includes("lunar")),
     ).toBe(false);
-    expect(requestedUrls).toHaveLength(4);
-    expect(requestedUrls.some((url) => url.includes("gl=CA"))).toBe(true);
-    expect(requestedUrls.some((url) => url.includes("gl=US"))).toBe(true);
+    expect(
+      requestedUrls.filter((url) =>
+        url.startsWith("https://www.bing.com/news/search"),
+      ),
+    ).toHaveLength(5);
+    expect(
+      requestedUrls.some((url) =>
+        decodeURIComponent(url).includes("site:cnn.com"),
+      ),
+    ).toBe(true);
+    expect(
+      requestedUrls.some((url) =>
+        decodeURIComponent(url).includes("site:foxnews.com"),
+      ),
+    ).toBe(true);
     expect(
       requestedUrls.some((url) =>
         new URL(url).searchParams
@@ -567,12 +600,12 @@ describe("worker live-news providers", () => {
       publisher: string,
     ) => `
       <item>
-        <title>${title} - ${publisher}</title>
+        <title>${title}</title>
         <description>${description}</description>
-        <link>https://news.google.com/rss/articles/${id}</link>
+        <link>https://${id}.example/story</link>
         <guid>${id}</guid>
         <pubDate>Sat, 25 Jul 2026 21:00:00 GMT</pubDate>
-        <source url="https://${id}.example/">${publisher}</source>
+        <News:Source>${publisher}</News:Source>
       </item>
     `;
     const exactFeed = `<rss><channel>${item(
@@ -590,7 +623,11 @@ describe("worker live-news providers", () => {
       ${item("unrelated", "Japan launches a lunar research mission", "A spacecraft entered orbit.", "Science Desk")}
     </channel></rss>`;
     const fetchMock = vi.fn(async (input: URL | RequestInfo) => {
-      const query = new URL(String(input)).searchParams.get("q") ?? "";
+      const url = String(input);
+      if (!url.startsWith("https://www.bing.com/news/search")) {
+        return new Response("Unavailable", { status: 503 });
+      }
+      const query = new URL(url).searchParams.get("q") ?? "";
       requestedQueries.push(query);
       return new Response(
         query.startsWith('"Extraordinarily hot') ? exactFeed : relatedFeed,
@@ -637,6 +674,42 @@ describe("worker live-news providers", () => {
         "‘Extraordinarily hot’: US heatwave stretches on with millions still under warnings",
       ),
     ).toBe(true);
+    expect(
+      articleMatchesEvent(
+        {
+          searchableText:
+            "AI chatbots take heat over left-wing bias and can no longer be considered neutral in America",
+        },
+        "‘Extraordinarily hot’: US heatwave stretches on with millions still under warnings",
+      ),
+    ).toBe(false);
+    expect(
+      articleMatchesEvent(
+        {
+          searchableText:
+            "Giant hot dog sculpture returns to New York Times Square for America's anniversary",
+        },
+        "‘Extraordinarily hot’: US heatwave stretches on with millions still under warnings",
+      ),
+    ).toBe(false);
+    expect(
+      articleMatchesEvent(
+        {
+          searchableText:
+            "Trump orders Smithsonian to post warnings about inaccurate US history. The administration accused the museum of anti-American bias.",
+        },
+        "‘Extraordinarily hot’: US heatwave stretches on with millions still under warnings",
+      ),
+    ).toBe(false);
+    expect(
+      articleMatchesEvent(
+        {
+          searchableText:
+            "The grid just screamed a warning to Congress and you are paying for it. Energy investments face federal delays.",
+        },
+        "‘Extraordinarily hot’: US heatwave stretches on with millions still under warnings",
+      ),
+    ).toBe(false);
   });
 
   it("returns an explicit outage only when every provider fails", async () => {

@@ -3,7 +3,6 @@ import {
   countrySearchTerms,
   textMatchesCountry,
 } from "../lib/country-terms";
-import { googleNewsLocaleForCountry } from "../lib/country-locale";
 import { newsTextTokens } from "../lib/live-news";
 
 export interface FeedArticle {
@@ -96,6 +95,10 @@ const GENERIC_OCCURRENCE_TOKENS = new Set([
   "suspect",
   "victim",
 ]);
+const COUNTRY_NEWS_QUERY_OVERRIDES: Record<string, string> = {
+  "British Indian Ocean Territory": "Diego Garcia",
+  "South Georgia and the South Sandwich Islands": "South Georgia island",
+};
 
 async function mapWithConcurrency<T, R>(
   items: T[],
@@ -276,6 +279,51 @@ export function parseGoogleNewsFeed(xml: string) {
   });
 }
 
+function originalBingArticleUrl(value: string) {
+  const safeUrl = safeHttpUrl(value);
+  if (!safeUrl) return "";
+  try {
+    const url = new URL(safeUrl);
+    if (
+      (url.hostname === "bing.com" || url.hostname.endsWith(".bing.com")) &&
+      url.searchParams.get("url")
+    ) {
+      return safeHttpUrl(url.searchParams.get("url") ?? "") || safeUrl;
+    }
+  } catch {
+    return safeUrl;
+  }
+  return safeUrl;
+}
+
+export function parseBingNewsFeed(xml: string) {
+  const items = xml.match(/<item(?:\s[^>]*)?>[\s\S]*?<\/item>/gi) ?? [];
+  return items.flatMap((item) => {
+    const articleUrl = originalBingArticleUrl(tagValue(item, "link"));
+    const publisherName = (
+      tagValue(item, "News:Source") || "Independent publisher"
+    )
+      .replace(/\s+on\s+MSN$/i, "")
+      .trim();
+    let publisherUrl = "";
+    try {
+      publisherUrl = new URL(articleUrl).origin;
+    } catch {
+      // buildCandidate rejects the article when its URL is invalid.
+    }
+    const article = buildCandidate(
+      tagValue(item, "title"),
+      articleUrl,
+      publisherName,
+      publisherUrl,
+      tagValue(item, "pubDate"),
+      tagValue(item, "description"),
+      tagValue(item, "guid") || articleUrl,
+    );
+    return article ? [article] : [];
+  });
+}
+
 export function parseGdeltJson(body: string) {
   const payload = JSON.parse(body) as {
     articles?: Array<{
@@ -401,6 +449,31 @@ const CORE_PROVIDERS: NewsProvider[] = [
     "https://news.un.org/",
     "https://news.un.org/feed/subscribe/en/news/all/rss.xml",
   ),
+  fixedRssProvider(
+    "Fox News",
+    "https://www.foxnews.com/world",
+    "https://moxie.foxnews.com/google-publisher/world.xml",
+  ),
+  fixedRssProvider(
+    "New York Post",
+    "https://nypost.com/",
+    "https://nypost.com/feed/",
+  ),
+  fixedRssProvider(
+    "Washington Examiner",
+    "https://www.washingtonexaminer.com/",
+    "https://www.washingtonexaminer.com/feed",
+  ),
+  fixedRssProvider(
+    "National Review",
+    "https://www.nationalreview.com/",
+    "https://www.nationalreview.com/feed/",
+  ),
+  fixedRssProvider(
+    "RNZ Pacific",
+    "https://www.rnz.co.nz/international/pacific-news",
+    "https://www.rnz.co.nz/rss/pacific.xml",
+  ),
 ];
 
 const GDELT_PROVIDER: NewsProvider = {
@@ -426,93 +499,48 @@ const GDELT_PROVIDER: NewsProvider = {
   parse: parseGdeltJson,
 };
 
-function googleNewsProvider(
-  name: string,
-  buildUrl: (countryName: string | null) => URL,
-  filterByCountry = false,
-): NewsProvider {
+function bingNewsProvider(name: string, query: string): NewsProvider {
   return {
     name,
-    publisherUrl: "https://news.google.com/",
-    timeoutMs: 5_000,
-    filterByCountry,
-    url: (_scope, countryName) => buildUrl(countryName),
-    parse: parseGoogleNewsFeed,
+    publisherUrl: "https://www.bing.com/news",
+    timeoutMs: 4_500,
+    filterByCountry: false,
+    url: () => {
+      const url = new URL("https://www.bing.com/news/search");
+      url.searchParams.set("q", query);
+      url.searchParams.set("format", "rss");
+      url.searchParams.set("setlang", "en");
+      return url;
+    },
+    parse: parseBingNewsFeed,
   };
 }
 
-const GOOGLE_WORLD_PROVIDER = googleNewsProvider("Google News · World", () => {
-  const url = new URL(
-    "https://news.google.com/rss/headlines/section/topic/WORLD",
-  );
-  url.searchParams.set("hl", "en-CA");
-  url.searchParams.set("gl", "CA");
-  url.searchParams.set("ceid", "CA:en");
-  return url;
-});
+const BING_WORLD_PROVIDER = bingNewsProvider(
+  "Bing News · World",
+  "world news",
+);
 
-function countryGoogleProviders(countryName: string, requestedRegion: string) {
-  const locale = googleNewsLocaleForCountry(countryName, requestedRegion);
-  const terms = countrySearchTerms(countryName).slice(0, 6);
-  const broadQuery = `${terms
-    .map((term) => `"${term}"`)
-    .join(" OR ")} when:7d`;
-  const currentQuery = `"${countryName}" news when:3d`;
-  const latestQuery = `"${countryName}" latest when:3d`;
-  const rightsQuery = `"${countryName}" human rights when:7d`;
-
+function countryBingProviders(countryName: string) {
+  const alternateTerm =
+    COUNTRY_NEWS_QUERY_OVERRIDES[countryName] ??
+    countrySearchTerms(countryName)
+      .filter((term) => term !== countryName)
+      .sort((left, right) => right.length - left.length)[0] ??
+    countryName;
   return [
-    googleNewsProvider(
-      "Google News · Local top stories",
-      () => {
-        const url = new URL("https://news.google.com/rss");
-        url.searchParams.set("hl", locale.hl);
-        url.searchParams.set("gl", locale.region);
-        url.searchParams.set("ceid", locale.ceid);
-        return url;
-      },
-      true,
+    bingNewsProvider(
+      "Bing News · Current country search",
+      `${countryName} news`,
     ),
-    googleNewsProvider("Google News · Local country search", () => {
-      const url = new URL("https://news.google.com/rss/search");
-      url.searchParams.set("q", broadQuery);
-      url.searchParams.set("hl", locale.hl);
-      url.searchParams.set("gl", locale.region);
-      url.searchParams.set("ceid", locale.ceid);
-      return url;
-    }),
-    googleNewsProvider("Google News · International country search", () => {
-      const url = new URL("https://news.google.com/rss/search");
-      url.searchParams.set("q", broadQuery);
-      url.searchParams.set("hl", "en-US");
-      url.searchParams.set("gl", "US");
-      url.searchParams.set("ceid", "US:en");
-      return url;
-    }),
-    googleNewsProvider("Google News · Current country news", () => {
-      const url = new URL("https://news.google.com/rss/search");
-      url.searchParams.set("q", currentQuery);
-      url.searchParams.set("hl", "en-US");
-      url.searchParams.set("gl", "US");
-      url.searchParams.set("ceid", "US:en");
-      return url;
-    }),
-    googleNewsProvider("Google News · Latest country search", () => {
-      const url = new URL("https://news.google.com/rss/search");
-      url.searchParams.set("q", latestQuery);
-      url.searchParams.set("hl", "en-US");
-      url.searchParams.set("gl", "US");
-      url.searchParams.set("ceid", "US:en");
-      return url;
-    }),
-    googleNewsProvider("Google News · Country rights search", () => {
-      const url = new URL("https://news.google.com/rss/search");
-      url.searchParams.set("q", rightsQuery);
-      url.searchParams.set("hl", "en-US");
-      url.searchParams.set("gl", "US");
-      url.searchParams.set("ceid", "US:en");
-      return url;
-    }),
+    bingNewsProvider(
+      "Bing News · Latest country search",
+      `${countryName} latest`,
+    ),
+    bingNewsProvider(
+      "Bing News · Alternate country search",
+      `${alternateTerm} news`,
+    ),
   ];
 }
 
@@ -534,80 +562,63 @@ export function articleMatchesEvent(
   const shared = headlineTokens.filter((token) =>
     articleTokenSet.has(token),
   ).length;
-  const hasMeaningfulPair =
-    shared >= 2 &&
-    headlineTokens.some(
-      (token) => token.length >= 5 && articleTokenSet.has(token),
+  const distinctiveShared = headlineTokens.filter(
+    (token) => token.length >= 6 && articleTokenSet.has(token),
+  ).length;
+  if (headlineTokens.length <= 4) {
+    return (
+      shared >= 3 ||
+      (shared >= 2 &&
+        distinctiveShared >= 1 &&
+        shared / headlineTokens.length >= 0.66)
     );
-  const required = headlineTokens.length <= 4 ? 2 : 3;
+  }
   return (
-    shared >= required ||
-    hasMeaningfulPair ||
-    shared / headlineTokens.length >= 0.4
+    shared >= 3 ||
+    (shared >= 2 &&
+      distinctiveShared >= 1 &&
+      shared / headlineTokens.length >= 0.5)
   );
 }
 
-function eventGoogleProviders(
+function eventBingProviders(
   headline: string,
   countryName: string | null,
-  requestedRegion: string,
 ) {
-  const locale = googleNewsLocaleForCountry(
-    countryName ?? "United States",
-    requestedRegion,
-  );
   const cleanHeadline = headline
     .replace(/["“”]+/g, " ")
     .replace(/\s+/g, " ")
     .trim();
-  const focusedTerms = eventTokens(cleanHeadline).slice(0, 7);
-  const exactQuery = `"${cleanHeadline.slice(0, 220)}" when:7d`;
+  const focusedTerms = eventTokens(cleanHeadline).slice(0, 8);
   const countryTerm = countryName ? `"${countryName}" ` : "";
-  const focusedQuery = `${countryTerm}${focusedTerms.join(" ")} when:7d`;
-  const searchProvider = (
-    name: string,
-    query: string,
-    hl: string,
-    region: string,
-    ceid: string,
-  ) =>
-    googleNewsProvider(name, () => {
-      const url = new URL("https://news.google.com/rss/search");
-      url.searchParams.set("q", query);
-      url.searchParams.set("hl", hl);
-      url.searchParams.set("gl", region);
-      url.searchParams.set("ceid", ceid);
-      return url;
-    });
+  const focusedQuery = `${countryTerm}${focusedTerms.join(" ")}`;
+  const leftSites =
+    "(site:cnn.com OR site:theguardian.com OR site:apnews.com OR site:nbcnews.com)";
+  const centerSites =
+    "(site:reuters.com OR site:bbc.com OR site:cbsnews.com OR site:dw.com)";
+  const rightSites =
+    "(site:foxnews.com OR site:nypost.com OR site:washingtonexaminer.com OR site:nationalreview.com)";
 
   return [
-    searchProvider(
-      "Google News · exact topic",
-      exactQuery,
-      locale.hl,
-      locale.region,
-      locale.ceid,
+    bingNewsProvider(
+      "Bing News · Exact topic",
+      `"${cleanHeadline.slice(0, 220)}"`,
     ),
-    searchProvider(
-      "Google News · related local coverage",
+    bingNewsProvider(
+      "Bing News · Related coverage",
       focusedQuery,
-      locale.hl,
-      locale.region,
-      locale.ceid,
     ),
-    searchProvider(
-      "Google News · exact international topic",
-      exactQuery,
-      "en-US",
-      "US",
-      "US:en",
+    bingNewsProvider(
+      "Bing News · Left-rated coverage",
+      `${focusedQuery} ${leftSites}`,
     ),
-    searchProvider(
-      "Google News · related international coverage",
-      focusedQuery,
-      "en-US",
-      "US",
-      "US:en",
+    bingNewsProvider(
+      "Bing News · Center-rated coverage",
+      `${focusedQuery} ${centerSites}`,
+    ),
+    bingNewsProvider(
+      "Bing News · Right-rated coverage",
+      `${focusedQuery} ${rightSites}`,
     ),
   ];
 }
@@ -615,13 +626,12 @@ function eventGoogleProviders(
 function providersForRequest(
   scope: "country" | "global",
   countryName: string | null,
-  requestedRegion: string,
 ) {
   if (scope === "global" || !countryName) {
-    return [...CORE_PROVIDERS, GDELT_PROVIDER, GOOGLE_WORLD_PROVIDER];
+    return [...CORE_PROVIDERS, GDELT_PROVIDER, BING_WORLD_PROVIDER];
   }
   return [
-    ...countryGoogleProviders(countryName, requestedRegion),
+    ...countryBingProviders(countryName),
     ...CORE_PROVIDERS,
     GDELT_PROVIDER,
   ];
@@ -630,49 +640,46 @@ function providersForRequest(
 async function fetchMapCountry(
   requestedCountry: string,
   fetchImpl: FetchImplementation,
-  getSharedResults: () => Promise<ProviderResult[]>,
 ) {
   const countryName = canonicalCountryName(requestedCountry);
   const terms = countrySearchTerms(requestedCountry);
-  const googleProviders = countryGoogleProviders(countryName, "");
-  const mapProviders = [
-    googleProviders[1],
-    googleProviders[3],
-    googleProviders[4],
-    googleProviders[5],
-  ];
-  const results = await Promise.all(
-    mapProviders.map((provider) =>
-      fetchProvider(
-        provider,
-        "country",
-        countryName,
-        terms,
-        fetchImpl,
-      ),
+  const countryProviders = countryBingProviders(countryName);
+  const results = [
+    await fetchProvider(
+      countryProviders[0],
+      "country",
+      countryName,
+      terms,
+      fetchImpl,
     ),
-  );
+  ];
   let relevantResults = countryRelevantResults(results, terms);
   if (!hasProviderArticles(relevantResults)) {
-    const sharedResults = countryRelevantResults(
-      await getSharedResults(),
+    const latestCountryResult = await fetchProvider(
+      countryProviders[1],
+      "country",
+      countryName,
       terms,
+      fetchImpl,
     );
-    relevantResults = [...relevantResults, ...sharedResults];
-  }
-  if (!hasProviderArticles(relevantResults)) {
-    results.push(
-      await fetchProvider(
-        GDELT_PROVIDER,
-        "country",
-        countryName,
-        terms,
-        fetchImpl,
-      ),
-    );
+    results.push(latestCountryResult);
     relevantResults = [
       ...relevantResults,
-      ...countryRelevantResults([results.at(-1)!], terms),
+      ...countryRelevantResults([latestCountryResult], terms),
+    ];
+  }
+  if (!hasProviderArticles(relevantResults)) {
+    const alternateCountryResult = await fetchProvider(
+      countryProviders[2],
+      "country",
+      countryName,
+      terms,
+      fetchImpl,
+    );
+    results.push(alternateCountryResult);
+    relevantResults = [
+      ...relevantResults,
+      ...countryRelevantResults([alternateCountryResult], terms),
     ];
   }
   const selectedResults = hasProviderArticles(relevantResults)
@@ -901,21 +908,10 @@ export async function handleLiveNews(
       );
     }
     const generatedAt = new Date().toISOString();
-    let sharedResultsPromise: Promise<ProviderResult[]> | undefined;
-    const getSharedResults = () => {
-      sharedResultsPromise ??= mapWithConcurrency(
-        [...CORE_PROVIDERS, GDELT_PROVIDER, GOOGLE_WORLD_PROVIDER],
-        6,
-        (provider) =>
-          fetchProvider(provider, "global", null, [], fetchImpl),
-      );
-      return sharedResultsPromise;
-    };
     const countries = await mapWithConcurrency(
       requestedCountries,
-      1,
-      (country) =>
-        fetchMapCountry(country, fetchImpl, getSharedResults),
+      4,
+      (country) => fetchMapCountry(country, fetchImpl),
     );
     return json(
       {
@@ -975,12 +971,11 @@ export async function handleLiveNews(
       : [];
   const providers =
     scope === "event"
-      ? eventGoogleProviders(
-          requestedHeadline,
-          countryName,
-          requestedRegion,
-        )
-      : providersForRequest(scope, countryName, requestedRegion);
+      ? [
+          ...eventBingProviders(requestedHeadline, countryName),
+          ...CORE_PROVIDERS,
+        ]
+      : providersForRequest(scope, countryName);
   let results = await mapWithConcurrency(
     providers,
     6,

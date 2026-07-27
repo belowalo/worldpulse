@@ -372,7 +372,9 @@ describe("WorldPulse interactions", () => {
       ).toBe(true),
     );
     expect(await screen.findByText("5 independent")).toBeInTheDocument();
-    expect(screen.getByText("4/5 rated")).toBeInTheDocument();
+    expect(
+      screen.getByText(/Left · center · right · 4\/5 rated/),
+    ).toBeInTheDocument();
     expect(screen.getByText("Left 25%")).toBeInTheDocument();
     expect(screen.getByText("Center 50%")).toBeInTheDocument();
     expect(screen.getByText("Right 25%")).toBeInTheDocument();
@@ -857,7 +859,7 @@ describe("WorldPulse interactions", () => {
     ).not.toBeInTheDocument();
   });
 
-  it("blocks interaction and reports progress until the complete live sweep finishes", async () => {
+  it("opens after the first live batch while the remaining countries continue loading", async () => {
     let finishSecondBatch: (() => void) | undefined;
     const secondBatchReady = new Promise<void>((resolve) => {
       finishSecondBatch = resolve;
@@ -869,8 +871,20 @@ describe("WorldPulse interactions", () => {
           features: [
             { id: "124", properties: { name: "Canada" } },
             { id: "484", properties: { name: "Mexico" } },
-            { id: "724", properties: { name: "Spain" } },
             { id: "686", properties: { name: "Senegal" } },
+            { id: "392", properties: { name: "Japan" } },
+            { id: "076", properties: { name: "Brazil" } },
+            { id: "032", properties: { name: "Argentina" } },
+            { id: "152", properties: { name: "Chile" } },
+            { id: "604", properties: { name: "Peru" } },
+            { id: "724", properties: { name: "Spain" } },
+            { id: "250", properties: { name: "France" } },
+            { id: "276", properties: { name: "Germany" } },
+            { id: "380", properties: { name: "Italy" } },
+            { id: "404", properties: { name: "Kenya" } },
+            { id: "818", properties: { name: "Egypt" } },
+            { id: "356", properties: { name: "India" } },
+            { id: "036", properties: { name: "Australia" } },
           ],
         });
       }
@@ -902,11 +916,11 @@ describe("WorldPulse interactions", () => {
       }),
     ).toBeInTheDocument();
     expect(
-      await screen.findByText("2 of 4 countries"),
+      await screen.findByRole("button", { name: "Global feed" }),
     ).toBeInTheDocument();
     expect(
-      screen.queryByRole("button", { name: "Global feed" }),
-    ).not.toBeInTheDocument();
+      screen.getByText(/8\/16 countries checked live · loading the rest/),
+    ).toBeInTheDocument();
 
     await act(async () => {
       finishSecondBatch?.();
@@ -917,7 +931,7 @@ describe("WorldPulse interactions", () => {
       await screen.findByRole("button", { name: "Global feed" }),
     ).toBeInTheDocument();
     expect(
-      screen.getByText(/4\/4 countries checked live/),
+      screen.getByText(/16\/16 countries checked live/),
     ).toBeInTheDocument();
   });
 
@@ -964,7 +978,7 @@ describe("WorldPulse interactions", () => {
     expect(screen.getByTestId("countries-with-news")).toHaveTextContent("0");
   });
 
-  it("loads every mapped country live before the map opens", async () => {
+  it("loads every mapped country live without a static snapshot", async () => {
     const mapArticle = {
       id: "senegal-music",
       title: "MUSIC AWARDS SENEGAL 2026 announced",
@@ -1032,8 +1046,8 @@ describe("WorldPulse interactions", () => {
     expect(
       mapRequestUrls.every(
         (url) =>
-          new URL(url, "https://worldpulse.test").searchParams.get("fresh") ===
-          "1",
+          new URL(url, "https://worldpulse.test").searchParams.has("fresh") ===
+          false,
       ),
     ).toBe(true);
     expect(

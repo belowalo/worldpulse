@@ -24,7 +24,7 @@ interface ExecutionContext {
   passThroughOnException(): void;
 }
 
-const LIVE_CACHE_NAME = "worldpulse-live-v5";
+const LIVE_CACHE_NAME = "worldpulse-live-v13";
 const LIVE_CACHE_FRESH_MS = 5 * 60_000;
 const LIVE_CACHE_RETENTION_SECONDS = 24 * 60 * 60;
 const ARTICLE_RETENTION_MS = 8 * 24 * 60 * 60_000;
@@ -145,7 +145,7 @@ function normalizedLiveCacheKey(request: Request) {
   url.hash = "";
   url.searchParams.delete("release");
   url.searchParams.delete("fresh");
-  url.searchParams.set("__wp_cache", "5");
+  url.searchParams.set("__wp_cache", "13");
   url.searchParams.sort();
   return new Request(url.toString(), { method: "GET" });
 }
@@ -178,7 +178,9 @@ async function storeLiveResponse(
   }
   let payload = await response.text();
   const cachedAt = Date.now();
-  if (db) {
+  const isMapSearch =
+    new URL(cacheKey.url).searchParams.get("scope") === "map";
+  if (db && !isMapSearch) {
     try {
       const stored = await readStoredNewsFeed(db, cacheKey.url);
       if (stored) payload = mergeCachedPayloads(payload, stored.payload);
@@ -243,9 +245,9 @@ async function handleCachedLiveNews(
   const cache = await caches.open(LIVE_CACHE_NAME);
   const cacheKey = normalizedLiveCacheKey(request);
   const requestUrl = new URL(request.url);
+  const isMapSearch = requestUrl.searchParams.get("scope") === "map";
   const forceFreshMapSearch =
-    requestUrl.searchParams.get("scope") === "map" &&
-    requestUrl.searchParams.get("fresh") === "1";
+    isMapSearch && requestUrl.searchParams.get("fresh") === "1";
   if (forceFreshMapSearch) {
     requestUrl.searchParams.delete("fresh");
     const fresh = await handleLiveNews(new Request(requestUrl, request));
@@ -260,6 +262,13 @@ async function handleCachedLiveNews(
     const cachedAt = Number(cached.headers.get("X-WorldPulse-Cached-At"));
     const isFresh =
       Number.isFinite(cachedAt) && Date.now() - cachedAt < LIVE_CACHE_FRESH_MS;
+    if (!isFresh && isMapSearch) {
+      const fresh = await handleLiveNews(cacheKey);
+      ctx.waitUntil(
+        storeLiveResponse(cache, cacheKey, fresh.clone(), env.DB),
+      );
+      return responseWithCacheState(fresh, "miss");
+    }
     if (!isFresh) {
       ctx.waitUntil(refreshLiveResponse(cache, cacheKey, env.DB));
     }
@@ -282,15 +291,20 @@ async function handleCachedLiveNews(
         const persistentResponse = new Response(stored.payload, { headers });
         const isFresh =
           Date.now() - stored.generated_at < LIVE_CACHE_FRESH_MS;
-        ctx.waitUntil(
-          isFresh
-            ? cache.put(cacheKey, persistentResponse.clone())
-            : refreshLiveResponse(cache, cacheKey, env.DB),
-        );
-        return responseWithCacheState(
-          persistentResponse,
-          isFresh ? "hit" : "refreshing",
-        );
+        if (!isFresh && isMapSearch) {
+          // Map startup never uses an old persisted snapshot. It continues to
+          // the direct live request below.
+        } else {
+          ctx.waitUntil(
+            isFresh
+              ? cache.put(cacheKey, persistentResponse.clone())
+              : refreshLiveResponse(cache, cacheKey, env.DB),
+          );
+          return responseWithCacheState(
+            persistentResponse,
+            isFresh ? "hit" : "refreshing",
+          );
+        }
       }
     } catch (error) {
       console.warn(
