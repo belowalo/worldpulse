@@ -667,6 +667,13 @@ export function articleMatchesCountry(
   return textMatchesCountry(article.searchableText, terms);
 }
 
+export function articleHeadlineMatchesCountry(
+  article: Pick<CandidateArticle, "title">,
+  terms: string[],
+) {
+  return textMatchesCountry(article.title, terms);
+}
+
 function countryRelevantResults(
   results: ProviderResult[],
   terms: string[],
@@ -718,7 +725,9 @@ async function fetchProvider(
     if (!parsed.length) throw new Error("no parseable articles");
     const articles =
       scope === "country" && provider.filterByCountry
-        ? parsed.filter((article) => articleMatchesCountry(article, terms))
+        ? parsed.filter((article) =>
+            articleHeadlineMatchesCountry(article, terms),
+          )
         : parsed;
     return { name: provider.name, ok: true, articles };
   } catch (error) {

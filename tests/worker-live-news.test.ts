@@ -5,6 +5,7 @@ import { resolve } from "node:path";
 import {
   articleMatchesEvent,
   articleMatchesCountry,
+  articleHeadlineMatchesCountry,
   handleLiveNews,
   parseGdeltJson,
   parseGoogleNewsFeed,
@@ -53,6 +54,27 @@ describe("worker live-news providers", () => {
         countrySearchTerms("Egypt"),
       ),
     ).toBe(true);
+  });
+
+  it("requires a country in the headline when filtering broad world feeds", () => {
+    const [article] = parsePublisherRss(
+      `
+        <rss><channel><item>
+          <title>Berlin CSD: Latest in string of deadly vehicle attacks</title>
+          <description>A comparison briefly mentions an incident in Canada.</description>
+          <link>https://publisher.example/berlin-csd</link>
+          <guid>berlin-csd</guid>
+          <pubDate>Sun, 26 Jul 2026 17:15:00 GMT</pubDate>
+        </item></channel></rss>
+      `,
+      "Example World News",
+      "https://publisher.example/",
+    );
+
+    expect(articleMatchesCountry(article, ["Canada", "Canadian"])).toBe(true);
+    expect(
+      articleHeadlineMatchesCountry(article, ["Canada", "Canadian"]),
+    ).toBe(false);
   });
 
   it("parses Google RSS attribution without keeping the title suffix", () => {
