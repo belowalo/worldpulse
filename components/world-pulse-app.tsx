@@ -818,7 +818,10 @@ export function WorldPulseApp({
         const nextFeeds: Record<string, FeedState> = {};
         for (const countryPayload of payload.countries) {
           const country = countriesByName.get(countryPayload.countryName);
-          if (!country || !countryPayload.articles.length) continue;
+          if (!country) continue;
+          if (phase === "initial") loadedCountries.add(country.name);
+          else refreshedCountries.add(country.name);
+          if (!countryPayload.articles.length) continue;
           const livePayload: LiveNewsPayload = {
             countryName: country.name,
             scope: "country",
@@ -836,12 +839,11 @@ export function WorldPulseApp({
             loading: false,
             error: null,
           };
-          if (phase === "initial") loadedCountries.add(country.name);
-          else refreshedCountries.add(country.name);
         }
 
-        if (!Object.keys(nextFeeds).length) return;
-        setLiveCountryFeeds((current) => ({ ...current, ...nextFeeds }));
+        if (Object.keys(nextFeeds).length) {
+          setLiveCountryFeeds((current) => ({ ...current, ...nextFeeds }));
+        }
         setWorldLoad((current) => ({
           ...current,
           loaded:
@@ -1441,12 +1443,12 @@ export function WorldPulseApp({
             statusLabel={
               worldLoad.total
                 ? worldLoad.loaded === worldLoad.total
-                  ? `${worldLoad.loaded}/${worldLoad.total} countries live${
+                  ? `${worldLoad.loaded}/${worldLoad.total} countries checked live${
                       worldLoad.refreshed
                         ? ` · ${worldLoad.refreshed} refreshed`
                         : ""
                     }`
-                  : `${worldLoad.loaded}/${worldLoad.total} countries live`
+                  : `${worldLoad.loaded}/${worldLoad.total} countries checked live`
                 : globalFeed.loading
                 ? "Refreshing live feed…"
                 : "Live · auto-refresh 10 min"

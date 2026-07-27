@@ -846,7 +846,7 @@ describe("WorldPulse interactions", () => {
     vi.stubGlobal("fetch", fetchMock);
 
     render(<WorldPulseApp MapComponent={TestMap} />);
-    await screen.findByText(/2\/2 countries live/);
+    await screen.findByText(/2\/2 countries checked live/);
     fireEvent.click(
       screen.getByRole("button", { name: "Select Egypt on map" }),
     );
@@ -916,7 +916,52 @@ describe("WorldPulse interactions", () => {
     expect(
       await screen.findByRole("button", { name: "Global feed" }),
     ).toBeInTheDocument();
-    expect(screen.getByText(/4\/4 countries live/)).toBeInTheDocument();
+    expect(
+      screen.getByText(/4\/4 countries checked live/),
+    ).toBeInTheDocument();
+  });
+
+  it("finishes the live sweep without inventing a headline for an empty country", async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === "/countries.geojson") {
+        return Response.json({
+          features: [{ id: "798", properties: { name: "Tuvalu" } }],
+        });
+      }
+      if (url.includes("scope=map")) {
+        return Response.json({
+          scope: "map",
+          generatedAt: "2026-07-25T00:00:00.000Z",
+          refreshAfterSeconds: 600,
+          provider: "Test live world search",
+          countries: [
+            {
+              countryName: "Tuvalu",
+              generatedAt: "2026-07-25T00:00:00.000Z",
+              available: false,
+              articles: [],
+            },
+          ],
+        });
+      }
+      return Response.json({
+        countryName: "Canada",
+        scope: "country",
+        generatedAt: "2026-07-25T00:00:00.000Z",
+        refreshAfterSeconds: 600,
+        provider: "Test live index",
+        articles: [],
+      });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<WorldPulseApp MapComponent={TestMap} />);
+
+    expect(
+      await screen.findByText(/1\/1 countries checked live/),
+    ).toBeInTheDocument();
+    expect(screen.getByTestId("countries-with-news")).toHaveTextContent("0");
   });
 
   it("loads every mapped country live before the map opens", async () => {
@@ -976,7 +1021,7 @@ describe("WorldPulse interactions", () => {
 
     await waitFor(() =>
       expect(
-        screen.getByText(/2\/2 countries live/),
+        screen.getByText(/2\/2 countries checked live/),
       ).toBeInTheDocument(),
     );
     expect(screen.getByTestId("countries-with-news")).toHaveTextContent("2");
@@ -1048,7 +1093,7 @@ describe("WorldPulse interactions", () => {
       { timeout: 15_000 },
     );
     expect(
-      screen.getByText(/215\/215 countries live/),
+      screen.getByText(/215\/215 countries checked live/),
     ).toBeInTheDocument();
   }, 20_000);
 });
