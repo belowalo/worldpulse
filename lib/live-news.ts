@@ -700,6 +700,25 @@ const STOP_WORDS = new Set([
   "with",
 ]);
 
+// These describe common news templates rather than the identity of an
+// occurrence. Excluding them prevents unrelated crime reports from merging
+// merely because both mention a suspect, police, or someone being killed.
+const OCCURRENCE_GENERIC_TOKENS = new Set([
+  "attack",
+  "dead",
+  "deadly",
+  "injur",
+  "injured",
+  "kill",
+  "killed",
+  "official",
+  "police",
+  "shoot",
+  "shooting",
+  "suspect",
+  "victim",
+]);
+
 const SHORT_SIGNAL_TOKENS = new Set(["ai", "eu", "fc", "uk", "un", "us", "vs"]);
 
 const TOKEN_EQUIVALENTS: Record<string, string> = {
@@ -787,6 +806,12 @@ export function newsTextTokens(value: string) {
   ];
 }
 
+function occurrenceIdentityTokens(value: string) {
+  return newsTextTokens(value).filter(
+    (token) => !OCCURRENCE_GENERIC_TOKENS.has(token),
+  );
+}
+
 function tokenMetrics(left: string[], right: string[]) {
   if (!left.length || !right.length) {
     return { common: 0, longCommon: 0, containment: 0 };
@@ -811,13 +836,13 @@ function hasSharedTitlePhrase(left: string[], right: string[]) {
 }
 
 function articleSimilarity(left: LiveArticle, right: LiveArticle) {
-  const leftTitle = newsTextTokens(left.title);
-  const rightTitle = newsTextTokens(right.title);
+  const leftTitle = occurrenceIdentityTokens(left.title);
+  const rightTitle = occurrenceIdentityTokens(right.title);
   const title = tokenMetrics(leftTitle, rightTitle);
-  const leftContext = newsTextTokens(
+  const leftContext = occurrenceIdentityTokens(
     `${left.title} ${left.description ?? ""}`,
   );
-  const rightContext = newsTextTokens(
+  const rightContext = occurrenceIdentityTokens(
     `${right.title} ${right.description ?? ""}`,
   );
   const context = tokenMetrics(leftContext, rightContext);

@@ -340,6 +340,46 @@ describe("live news normalization", () => {
     expect(canonicalEvent.articles).toHaveLength(2);
   });
 
+  it("does not merge unrelated crime reports that share generic wording", () => {
+    const [seattleEvent] = buildLiveEvents(
+      {
+        ...payload,
+        countryName: "Canada",
+        articles: [
+          {
+            ...payload.articles[0],
+            id: "seattle-case",
+            title:
+              "Suspect dies after Seattle Space Needle shooting leaves victim injured",
+            publisherName: "CBC News",
+            publisherUrl: "https://cbc.ca/",
+          },
+        ],
+      },
+      { name: "Canada", iso2: "CA" },
+    );
+    const [berlinEvent] = buildLiveEvents(
+      {
+        ...payload,
+        countryName: null,
+        scope: "global",
+        articles: [
+          {
+            ...payload.articles[0],
+            id: "berlin-case",
+            title:
+              "Suspect in deadly Berlin Pride attack killed in confrontation with police, officials say",
+            publisherName: "BBC News",
+            publisherUrl: "https://bbc.com/",
+          },
+        ],
+      },
+      null,
+    );
+
+    expect(eventsDescribeSameOccurrence(seattleEvent, berlinEvent)).toBe(false);
+  });
+
   it("merges an event-specific search and ranks five distinct publishers", () => {
     const [event] = buildLiveEvents(
       { ...payload, articles: [payload.articles[0]] },

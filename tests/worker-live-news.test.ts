@@ -513,6 +513,15 @@ describe("worker live-news providers", () => {
         "Canada and Mexico agree a cross-border trade accord",
       ),
     ).toBe(true);
+    expect(
+      articleMatchesEvent(
+        {
+          searchableText:
+            "Suspect in deadly Berlin Pride attack killed in confrontation with police, officials say",
+        },
+        "Suspect dies after Seattle Space Needle shooting leaves victim injured",
+      ),
+    ).toBe(false);
   });
 
   it("finds rewritten coverage of a heatwave instead of requiring the same headline", async () => {

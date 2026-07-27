@@ -476,7 +476,7 @@ describe("WorldPulse interactions", () => {
     const countryCard = countryHeading.closest("article");
     expect(countryCard).not.toBeNull();
     expect(
-      await within(countryCard!).findByText("5 shown · 6 matched"),
+      await within(countryCard!).findByText("5 shown · 7 matched"),
     ).toBeInTheDocument();
     const countryScore = within(countryCard!).getByText(
       /^(Major|Significant|Developing|Routine) · \d+$/,

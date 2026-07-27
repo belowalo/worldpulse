@@ -81,6 +81,21 @@ const EVENT_STOP_WORDS = new Set([
   "that",
   "with",
 ]);
+const GENERIC_OCCURRENCE_TOKENS = new Set([
+  "attack",
+  "dead",
+  "deadly",
+  "injur",
+  "injured",
+  "kill",
+  "killed",
+  "official",
+  "police",
+  "shoot",
+  "shooting",
+  "suspect",
+  "victim",
+]);
 
 function decodeXml(value: string) {
   return value
@@ -482,7 +497,9 @@ function countryGoogleProviders(countryName: string, requestedRegion: string) {
 
 function eventTokens(value: string) {
   return newsTextTokens(value).filter(
-    (token) => !EVENT_STOP_WORDS.has(token),
+    (token) =>
+      !EVENT_STOP_WORDS.has(token) &&
+      !GENERIC_OCCURRENCE_TOKENS.has(token),
   );
 }
 
