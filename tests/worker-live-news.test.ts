@@ -519,12 +519,22 @@ describe("worker live-news providers", () => {
       ${item("six", "Canada Mexico trade pact enters force", "Regional Desk", "regional.example")}
       ${item("unrelated", "Japan launches a new lunar research mission", "Science Desk", "science.example")}
     </channel></rss>`;
+    const targetedAttempts = new Map<string, number>();
     const fetchMock = vi.fn(async (input: URL | RequestInfo) => {
       const url = String(input);
       requestedUrls.push(url);
-      return url.startsWith("https://www.bing.com/news/search")
-        ? new Response(eventFeed, { status: 200 })
-        : new Response("Unavailable", { status: 503 });
+      if (!url.startsWith("https://www.bing.com/news/search")) {
+        return new Response("Unavailable", { status: 503 });
+      }
+      const query = new URL(url).searchParams.get("q") ?? "";
+      if (query.includes("site:")) {
+        const attempt = (targetedAttempts.get(query) ?? 0) + 1;
+        targetedAttempts.set(query, attempt);
+        if (attempt === 1) {
+          return new Response("Unavailable", { status: 503 });
+        }
+      }
+      return new Response(eventFeed, { status: 200 });
     });
 
     const response = await handleLiveNews(
@@ -553,7 +563,8 @@ describe("worker live-news providers", () => {
       requestedUrls.filter((url) =>
         url.startsWith("https://www.bing.com/news/search"),
       ),
-    ).toHaveLength(5);
+    ).toHaveLength(8);
+    expect([...targetedAttempts.values()]).toEqual([2, 2, 2]);
     expect(
       requestedUrls.some((url) =>
         decodeURIComponent(url).includes("site:cnn.com"),

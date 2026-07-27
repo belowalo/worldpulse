@@ -994,6 +994,43 @@ export async function handleLiveNews(
         articleMatchesEvent(article, requestedHeadline),
       );
     }
+    const viewpointProviders = providers.filter((provider) =>
+      /(?:Left|Center|Right)-rated coverage/.test(provider.name),
+    );
+    const viewpointRetries = viewpointProviders.filter((provider) => {
+      const result = results.find(
+        (candidate) => candidate.name === provider.name,
+      );
+      return !result?.articles.length;
+    });
+    if (viewpointRetries.length) {
+      const retryResults = await mapWithConcurrency(
+        viewpointRetries,
+        2,
+        async (provider) => {
+          const retry = await fetchProvider(
+            provider,
+            scope,
+            countryName,
+            terms,
+            fetchImpl,
+          );
+          retry.articles = retry.articles.filter((article) =>
+            articleMatchesEvent(article, requestedHeadline),
+          );
+          return retry;
+        },
+      );
+      const retriesByName = new Map(
+        retryResults.map((result) => [result.name, result]),
+      );
+      results = results.map((result) => {
+        const retry = retriesByName.get(result.name);
+        return retry && (retry.articles.length || !result.ok)
+          ? retry
+          : result;
+      });
+    }
   }
   const successful = results.filter((result) => result.ok);
   if (!successful.length) {
