@@ -611,11 +611,12 @@ function MethodologyModal({ onClose }: { onClose: () => void }) {
         <p className="mt-5 text-xs leading-5 text-[#8996a8]">
           Every displayed headline and publisher link comes from a real public
           news feed. Before the map appears, WorldPulse checks the initial
-          country snapshot and commits its colors together so clicking a
-          country cannot change its map category. No headlines are bundled into
-          the website. Opening a country runs a deeper local and international
-          search for the news panel without altering the map snapshot.
-          WorldPulse never invents headlines or sources.
+          country snapshot and commits its colors together. No headlines are
+          bundled into the website. Opening a country runs a deeper local and
+          international search; once that search succeeds, its highest-ranked
+          event becomes both the panel’s top story and that country’s map
+          signal. The synchronized signal remains after the selection outline
+          is cleared. WorldPulse never invents headlines or sources.
         </p>
         <p className="mt-3 text-xs leading-5 text-[#8996a8]">
           Coverage is uneven. Countries with less digital reporting or fewer
@@ -1121,17 +1122,32 @@ export function WorldPulseApp({
   const mapCountries = useMemo(
     () =>
       countryDirectory.map((country): MapCountry => {
-        const snapshotFeed = mapSnapshotFeeds[country.name];
-        if (snapshotFeed?.events.length) {
+        const detailedFeed = countryFeeds[country.name];
+        const authoritativeFeed =
+          detailedFeed?.events.length && !detailedFeed.error
+            ? detailedFeed
+            : mapSnapshotFeeds[country.name];
+        if (authoritativeFeed?.events.length) {
+          const synchronizedEvents = authoritativeFeed.events
+            .map((event) => {
+              const payload = coverageForEvent(event, eventCoverage)?.payload;
+              return payload ? enrichEventWithCoverage(event, payload) : event;
+            })
+            .sort(
+              (left, right) =>
+                right.importanceScore - left.importanceScore ||
+                Date.parse(right.lastUpdatedAt) -
+                  Date.parse(left.lastUpdatedAt),
+            );
           return {
             ...country,
-            events: snapshotFeed.events,
-            topEvent: snapshotFeed.events[0],
+            events: synchronizedEvents,
+            topEvent: synchronizedEvents[0],
           };
         }
         return country;
       }),
-    [countryDirectory, mapSnapshotFeeds],
+    [countryDirectory, countryFeeds, eventCoverage, mapSnapshotFeeds],
   );
   const activeCountry =
     mapCountries.find((country) => country.mapId === selectedCountry.mapId) ??
@@ -1412,6 +1428,31 @@ export function WorldPulseApp({
     importance !== "All" ||
     timeRange !== "7 days" ||
     search.trim().length > 0;
+  const displayedMapCountries = useMemo(() => {
+    const displayedTopEvent =
+      !globalView && !hasActiveFilters ? filteredEvents[0] : undefined;
+    if (!displayedTopEvent) return mapCountries;
+    return mapCountries.map((country) =>
+      country.mapId === activeCountry.mapId
+        ? {
+            ...country,
+            topEvent: displayedTopEvent,
+            events: [
+              displayedTopEvent,
+              ...country.events.filter(
+                (event) => event.id !== displayedTopEvent.id,
+              ),
+            ],
+          }
+        : country,
+    );
+  }, [
+    activeCountry.mapId,
+    filteredEvents,
+    globalView,
+    hasActiveFilters,
+    mapCountries,
+  ]);
   const noRecentEvents =
     baseEvents.length > 0 &&
     filteredEvents.length === 0 &&
@@ -1492,7 +1533,7 @@ export function WorldPulseApp({
       <div className="grid min-h-[calc(100vh-4rem)] lg:grid-cols-[minmax(0,1fr)_420px]">
         <section className="relative min-h-[54vh] border-b border-[#222d3e] lg:h-[calc(100vh-4rem)] lg:border-b-0 lg:border-r">
           <MapComponent
-            countries={mapCountries}
+            countries={displayedMapCountries}
             selectedMapId={globalView ? null : selectedCountry.mapId}
             onSelect={handleSelect}
             linkEvents={mapLinkEvents}

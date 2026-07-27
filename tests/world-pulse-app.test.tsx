@@ -1182,10 +1182,16 @@ describe("WorldPulse interactions", () => {
     ).toBeInTheDocument();
   }, 20_000);
 
-  it("keeps the map category snapshot stable when a deeper country feed loads", async () => {
+  it("keeps the map signal aligned with the deeper country feed after it loads", async () => {
     const mapHeadline = "Canada trade exports rise after a new market agreement";
     const countryHeadline =
       "Canada military forces clash near a disputed border base";
+    let resolveCountryFeed:
+      | ((response: Response) => void)
+      | undefined;
+    const countryFeedResponse = new Promise<Response>((resolve) => {
+      resolveCountryFeed = resolve;
+    });
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input);
       if (url === "/countries.geojson") {
@@ -1205,21 +1211,7 @@ describe("WorldPulse interactions", () => {
           ],
         });
       }
-      return Response.json({
-        countryName: "Canada",
-        scope: "country",
-        generatedAt: "2026-07-25T02:00:00.000Z",
-        refreshAfterSeconds: 600,
-        provider: "Test live index",
-        articles: [
-          {
-            ...liveArticleFor("Canada"),
-            id: "canada-country-conflict",
-            title: countryHeadline,
-            publishedAt: "2026-07-25T01:00:00.000Z",
-          },
-        ],
-      });
+      return countryFeedResponse;
     });
     vi.stubGlobal("fetch", fetchMock);
 
@@ -1232,16 +1224,39 @@ describe("WorldPulse interactions", () => {
     expect(screen.getByTestId("canada-map-headline")).toHaveTextContent(
       mapHeadline,
     );
+    await act(async () => {
+      resolveCountryFeed?.(
+        Response.json({
+          countryName: "Canada",
+          scope: "country",
+          generatedAt: "2026-07-25T02:00:00.000Z",
+          refreshAfterSeconds: 600,
+          provider: "Test live index",
+          articles: [
+            {
+              ...liveArticleFor("Canada"),
+              id: "canada-country-conflict",
+              title: countryHeadline,
+              publishedAt: "2026-07-25T01:00:00.000Z",
+            },
+          ],
+        }),
+      );
+      await countryFeedResponse;
+    });
     expect(
       await screen.findByRole("heading", { name: countryHeadline }),
     ).toBeInTheDocument();
     expect(screen.getByTestId("canada-map-category")).toHaveTextContent(
-      "Economy",
+      "Conflict and security",
+    );
+    expect(screen.getByTestId("canada-map-headline")).toHaveTextContent(
+      countryHeadline,
     );
 
     fireEvent.click(screen.getByRole("button", { name: "Global feed" }));
     expect(screen.getByTestId("canada-map-category")).toHaveTextContent(
-      "Economy",
+      "Conflict and security",
     );
   });
 });

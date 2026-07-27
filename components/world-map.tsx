@@ -82,6 +82,13 @@ export function WorldMap({
     () => buildCountryColorExpression(countries),
     [countries],
   );
+  const hoveredCountry = hovered
+    ? (countries.find(
+        (country) =>
+          country.mapId === hovered.country.mapId ||
+          country.name === hovered.country.name,
+      ) ?? hovered.country)
+    : null;
   const colorExpressionRef =
     useRef<ExpressionSpecification>(colorExpression);
   const eventLinks = useMemo(
@@ -392,7 +399,7 @@ export function WorldMap({
         {statusLabel}
       </div>
 
-      {hovered ? (
+      {hovered && hoveredCountry ? (
         <div
           className="pointer-events-none absolute z-20 w-64 rounded-xl border border-[#39475d] bg-[#0d1522]/95 p-3 shadow-2xl"
           style={{
@@ -402,20 +409,20 @@ export function WorldMap({
         >
           <div className="flex items-center justify-between gap-3">
             <span className="font-semibold text-white">
-              {hovered.country.name}
+              {hoveredCountry.name}
             </span>
             <span className="font-mono text-xs text-[#73e2cc]">
-              {hovered.country.topEvent?.importanceScore ?? "—"}
+              {hoveredCountry.topEvent?.importanceScore ?? "—"}
             </span>
           </div>
-          {hovered.country.topEvent ? (
+          {hoveredCountry.topEvent ? (
             <>
               <p className="mt-2 text-xs leading-relaxed text-[#d4dbe5]">
-                <span dir="auto">{hovered.country.topEvent.headline}</span>
+                <span dir="auto">{hoveredCountry.topEvent.headline}</span>
               </p>
               <p className="mt-2 font-mono text-[10px] uppercase tracking-[0.12em] text-[#8f9caf]">
-                {hovered.country.topEvent.category} ·{" "}
-                {hovered.country.topEvent.importanceLabel}
+                {hoveredCountry.topEvent.category} ·{" "}
+                {hoveredCountry.topEvent.importanceLabel}
               </p>
             </>
           ) : (

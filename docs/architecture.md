@@ -59,4 +59,4 @@ The API validates pagination bounds and returns a consistent `{"error": ...}` en
 
 ## Deployment
 
-Docker Compose is the full local reference deployment. The hosted app packages the Next.js surface, cached feed-metadata proxy, and D1 migration as a Cloudflare-compatible worker. It contains no static news snapshot: a startup verification sweep builds an atomic country-color snapshot from live endpoints, followed by ten-minute refresh sweeps and focused active-feed updates. Deeper country-panel searches never mutate the map snapshot.
+Docker Compose is the full local reference deployment. The hosted app packages the Next.js surface, cached feed-metadata proxy, and D1 migration as a Cloudflare-compatible worker. It contains no static news snapshot: a startup verification sweep builds an atomic country-color snapshot from live endpoints, followed by ten-minute refresh sweeps and focused active-feed updates. A successful deeper country-panel search becomes authoritative for that country's top event in both the panel and map, so its category hue remains consistent after selection and deselection.

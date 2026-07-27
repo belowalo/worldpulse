@@ -15,7 +15,7 @@ The deployed application is the preferred live preview. A social preview is avai
 - **Hosted cache:** Cloudflare edge caching plus D1 persistence streams a recent live index immediately, refreshes it in the background, and provides resilience for deeper country and event feeds.
 - **Reference API:** FastAPI, Pydantic validation, SQLAlchemy 2, and PostgreSQL remain available for local full-stack development.
 - **Local orchestration:** Docker Compose starts PostgreSQL, migrates and seeds the API, then starts the web app with health checks.
-- **Hosted preview:** The browser initially checks one current map signal per country rather than downloading the complete world article index. The map snapshot is committed together after source verification, so deeper click-time country searches cannot change its colors. Countries without a source-backed current match use a neutral fill rather than synthetic news.
+- **Hosted preview:** The browser initially checks one current map signal per country rather than downloading the complete world article index. The map snapshot is committed together after source verification. When a deeper country search succeeds, the panel and that country's map signal adopt the same highest-ranked event and remain synchronized after deselection. Countries without a source-backed current match use a neutral fill rather than synthetic news.
 
 The web app lives at the repository root to preserve the hosting runtime's required structure. `apps/api` contains the backend. See [architecture.md](docs/architecture.md) for details.
 
