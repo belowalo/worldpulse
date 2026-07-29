@@ -107,7 +107,7 @@ const COUNTRY_NEWS_QUERY_OVERRIDES: Record<string, string> = {
   "South Georgia and the South Sandwich Islands": "South Georgia island",
 };
 const ENGLISH_SIGNAL_WORDS = new Set([
-  "a", "after", "and", "are", "as", "at", "for", "from", "has", "in",
+  "after", "and", "are", "as", "at", "for", "from", "has", "in",
   "is", "new", "of", "on", "says", "the", "to", "with",
 ]);
 const NON_ENGLISH_SIGNAL_WORDS = new Set([
