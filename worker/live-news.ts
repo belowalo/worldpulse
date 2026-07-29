@@ -138,7 +138,10 @@ export function isLikelyEnglishHeadline(value: string) {
   const hasAccentedLatin = /[\u00c0-\u024f]/u.test(value);
   return !(
     (nonEnglishSignals >= 3 ||
-      (hasAccentedLatin && nonEnglishSignals >= 2)) &&
+      (nonEnglishSignals >= 2 && englishSignals === 0) ||
+      (hasAccentedLatin &&
+        nonEnglishSignals >= 1 &&
+        englishSignals === 0)) &&
     englishSignals < nonEnglishSignals
   );
 }
