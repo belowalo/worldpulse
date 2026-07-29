@@ -1,7 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
 
 import {
+  discoverLiveNewsrooms,
   handleLiveVideo,
+  parseLiveNewsroomSearch,
   parseLiveVideoSearch,
 } from "../worker/live-video";
 
@@ -127,5 +129,116 @@ describe("live video discovery", () => {
     expect(response.status).toBe(200);
     expect(payload.videos).toEqual([]);
     expect(fetchMock).toHaveBeenCalledOnce();
+  });
+
+  it("keeps only active broadcasts from the curated newsroom directory", () => {
+    const body = youtubeSearchPage([
+      liveRenderer({
+        id: "reuters001",
+        title: "🔴 Reuters world briefing live",
+        channel: "Reuters",
+        viewers: "2.4K",
+      }),
+      liveRenderer({
+        id: "lookalike02",
+        title: "Reuters headlines discussed live",
+        channel: "Daily Commentary",
+        viewers: "18K",
+      }),
+      liveRenderer({
+        id: "recorded003",
+        title: "BBC News international bulletin",
+        channel: "BBC News",
+        viewers: "7K",
+        live: false,
+      }),
+    ]);
+
+    expect(parseLiveNewsroomSearch(body)).toEqual([
+      expect.objectContaining({
+        id: "reuters001",
+        newsroomName: "Reuters",
+        title: "Reuters world briefing live",
+        viewerCount: 2400,
+      }),
+    ]);
+  });
+
+  it("combines successful newsroom searches, deduplicates outlets, and ranks by viewers", async () => {
+    let requestNumber = 0;
+    const fetchMock = vi.fn(async () => {
+      requestNumber += 1;
+      if (requestNumber > 2) {
+        return new Response("Unavailable", { status: 503 });
+      }
+      return new Response(
+        youtubeSearchPage([
+          liveRenderer({
+            id: requestNumber === 1 ? "wionlive01" : "wionlive02",
+            title:
+              requestNumber === 1
+                ? "WION world news live"
+                : "WION breaking news live",
+            channel: "WION",
+            viewers: requestNumber === 1 ? "900" : "1.2K",
+          }),
+          liveRenderer({
+            id: "bbcworld01",
+            title: "BBC News world coverage live",
+            channel: "BBC News",
+            viewers: "3.5K",
+          }),
+        ]),
+        { status: 200 },
+      );
+    });
+
+    const videos = await discoverLiveNewsrooms(fetchMock);
+
+    expect(fetchMock).toHaveBeenCalledTimes(5);
+    expect(videos.map((video) => video.newsroomName)).toEqual([
+      "BBC News",
+      "WION",
+    ]);
+    expect(videos[1]).toMatchObject({
+      id: "wionlive02",
+      viewerCount: 1200,
+    });
+  });
+
+  it("serves the auto-refreshing newsroom directory mode", async () => {
+    const fetchMock = vi.fn(async () =>
+      new Response(
+        youtubeSearchPage([
+          liveRenderer({
+            id: "skynews001",
+            title: "Sky News live",
+            channel: "Sky News",
+            viewers: "8K",
+          }),
+        ]),
+        { status: 200 },
+      ),
+    );
+
+    const response = await handleLiveVideo(
+      new Request(
+        "https://worldpulse.test/api/live-video?mode=newsrooms",
+      ),
+      fetchMock,
+    );
+    const payload = (await response.json()) as {
+      mode: string;
+      refreshAfterSeconds: number;
+      videos: Array<{ newsroomName: string }>;
+    };
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("Cache-Control")).toContain("s-maxage=75");
+    expect(payload).toMatchObject({
+      mode: "newsrooms",
+      refreshAfterSeconds: 90,
+    });
+    expect(payload.videos[0]?.newsroomName).toBe("Sky News");
   });
 });

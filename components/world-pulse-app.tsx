@@ -791,6 +791,7 @@ interface LiveVideo {
   id: string;
   title: string;
   channelName: string;
+  newsroomName?: string;
   viewerCount: number;
   thumbnailUrl?: string;
   watchUrl: string;
@@ -799,10 +800,14 @@ interface LiveVideo {
 
 interface LiveVideoState {
   loading: boolean;
+  refreshing: boolean;
   error: string | null;
   videos: LiveVideo[];
   selectedVideoId: string;
+  generatedAt: string | null;
 }
+
+const LIVE_DIRECTORY_REFRESH_MS = 90_000;
 
 function formatViewerCount(value: number) {
   return new Intl.NumberFormat("en", {
@@ -811,79 +816,117 @@ function formatViewerCount(value: number) {
   }).format(value);
 }
 
-function LiveNewsCoverage({ event }: { event: Event }) {
+function LiveNewsDirectory() {
+  const requestRef = useRef<AbortController | null>(null);
   const [coverage, setCoverage] = useState<LiveVideoState>({
     loading: true,
+    refreshing: false,
     error: null,
     videos: [],
     selectedVideoId: "",
+    generatedAt: null,
   });
 
-  useEffect(() => {
+  const loadNewsrooms = useCallback(async (initial: boolean) => {
+    requestRef.current?.abort();
     const controller = new AbortController();
-    void fetch(
-      `/api/live-video?headline=${encodeURIComponent(event.headline)}`,
-      { signal: controller.signal },
-    )
-      .then(async (response) => {
-        const payload = (await response.json()) as {
-          error?: string;
-          videos?: LiveVideo[];
-        };
-        if (!response.ok) {
-          throw new Error(
-            payload.error ?? "Live coverage could not be checked right now.",
-          );
-        }
-        const videos = payload.videos ?? [];
-        setCoverage({
-          loading: false,
-          error: null,
-          videos,
-          selectedVideoId: videos[0]?.id ?? "",
-        });
-      })
-      .catch((error) => {
-        if (controller.signal.aborted) return;
-        setCoverage({
-          loading: false,
-          error:
-            error instanceof Error
-              ? error.message
-              : "Live coverage could not be checked right now.",
-          videos: [],
-          selectedVideoId: "",
-        });
+    requestRef.current = controller;
+    setCoverage((current) => ({
+      ...current,
+      loading: initial && !current.videos.length,
+      refreshing: !initial || Boolean(current.videos.length),
+      error: null,
+    }));
+    try {
+      const response = await fetch("/api/live-video?mode=newsrooms", {
+        signal: controller.signal,
       });
-    return () => controller.abort();
-  }, [event.headline]);
+      const payload = (await response.json()) as {
+        error?: string;
+        generatedAt?: string;
+        videos?: LiveVideo[];
+      };
+      if (!response.ok) {
+        throw new Error(
+          payload.error ?? "Live newsrooms could not be checked right now.",
+        );
+      }
+      const videos = payload.videos ?? [];
+      setCoverage((current) => ({
+        loading: false,
+        refreshing: false,
+        error: null,
+        videos,
+        selectedVideoId: videos.some(
+          (video) => video.id === current.selectedVideoId,
+        )
+          ? current.selectedVideoId
+          : (videos[0]?.id ?? ""),
+        generatedAt: payload.generatedAt ?? new Date().toISOString(),
+      }));
+    } catch (error) {
+      if (controller.signal.aborted) return;
+      setCoverage((current) => ({
+        ...current,
+        loading: false,
+        refreshing: false,
+        error:
+          error instanceof Error
+            ? error.message
+            : "Live newsrooms could not be checked right now.",
+      }));
+    }
+  }, []);
+
+  useEffect(() => {
+    void loadNewsrooms(true);
+    const interval = window.setInterval(() => {
+      if (!document.hidden) void loadNewsrooms(false);
+    }, LIVE_DIRECTORY_REFRESH_MS);
+    const refreshWhenVisible = () => {
+      if (!document.hidden) void loadNewsrooms(false);
+    };
+    document.addEventListener("visibilitychange", refreshWhenVisible);
+    return () => {
+      window.clearInterval(interval);
+      document.removeEventListener("visibilitychange", refreshWhenVisible);
+      requestRef.current?.abort();
+    };
+  }, [loadNewsrooms]);
 
   if (coverage.loading) {
     return (
       <div
-        className="mt-5 grid min-h-[420px] place-items-center rounded-2xl border border-[#313d50] bg-[#080e17]"
+        className="mt-6 grid min-h-[420px] place-items-center rounded-2xl border border-[#313d50] bg-[#080e17]"
         aria-busy="true"
       >
         <div className="text-center">
           <div className="mx-auto h-7 w-7 animate-spin rounded-full border-2 border-[#4e5e73] border-t-[#ff6874]" />
           <p className="mt-4 font-mono text-[9px] uppercase tracking-[0.18em] text-[#8290a3]">
-            Checking active live coverage
+            Checking the live newsrooms
           </p>
         </div>
       </div>
     );
   }
 
-  if (coverage.error) {
+  if (coverage.error && !coverage.videos.length) {
     return (
-      <div className="mt-5 grid min-h-[360px] place-items-center rounded-2xl border border-[#4a3037] bg-[#140c11] px-6 text-center">
+      <div className="mt-6 grid min-h-[360px] place-items-center rounded-2xl border border-[#4a3037] bg-[#140c11] px-6 text-center">
         <div>
           <p className="text-lg font-semibold text-white">
-            Live coverage could not be checked
+            Live newsrooms could not be checked
           </p>
           <p className="mt-2 text-xs leading-5 text-[#a9999f]">
             {coverage.error}
           </p>
+          <button
+            type="button"
+            onClick={() => void loadNewsrooms(true)}
+            className="mt-5 rounded-full border border-[#70414a] px-4 py-2 text-[10px] text-[#f1c1c6] transition hover:bg-[#2a1117]"
+          >
+            Try again
+          </button>
         </div>
       </div>
     );
@@ -891,16 +934,22 @@ function LiveNewsCoverage({ event }: { event: Event }) {
 
   if (!coverage.videos.length) {
     return (
-      <div className="mt-5 grid min-h-[360px] place-items-center rounded-2xl border border-[#343f50] bg-[#09111c] px-6 text-center">
+      <div className="mt-6 grid min-h-[360px] place-items-center rounded-2xl border border-[#343f50] bg-[#09111c] px-6 text-center">
         <div className="max-w-lg">
           <div className="mx-auto h-3 w-3 rounded-full bg-[#5d6979]" />
           <p className="mt-4 text-xl font-semibold text-white">
-            No active live coverage for this story
+            No major newsrooms are live right now
           </p>
           <p className="mt-2 text-xs leading-5 text-[#8996a8]">
-            No currently live YouTube news feed closely matches this headline.
-            Select another breaking story to continue.
+            WorldPulse will check again automatically, or you can refresh now.
           </p>
+          <button
+            type="button"
+            onClick={() => void loadNewsrooms(false)}
+            className="mt-5 rounded-full border border-[#3a4659] px-4 py-2 text-[10px] text-[#cad2dd] transition hover:bg-[#182335]"
+          >
+            Refresh live directory
+          </button>
         </div>
       </div>
     );
@@ -909,110 +958,148 @@ function LiveNewsCoverage({ event }: { event: Event }) {
   const selectedVideo =
     coverage.videos.find((video) => video.id === coverage.selectedVideoId) ??
     coverage.videos[0];
+  const updatedAt = coverage.generatedAt
+    ? new Date(coverage.generatedAt).toLocaleTimeString("en", {
+        hour: "numeric",
+        minute: "2-digit",
+      })
+    : null;
 
   return (
-    <div className="mt-5 grid gap-5 lg:grid-cols-[minmax(0,1fr)_340px]">
-      <div className="overflow-hidden rounded-2xl border border-[#313d50] bg-black shadow-2xl">
-        <div className="aspect-video">
-          <iframe
-            key={`${event.id}-${selectedVideo.id}`}
-            className="h-full w-full"
-            src={selectedVideo.embedUrl}
-            title={`${selectedVideo.channelName}: ${selectedVideo.title}`}
-            allow="autoplay; encrypted-media; picture-in-picture"
-            allowFullScreen
-          />
+    <>
+      <div className="mt-6 flex flex-wrap items-center justify-between gap-3">
+        <div aria-live="polite" className="flex items-center gap-2">
+          <span className="h-2 w-2 rounded-full bg-[#ff5964] shadow-[0_0_10px_#ff5964]" />
+          <span className="font-mono text-[9px] uppercase tracking-[0.16em] text-[#aab5c4]">
+            {coverage.refreshing
+              ? "Updating live directory"
+              : `${coverage.videos.length} newsrooms live${updatedAt ? ` · Updated ${updatedAt}` : ""}`}
+          </span>
         </div>
-        <div className="flex flex-wrap items-center justify-between gap-3 border-t border-[#2a3445] bg-[#0a101a] px-4 py-3">
-          <div className="min-w-0">
-            <div className="font-mono text-[8px] uppercase tracking-[0.16em] text-[#ff7480]">
-              Most watched matching live feed
-            </div>
-            <div className="mt-1 truncate text-sm font-semibold text-white">
-              {selectedVideo.channelName}
-            </div>
-            <div className="mt-1 line-clamp-1 text-[10px] text-[#8996a8]">
-              {selectedVideo.title}
-            </div>
-          </div>
-          <a
-            href={selectedVideo.watchUrl}
-            target="_blank"
-            rel="noreferrer"
-            className="rounded-full border border-[#3a4659] px-3 py-2 text-[10px] text-[#cad2dd] transition hover:bg-[#182335]"
-          >
-            Open YouTube
-          </a>
-        </div>
+        <button
+          type="button"
+          onClick={() => void loadNewsrooms(false)}
+          disabled={coverage.refreshing}
+          className="rounded-full border border-[#3a4659] px-3 py-2 text-[9px] uppercase tracking-[0.12em] text-[#cad2dd] transition hover:bg-[#182335] disabled:cursor-wait disabled:opacity-60"
+        >
+          {coverage.refreshing ? "Refreshing" : "Refresh"}
+        </button>
       </div>
 
-      <aside className="rounded-2xl border border-[#273549] bg-[#09111c] p-4">
-        <p className="font-mono text-[9px] uppercase tracking-[0.2em] text-[#718197]">
-          Available live feeds
+      {coverage.error ? (
+        <p className="mt-3 text-[10px] text-[#c89a9f]" role="status">
+          The latest update was delayed. The current directory remains available.
         </p>
-        <div className="mt-3 space-y-2">
-          {coverage.videos.map((video) => (
-            <button
-              type="button"
-              key={video.id}
-              onClick={() =>
-                setCoverage((current) => ({
-                  ...current,
-                  selectedVideoId: video.id,
-                }))
-              }
-              className={`w-full overflow-hidden rounded-xl border text-left transition ${
-                video.id === selectedVideo.id
-                  ? "border-[#b94552] bg-[#32151d] text-white"
-                  : "border-[#253247] bg-[#0d1724] text-[#b8c2cf] hover:border-[#4b5c73]"
-              }`}
-            >
-              {video.thumbnailUrl ? (
-                <div
-                  aria-hidden="true"
-                  className="h-16 w-full bg-cover bg-center opacity-65"
-                  style={{
-                    backgroundImage: `linear-gradient(90deg, rgba(7,12,20,0.08), rgba(7,12,20,0.72)), url("${video.thumbnailUrl}")`,
-                  }}
-                />
-              ) : null}
-              <div className="px-3 py-2.5">
-                <div className="flex items-center justify-between gap-2">
-                  <span className="text-xs font-medium">
-                    {video.channelName}
-                  </span>
-                  <span className="shrink-0 font-mono text-[8px] uppercase text-[#ff7a84]">
-                    {video.viewerCount
-                      ? `${formatViewerCount(video.viewerCount)} watching`
-                      : "Live"}
+      ) : null}
+
+      <div className="mt-4 grid gap-5 xl:grid-cols-[minmax(0,1fr)_390px]">
+        <div className="overflow-hidden rounded-2xl border border-[#313d50] bg-black shadow-2xl">
+          <div className="aspect-video">
+            <iframe
+              key={selectedVideo.id}
+              className="h-full w-full"
+              src={selectedVideo.embedUrl}
+              title={`${selectedVideo.newsroomName ?? selectedVideo.channelName}: ${selectedVideo.title}`}
+              allow="autoplay; encrypted-media; picture-in-picture"
+              allowFullScreen
+            />
+          </div>
+          <div className="flex flex-wrap items-center justify-between gap-3 border-t border-[#2a3445] bg-[#0a101a] px-4 py-3">
+            <div className="min-w-0">
+              <div className="font-mono text-[8px] uppercase tracking-[0.16em] text-[#ff7480]">
+                Top live coverage
+              </div>
+              <div className="mt-1 truncate text-sm font-semibold text-white">
+                {selectedVideo.newsroomName ?? selectedVideo.channelName}
+              </div>
+              <div className="mt-1 line-clamp-2 text-[10px] leading-4 text-[#8996a8]">
+                {selectedVideo.title}
+              </div>
+            </div>
+            <div className="flex items-center gap-2">
+              <span className="font-mono text-[9px] uppercase tracking-[0.1em] text-[#ff7a84]">
+                {selectedVideo.viewerCount
+                  ? `${formatViewerCount(selectedVideo.viewerCount)} watching`
+                  : "Live"}
+              </span>
+              <a
+                href={selectedVideo.watchUrl}
+                target="_blank"
+                rel="noreferrer"
+                className="rounded-full border border-[#3a4659] px-3 py-2 text-[10px] text-[#cad2dd] transition hover:bg-[#182335]"
+              >
+                Open feed
+              </a>
+            </div>
+          </div>
+        </div>
+
+        <aside className="rounded-2xl border border-[#273549] bg-[#09111c] p-4">
+          <div className="flex items-end justify-between gap-3">
+            <div>
+              <p className="font-mono text-[9px] uppercase tracking-[0.2em] text-[#718197]">
+                Across the newsrooms
+              </p>
+              <p className="mt-1 text-[10px] text-[#647287]">
+                What leading channels are covering now
+              </p>
+            </div>
+            <span className="font-mono text-[8px] uppercase text-[#ff7480]">
+              Live
+            </span>
+          </div>
+          <div className="mt-3 max-h-[620px] space-y-2 overflow-y-auto pr-1">
+            {coverage.videos.map((video) => (
+              <button
+                type="button"
+                key={video.id}
+                aria-label={`Watch ${video.newsroomName ?? video.channelName}: ${video.title}`}
+                onClick={() =>
+                  setCoverage((current) => ({
+                    ...current,
+                    selectedVideoId: video.id,
+                  }))
+                }
+                className={`w-full overflow-hidden rounded-xl border text-left transition ${
+                  video.id === selectedVideo.id
+                    ? "border-[#b94552] bg-[#32151d] text-white"
+                    : "border-[#253247] bg-[#0d1724] text-[#b8c2cf] hover:border-[#4b5c73]"
+                }`}
+              >
+                {video.thumbnailUrl ? (
+                  <div
+                    aria-hidden="true"
+                    className="h-16 w-full bg-cover bg-center opacity-65"
+                    style={{
+                      backgroundImage: `linear-gradient(90deg, rgba(7,12,20,0.08), rgba(7,12,20,0.72)), url("${video.thumbnailUrl}")`,
+                    }}
+                  />
+                ) : null}
+                <div className="px-3 py-2.5">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-xs font-medium">
+                      {video.newsroomName ?? video.channelName}
+                    </span>
+                    <span className="shrink-0 font-mono text-[8px] uppercase text-[#ff7a84]">
+                      {video.viewerCount
+                        ? `${formatViewerCount(video.viewerCount)} watching`
+                        : "Live"}
+                    </span>
+                  </div>
+                  <span className="mt-1 line-clamp-2 block text-[10px] leading-4 text-[#8f9caf]">
+                    {video.title}
                   </span>
                 </div>
-                <span className="mt-1 line-clamp-2 block text-[10px] leading-4 text-[#8f9caf]">
-                  {video.title}
-                </span>
-              </div>
-            </button>
-          ))}
-        </div>
-      </aside>
-    </div>
+              </button>
+            ))}
+          </div>
+        </aside>
+      </div>
+    </>
   );
 }
 
-function LiveNewsModal({
-  events,
-  onClose,
-}: {
-  events: Event[];
-  onClose: () => void;
-}) {
-  const stories = events.slice(0, 6);
-  const [selectedEventId, setSelectedEventId] = useState(
-    stories[0]?.id ?? "",
-  );
-  const selectedEvent =
-    stories.find((event) => event.id === selectedEventId) ?? stories[0];
-
+function LiveNewsModal({ onClose }: { onClose: () => void }) {
   useEffect(() => {
     const closeOnEscape = (event: KeyboardEvent) => {
       if (event.key === "Escape") onClose();
@@ -1032,7 +1119,7 @@ function LiveNewsModal({
         <div className="flex items-start justify-between gap-5 border-b border-[#332b35] pb-5">
           <div>
             <p className="font-mono text-[9px] uppercase tracking-[0.24em] text-[#ff6874]">
-              Live video coverage
+              Active broadcasts
             </p>
             <h2
               id="live-news-title"
@@ -1041,8 +1128,8 @@ function LiveNewsModal({
               Live News
             </h2>
             <p className="mt-2 max-w-2xl text-sm leading-6 text-[#92a0b3]">
-              Select a breaking story to find active YouTube news coverage,
-              ranked by current viewers. Switch between every matching feed.
+              See what leading international newsrooms are broadcasting now.
+              Choose any active channel without leaving the live desk.
             </p>
           </div>
           <button
@@ -1055,49 +1142,7 @@ function LiveNewsModal({
           </button>
         </div>
 
-        {selectedEvent ? (
-          <>
-            <div className="mt-6 flex gap-2 overflow-x-auto pb-2">
-              {stories.map((event, index) => (
-                <button
-                  type="button"
-                  key={event.id}
-                  onClick={() => setSelectedEventId(event.id)}
-                  className={`min-w-56 rounded-xl border px-4 py-3 text-left transition ${
-                    event.id === selectedEvent.id
-                      ? "border-[#a83d49] bg-[#30151c]"
-                      : "border-[#273549] bg-[#0b131f] hover:border-[#4b5c73]"
-                  }`}
-                >
-                  <span className="font-mono text-[8px] uppercase tracking-[0.16em] text-[#ff7480]">
-                    Breaking {String(index + 1).padStart(2, "0")}
-                  </span>
-                  <span className="mt-1.5 line-clamp-2 block text-xs leading-5 text-white">
-                    {event.headline}
-                  </span>
-                </button>
-              ))}
-            </div>
-
-            <LiveNewsCoverage key={selectedEvent.id} event={selectedEvent} />
-
-            <div className="mt-5 rounded-2xl border border-[#2b394d] bg-[#0b131f] p-4">
-              <div className="font-mono text-[8px] uppercase tracking-[0.16em] text-[#ff7480]">
-                Breaking story
-              </div>
-              <h3 className="mt-2 text-lg font-semibold leading-snug text-white">
-                {selectedEvent.headline}
-              </h3>
-              <p className="mt-2 max-w-4xl text-xs leading-5 text-[#9ba8b9]">
-                {selectedEvent.summary}
-              </p>
-            </div>
-          </>
-        ) : (
-          <div className="mt-6 rounded-2xl border border-dashed border-[#34445a] p-12 text-center text-sm text-[#8996a8]">
-            Live coverage will appear when the breaking feed is ready.
-          </div>
-        )}
+        <LiveNewsDirectory />
       </section>
     </div>
   );
@@ -2488,10 +2533,7 @@ export function WorldPulseApp({
         />
       ) : null}
       {showLiveNews ? (
-        <LiveNewsModal
-          events={breakingEvents}
-          onClose={() => setShowLiveNews(false)}
-        />
+        <LiveNewsModal onClose={() => setShowLiveNews(false)} />
       ) : null}
       </main>
     </>

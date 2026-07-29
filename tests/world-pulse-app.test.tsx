@@ -268,13 +268,14 @@ describe("WorldPulse interactions", () => {
       }
       if (url.startsWith("/api/live-video")) {
         return Response.json({
-          headline,
+          mode: "newsrooms",
           generatedAt: "2026-07-25T00:00:00.000Z",
           videos: [
             {
               id: "testlive001",
               title: `${headline} live`,
               channelName: "Example Live",
+              newsroomName: "Example Live",
               viewerCount: 1250,
               thumbnailUrl: "https://i.ytimg.com/vi/testlive001/hqdefault.jpg",
               watchUrl: "https://www.youtube.com/watch?v=testlive001",
@@ -332,15 +333,12 @@ describe("WorldPulse interactions", () => {
       expect.stringContaining("youtube-nocookie.com/embed/testlive001"),
     );
     expect(
-      within(liveNewsDialog).getByText("Available live feeds"),
+      within(liveNewsDialog).getByText("Across the newsrooms"),
     ).toBeInTheDocument();
   });
 
-  it("changes Live News coverage with the selected story and shows an explicit empty state", async () => {
-    const coveredHeadline =
-      "Trump meets Netanyahu at the White House summit";
-    const uncoveredHeadline =
-      "Australia expands a remote coastal rail project";
+  it("switches newsroom feeds and preserves the selected feed during a directory refresh", async () => {
+    let directoryRequestCount = 0;
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input);
       if (url === "/countries.geojson") {
@@ -350,28 +348,39 @@ describe("WorldPulse interactions", () => {
       }
       if (url.includes("scope=map")) return liveMapResponse(url);
       if (url.startsWith("/api/live-video")) {
-        const requestedHeadline = new URL(
-          url,
-          "https://worldpulse.test",
-        ).searchParams.get("headline");
+        directoryRequestCount += 1;
+        const updated = directoryRequestCount > 1;
         return Response.json({
-          headline: requestedHeadline,
-          generatedAt: "2026-07-25T00:00:00.000Z",
-          videos:
-            requestedHeadline === coveredHeadline
-              ? [
-                  {
-                    id: "covered001",
-                    title: `${coveredHeadline} live`,
-                    channelName: "World News Live",
-                    viewerCount: 2400,
-                    watchUrl:
-                      "https://www.youtube.com/watch?v=covered001",
-                    embedUrl:
-                      "https://www.youtube-nocookie.com/embed/covered001?autoplay=1&mute=1&playsinline=1",
-                  },
-                ]
-              : [],
+          mode: "newsrooms",
+          generatedAt: updated
+            ? "2026-07-25T00:02:00.000Z"
+            : "2026-07-25T00:00:00.000Z",
+          videos: [
+            {
+              id: "reuters001",
+              title: updated
+                ? "Reuters world briefing updated"
+                : "Reuters world briefing",
+              channelName: "Reuters",
+              newsroomName: "Reuters",
+              viewerCount: 5000,
+              watchUrl: "https://www.youtube.com/watch?v=reuters001",
+              embedUrl:
+                "https://www.youtube-nocookie.com/embed/reuters001?autoplay=1&mute=1&playsinline=1",
+            },
+            {
+              id: "bbcnews001",
+              title: updated
+                ? "BBC News latest international coverage"
+                : "BBC News live international coverage",
+              channelName: "BBC News",
+              newsroomName: "BBC News",
+              viewerCount: 3000,
+              watchUrl: "https://www.youtube.com/watch?v=bbcnews001",
+              embedUrl:
+                "https://www.youtube-nocookie.com/embed/bbcnews001?autoplay=1&mute=1&playsinline=1",
+            },
+          ],
         });
       }
       return Response.json({
@@ -382,20 +391,12 @@ describe("WorldPulse interactions", () => {
         provider: "Test live index",
         articles: [
           {
-            id: "covered-story",
-            title: coveredHeadline,
-            url: "https://publisher-one.example/covered",
+            id: "world-story",
+            title: "International leaders hold a global summit",
+            url: "https://publisher-one.example/world",
             publisherName: "Publisher One",
             publisherUrl: "https://publisher-one.example/",
             publishedAt: "2026-07-25T00:00:00.000Z",
-          },
-          {
-            id: "uncovered-story",
-            title: uncoveredHeadline,
-            url: "https://publisher-two.example/uncovered",
-            publisherName: "Publisher Two",
-            publisherUrl: "https://publisher-two.example/",
-            publishedAt: "2026-07-25T00:01:00.000Z",
           },
         ],
       });
@@ -407,27 +408,69 @@ describe("WorldPulse interactions", () => {
     const dialog = screen.getByRole("dialog", { name: "Live News" });
 
     fireEvent.click(
-      within(dialog).getByRole("button", {
-        name: new RegExp(coveredHeadline),
+      await within(dialog).findByRole("button", {
+        name: /Watch BBC News: BBC News live international coverage/,
       }),
     );
     expect(
       await within(dialog).findByTitle(
-        `World News Live: ${coveredHeadline} live`,
+        "BBC News: BBC News live international coverage",
       ),
-    ).toBeInTheDocument();
+    ).toHaveAttribute(
+      "src",
+      expect.stringContaining("youtube-nocookie.com/embed/bbcnews001"),
+    );
 
     fireEvent.click(
-      within(dialog).getByRole("button", {
-        name: new RegExp(uncoveredHeadline),
-      }),
+      within(dialog).getByRole("button", { name: "Refresh" }),
     );
+    await waitFor(() => expect(directoryRequestCount).toBe(2));
     expect(
-      await within(dialog).findByText(
-        "No active live coverage for this story",
+      await within(dialog).findByTitle(
+        "BBC News: BBC News latest international coverage",
       ),
+    ).toHaveAttribute(
+      "src",
+      expect.stringContaining("youtube-nocookie.com/embed/bbcnews001"),
+    );
+    expect(within(dialog).queryByText(/Breaking 01/)).not.toBeInTheDocument();
+  });
+
+  it("shows a truthful empty state when no major newsroom is live", async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === "/countries.geojson") {
+        return Response.json({
+          features: [{ id: "124", properties: { name: "Canada" } }],
+        });
+      }
+      if (url.includes("scope=map")) return liveMapResponse(url);
+      if (url.startsWith("/api/live-video")) {
+        return Response.json({
+          mode: "newsrooms",
+          generatedAt: "2026-07-25T00:00:00.000Z",
+          videos: [],
+        });
+      }
+      return Response.json({
+        countryName: null,
+        scope: "global",
+        generatedAt: "2026-07-25T00:00:00.000Z",
+        refreshAfterSeconds: 600,
+        provider: "Test live index",
+        articles: [],
+      });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<WorldPulseApp MapComponent={TestMap} />);
+    fireEvent.click(await screen.findByRole("button", { name: "Live News" }));
+    expect(
+      await screen.findByText("No major newsrooms are live right now"),
     ).toBeInTheDocument();
-    expect(within(dialog).queryByTitle(/World News Live/)).not.toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Refresh live directory" }),
+    ).toBeInTheDocument();
   });
 
   it("limits Live Situation to the twelve strongest global stories", async () => {
