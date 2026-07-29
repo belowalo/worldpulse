@@ -41,13 +41,13 @@ export async function generateMetadata(): Promise<Metadata> {
       description,
       type: "website",
       url: origin,
-      images: [{ url: `${origin}/og.png`, width: 1731, height: 909 }],
+      images: [{ url: `${origin}/og-globe.png`, width: 1728, height: 910 }],
     },
     twitter: {
       card: "summary_large_image",
       title,
       description,
-      images: [`${origin}/og.png`],
+      images: [`${origin}/og-globe.png`],
     },
   };
 }

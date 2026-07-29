@@ -2,20 +2,20 @@
 
 WorldPulse is a production-quality MVP for exploring recent world news through an interactive map. Each country's hue represents the category of its highest-impact active event, while intensity represents a deterministic 0–100 importance estimate. Clicking any mapped country opens its current RSS-indexed headlines, publisher links, timestamps, geographic scope, and a plain-language score explanation.
 
-The hosted site verifies an initial tranche of country signals, opens the usable map, and continues completing or repairing the world index in the background. Only articles with an explicit country reference are eligible for that country's map signal. Recent valid country snapshots remain available during transient provider outages, while unresolved countries show an explicit checking or neutral state instead of silently failing. Selected-country refreshes and focused event searches can add newer or broader coverage without blocking the map. The site reads headline-level public feed metadata and leaves article bodies on publisher websites.
+The hosted site keeps its startup screen in place until the country directory, every country signal, the global feed, and the interactive globe have all reached a usable terminal state. Only articles with an explicit country reference are eligible for that country's map signal. Recent valid country snapshots remain available during transient provider outages, while countries with no verified current coverage resolve to an explicit neutral state instead of silently failing. Selected-country refreshes and focused event searches can add newer or broader coverage without blocking the globe. The site reads headline-level public feed metadata and leaves article bodies on publisher websites.
 
 ## Screenshots
 
-The deployed application is the preferred live preview. A social preview is available at `public/og.png`; add product screenshots here when release snapshots are captured.
+The deployed application is the preferred live preview. A social preview is available at `public/og-globe.png`; add product screenshots here when release snapshots are captured.
 
 ## Architecture
 
-- **Web:** Next.js 16, React 19, strict TypeScript, Tailwind CSS, MapLibre GL JS, and local country geometry.
+- **Web:** Next.js 16, React 19, strict TypeScript, Tailwind CSS, a lightweight Three.js globe renderer, and local country geometry.
 - **Hosted news API:** A same-origin Cloudflare Worker endpoint queries public RSS indexes, validates and deduplicates articles, and returns country, global, map-summary, and event-coverage feeds.
 - **Hosted cache:** Cloudflare edge caching plus D1 persistence streams a recent live index immediately, refreshes it in the background, and provides resilience for deeper country and event feeds.
 - **Reference API:** FastAPI, Pydantic validation, SQLAlchemy 2, and PostgreSQL remain available for local full-stack development.
 - **Local orchestration:** Docker Compose starts PostgreSQL, migrates and seeds the API, then starts the web app with health checks.
-- **Hosted preview:** The browser starts the batched live country sweep automatically, opens after the first verified tranche (with a bounded fallback), and reports background progress until the index settles. Stable batch identities, stale-if-error responses, and bounded deep retries preserve recent valid signals through upstream timeouts. Results are occurrence-matched, publisher-deduplicated, and scored as one canonical event record used by the map, country panel, and global feed. The two uninhabited map areas remain neutral when no current reporting exists.
+- **Hosted preview:** The browser starts the bounded batched country sweep and global feed automatically, keeps a detailed readiness screen visible until every request has settled and the globe runtime is prepared, and then reveals the complete interface at once. Stable batch identities, stale-if-error responses, and bounded deep retries preserve recent valid signals through upstream timeouts. Results are occurrence-matched, publisher-deduplicated, and scored as one canonical event record used by the globe, country panel, breaking-news ticker, and global feed. The two uninhabited map areas remain neutral when no current reporting exists.
 
 The web app lives at the repository root to preserve the hosting runtime's required structure. `apps/api` contains the backend. See [architecture.md](docs/architecture.md) for details.
 

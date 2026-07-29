@@ -1,5 +1,4 @@
 @import "tailwindcss";
-@import "maplibre-gl/dist/maplibre-gl.css";
 
 :root {
   --ink: #f6f7f9;
@@ -55,43 +54,112 @@ select:focus-visible {
   font-family: var(--font-geist-mono), monospace;
 }
 
-.maplibregl-map {
-  font: inherit;
-}
-
-.maplibregl-canvas {
+.world-globe canvas {
+  display: block;
   outline: none;
+  touch-action: none;
 }
 
-.maplibregl-ctrl-group {
+.world-globe-tooltip {
+  width: min(17rem, calc(100vw - 2rem));
+  border: 1px solid #39475d;
+  border-radius: 0.75rem;
+  background: rgba(7, 15, 25, 0.97);
+  padding: 0.75rem;
+  color: #d4dbe5;
+  box-shadow: 0 20px 50px rgba(0, 0, 0, 0.45);
+  font-family: var(--font-geist-sans), Arial, sans-serif;
+  pointer-events: none;
+}
+
+.world-globe-tooltip__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  color: white;
+}
+
+.world-globe-tooltip__header span {
+  color: #73e2cc;
+  font-family: var(--font-geist-mono), monospace;
+  font-size: 0.75rem;
+}
+
+.world-globe-tooltip__headline {
+  margin-top: 0.5rem;
+  font-size: 0.75rem;
+  line-height: 1.45;
+}
+
+.world-globe-tooltip__meta {
+  margin-top: 0.5rem;
+  color: #8f9caf;
+  font-family: var(--font-geist-mono), monospace;
+  font-size: 0.625rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.breaking-news-viewport {
+  min-width: 0;
+  flex: 1;
   overflow: hidden;
-  border: 1px solid #344258;
-  border-radius: 8px !important;
-  background: #121b29 !important;
-  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.25) !important;
+  mask-image: linear-gradient(
+    to right,
+    transparent,
+    black 1.5rem,
+    black calc(100% - 1.5rem),
+    transparent
+  );
 }
 
-.maplibregl-ctrl-group button {
-  filter: invert(1);
+.breaking-news-track {
+  display: flex;
+  width: max-content;
+  will-change: transform;
+  animation: breaking-news-scroll 52s linear infinite;
 }
 
-.maplibregl-ctrl-attrib {
-  background: rgba(8, 13, 21, 0.8) !important;
-  color: #8390a3;
+.breaking-news-bar:hover .breaking-news-track,
+.breaking-news-bar:focus-within .breaking-news-track {
+  animation-play-state: paused;
 }
 
-.maplibregl-ctrl-attrib a {
-  color: #b6c3d6;
+.breaking-news-set {
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
 }
 
-.maplibregl-ctrl-top-right {
-  right: 0.5rem;
-  top: 3.5rem;
+.breaking-news-item {
+  display: inline-flex;
+  height: 2.25rem;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0 1.1rem;
+  border-right: 1px solid rgba(120, 50, 58, 0.42);
+  color: #d8c1c4;
+  font-family: var(--font-geist-mono), monospace;
+  font-size: 0.5625rem;
+  letter-spacing: 0.055em;
+  text-decoration: none;
+  white-space: nowrap;
 }
 
-.maplibregl-ctrl-bottom-left {
-  bottom: 6.5rem;
-  left: 0.5rem;
+.breaking-news-item:hover,
+.breaking-news-item:focus-visible {
+  background: rgba(255, 89, 100, 0.07);
+  color: white;
+}
+
+@keyframes breaking-news-scroll {
+  from {
+    transform: translate3d(0, 0, 0);
+  }
+  to {
+    transform: translate3d(-50%, 0, 0);
+  }
 }
 
 .scrollbar-thin {
@@ -100,6 +168,10 @@ select:focus-visible {
 }
 
 @media (prefers-reduced-motion: reduce) {
+  .breaking-news-track {
+    animation: none;
+  }
+
   *,
   *::before,
   *::after {

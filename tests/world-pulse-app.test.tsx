@@ -679,7 +679,7 @@ describe("WorldPulse interactions", () => {
     ).not.toBeInTheDocument();
   });
 
-  it("deep-checks only unresolved map countries and defers global news until opened", async () => {
+  it("deep-checks unresolved countries and preloads global news before opening", async () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input);
       if (url === "/countries.geojson") {
@@ -721,14 +721,10 @@ describe("WorldPulse interactions", () => {
         url.includes("/api/live-news?country="),
       ),
     ).toBe(true);
-    expect(requestedUrls).not.toContain("/api/live-news?scope=global");
-
-    fireEvent.click(
+    expect(requestedUrls).toContain("/api/live-news?scope=global");
+    expect(
       await screen.findByRole("button", { name: "Global feed" }),
-    );
-    await waitFor(() =>
-      expect(fetchMock).toHaveBeenCalledWith("/api/live-news?scope=global"),
-    );
+    ).toBeInTheDocument();
   });
 
   it("keeps a country neutral when both map and deep reporting are unavailable", async () => {
@@ -772,7 +768,7 @@ describe("WorldPulse interactions", () => {
       fetchMock.mock.calls.some(([input]) =>
         String(input).includes("scope=global"),
       ),
-    ).toBe(false);
+    ).toBe(true);
   });
 
   it("offers older indexed reporting when the default window is empty", async () => {
@@ -974,7 +970,7 @@ describe("WorldPulse interactions", () => {
     ).toHaveLength(egyptRequestsBeforeClick);
   });
 
-  it("opens the interface after the first verified batch while the remaining index continues", async () => {
+  it("keeps the loading screen up until the complete country index is ready", async () => {
     let finishMexico: (() => void) | undefined;
     const mexicoReady = new Promise<void>((resolve) => {
       finishMexico = resolve;
@@ -1020,13 +1016,15 @@ describe("WorldPulse interactions", () => {
     render(<WorldPulseApp MapComponent={TestMap} />);
 
     expect(
-      await screen.findByText("Indexing countries · 8/9"),
+      await screen.findByText("8/9 country feeds checked"),
     ).toBeInTheDocument();
     expect(
-      screen.getByRole("button", { name: "Global feed" }),
+      screen.getByRole("heading", { name: "Loading the live world map" }),
     ).toBeInTheDocument();
-    expect(screen.getByTestId("countries-with-news")).toHaveTextContent("8");
-    expect(screen.getByTestId("countries-syncing")).toHaveTextContent("1");
+    expect(
+      screen.queryByRole("button", { name: "Global feed" }),
+    ).not.toBeInTheDocument();
+    expect(screen.queryByTestId("countries-with-news")).not.toBeInTheDocument();
 
     await act(async () => {
       finishMexico?.();
@@ -1036,6 +1034,9 @@ describe("WorldPulse interactions", () => {
     expect(
       await screen.findByText("Live country index complete"),
     ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("heading", { name: "Loading the live world map" }),
+    ).not.toBeInTheDocument();
     expect(screen.getByTestId("countries-with-news")).toHaveTextContent("9");
     expect(screen.getByTestId("countries-syncing")).toHaveTextContent("0");
   });
@@ -1224,7 +1225,9 @@ describe("WorldPulse interactions", () => {
       screen.getByRole("button", { name: "Select Senegal on map" }),
     );
     expect(
-      await screen.findByText("MUSIC AWARDS SENEGAL 2026 announced"),
+      await screen.findByRole("heading", {
+        name: "MUSIC AWARDS SENEGAL 2026 announced",
+      }),
     ).toBeInTheDocument();
     expect(
       screen.getAllByText("Culture and entertainment").length,
