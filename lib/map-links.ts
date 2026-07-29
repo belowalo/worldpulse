@@ -175,23 +175,16 @@ function curvedLine(
 export function countriesMentionedByEvent(
   event: Event,
   countries: MapCountry[],
-  anchorCountry?: MapCountry,
+  _anchorCountry?: MapCountry,
 ) {
+  void _anchorCountry;
   const searchableText = [
     event.headline,
-    event.summary,
     ...event.articles.map((article) => article.headline),
   ].join(" ");
-  const mentioned = countries.filter((country) =>
+  return countries.filter((country) =>
     textMatchesCountry(searchableText, countrySearchTerms(country.name)),
   );
-  if (
-    anchorCountry &&
-    !mentioned.some((country) => country.mapId === anchorCountry.mapId)
-  ) {
-    mentioned.unshift(anchorCountry);
-  }
-  return mentioned;
 }
 
 export function buildEventLinkCollection({
@@ -220,34 +213,23 @@ export function buildEventLinkCollection({
   for (const event of [...events].sort(
     (left, right) => right.importanceScore - left.importanceScore,
   )) {
-    const anchoredToSelection =
-      selectedCountry &&
-      (event.primaryCountry === selectedCountry.iso2 ||
-        event.primaryCountry === selectedCountry.name)
-        ? selectedCountry
-        : undefined;
-    const explicitlyAffected = event.affectedCountries.flatMap(
-      (countryCodeOrName) => {
-        const matchedCountry = countries.find(
-          (country) =>
-            country.iso2 === countryCodeOrName ||
-            country.name === countryCodeOrName,
-        );
-        return matchedCountry ? [matchedCountry] : [];
-      },
+    const mentioned = countriesMentionedByEvent(event, countries).filter(
+      (country) => centerForCountry(country),
     );
-    const mentioned = (
-      explicitlyAffected.length >= 2
-        ? explicitlyAffected
-        : countriesMentionedByEvent(
-            event,
-            countries,
-            anchoredToSelection,
-          )
-    ).filter((country) => centerForCountry(country));
     if (mentioned.length < 2) continue;
 
-    const origin = anchoredToSelection ?? mentioned[0];
+    const primaryCountry = countries.find(
+      (country) =>
+        country.iso2 === event.primaryCountry ||
+        country.name === event.primaryCountry,
+    );
+    const selectedIsMentioned = selectedCountry
+      ? mentioned.find((country) => country.mapId === selectedCountry.mapId)
+      : undefined;
+    const primaryIsMentioned = primaryCountry
+      ? mentioned.find((country) => country.mapId === primaryCountry.mapId)
+      : undefined;
+    const origin = selectedIsMentioned ?? primaryIsMentioned ?? mentioned[0];
     const originCenter = centerForCountry(origin);
     if (!originCenter) continue;
     for (const destination of mentioned) {

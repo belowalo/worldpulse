@@ -165,21 +165,24 @@ describe("WorldPulse interactions", () => {
     expect(screen.getByRole("heading", { name: "Japan" })).toBeInTheDocument();
   });
 
-  it("clears the country highlight in global feed and restores it in map view", () => {
+  it("opens Live Situation without changing the selected country", () => {
     render(<WorldPulseApp MapComponent={TestMap} liveUpdates={false} />);
     fireEvent.click(
       screen.getByRole("button", { name: "Select Japan on map" }),
     );
     expect(screen.getByTestId("selected-map-id")).toHaveTextContent("392");
 
-    fireEvent.click(screen.getByRole("button", { name: "Global feed" }));
-    expect(screen.getByTestId("selected-map-id")).toBeEmptyDOMElement();
-
-    fireEvent.click(screen.getByRole("button", { name: "Country feed" }));
+    fireEvent.click(screen.getByRole("button", { name: "Live Situation" }));
+    expect(
+      screen.getByRole("heading", { name: "Live Situation" }),
+    ).toBeInTheDocument();
     expect(screen.getByTestId("selected-map-id")).toHaveTextContent("392");
+    expect(
+      screen.queryByRole("button", { name: "Global feed" }),
+    ).not.toBeInTheDocument();
   });
 
-  it("shows all country connections until a specific event is selected", async () => {
+  it("shows no country connections until a specific event is selected", async () => {
     const tradeHeadline =
       "Canada and Mexico agree a cross-border trade accord";
     const countryArticles = [
@@ -228,14 +231,8 @@ describe("WorldPulse interactions", () => {
 
     render(<WorldPulseApp MapComponent={TestMap} />);
 
-    await waitFor(() =>
-      expect(
-        screen
-          .getByTestId("link-event-ids")
-          .textContent?.split(",")
-          .filter(Boolean).length,
-      ).toBeGreaterThan(1),
-    );
+    await screen.findByRole("heading", { name: tradeHeadline });
+    expect(screen.getByTestId("link-event-ids")).toBeEmptyDOMElement();
 
     fireEvent.click(
       await screen.findByRole("heading", { name: tradeHeadline }),
@@ -247,13 +244,10 @@ describe("WorldPulse interactions", () => {
     fireEvent.click(
       screen.getByRole("heading", { name: tradeHeadline }),
     );
-    expect(
-      screen.getByTestId("link-event-ids").textContent?.split(",").filter(Boolean)
-        .length,
-    ).toBeGreaterThan(1);
+    expect(screen.getByTestId("link-event-ids")).toBeEmptyDOMElement();
   });
 
-  it("keeps global connections hidden until an event is selected", async () => {
+  it("shows the global top stories in Live Situation with one source each", async () => {
     const headline = "Canada and Mexico agree a cross-border trade accord";
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input);
@@ -295,26 +289,16 @@ describe("WorldPulse interactions", () => {
     vi.stubGlobal("fetch", fetchMock);
 
     render(<WorldPulseApp MapComponent={TestMap} />);
-    fireEvent.click(
-      await screen.findByRole("button", { name: "Global feed" }),
-    );
-
-    expect(screen.getByTestId("link-event-ids")).toBeEmptyDOMElement();
-    fireEvent.click(
-      await screen.findByRole("heading", { name: headline }),
-    );
-    expect(screen.getByTestId("link-event-ids")).not.toBeEmptyDOMElement();
+    fireEvent.click(await screen.findByRole("button", { name: "Live Situation" }));
+    const dialog = screen.getByRole("dialog", { name: "Live Situation" });
+    expect(within(dialog).getByRole("heading", { name: headline })).toBeInTheDocument();
+    expect(within(dialog).getAllByRole("link")).toHaveLength(1);
     expect(
       screen.queryByRole("button", { name: /connections/i }),
     ).not.toBeInTheDocument();
-
-    fireEvent.click(
-      screen.getByRole("heading", { name: headline }),
-    );
-    expect(screen.getByTestId("link-event-ids")).toBeEmptyDOMElement();
   });
 
-  it("renders a large global index progressively without hiding results from filters", async () => {
+  it("limits Live Situation to the ten strongest global stories", async () => {
     const globalArticles = Array.from({ length: 45 }, (_, index) => ({
       id: `global-${index}`,
       title: `Distinct event marker${index} topic${index} dispatch${index}`,
@@ -343,16 +327,10 @@ describe("WorldPulse interactions", () => {
     vi.stubGlobal("fetch", fetchMock);
 
     render(<WorldPulseApp MapComponent={TestMap} />);
-    fireEvent.click(
-      await screen.findByRole("button", { name: "Global feed" }),
-    );
-
-    expect(
-      await screen.findByText("Showing 40 of 45 matching events"),
-    ).toBeInTheDocument();
-    expect(screen.getAllByRole("article")).toHaveLength(40);
-    fireEvent.click(screen.getByRole("button", { name: "Load 40 more" }));
-    expect(screen.getAllByRole("article")).toHaveLength(45);
+    fireEvent.click(await screen.findByRole("button", { name: "Live Situation" }));
+    const dialog = screen.getByRole("dialog", { name: "Live Situation" });
+    expect(within(dialog).getByText("Situation 10")).toBeInTheDocument();
+    expect(within(dialog).getAllByRole("link")).toHaveLength(10);
   });
 
   it("automatically expands a visible event to five publishers and shows rated coverage mix", async () => {
@@ -486,7 +464,7 @@ describe("WorldPulse interactions", () => {
     ).toHaveAttribute("data-bias", "unrated");
   });
 
-  it("uses the same canonical event score and bias mix in country and global views", async () => {
+  it("shows the canonical global occurrence once in Live Situation", async () => {
     const globalHeadline =
       "Heat dome expands across central Canada, creating dangerous conditions for millions";
     const localHeadline =
@@ -597,21 +575,12 @@ describe("WorldPulse interactions", () => {
     expect(
       await within(countryCard!).findByText("5 shown · 7 matched"),
     ).toBeInTheDocument();
-    const countryScore = within(countryCard!).getByText(
-      /^(Major|Significant|Developing|Routine) · \d+$/,
-    ).textContent;
-    const countryMix = within(countryCard!).getByText(/\d+\/5 rated/).textContent;
-
-    fireEvent.click(screen.getByRole("button", { name: "Global feed" }));
-
-    const globalCard = (
-      await screen.findByRole("heading", { name: globalHeadline })
-    ).closest("article");
-    expect(globalCard).not.toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Live Situation" }));
+    const dialog = screen.getByRole("dialog", { name: "Live Situation" });
     expect(
-      within(globalCard!).getByText(countryScore ?? ""),
+      within(dialog).getByRole("heading", { name: globalHeadline }),
     ).toBeInTheDocument();
-    expect(within(globalCard!).getByText(countryMix ?? "")).toBeInTheDocument();
+    expect(within(dialog).getAllByRole("link")).toHaveLength(1);
   });
 
   it("filters the visible events by search", async () => {
@@ -723,8 +692,11 @@ describe("WorldPulse interactions", () => {
     ).toBe(true);
     expect(requestedUrls).toContain("/api/live-news?scope=global");
     expect(
-      await screen.findByRole("button", { name: "Global feed" }),
+      await screen.findByRole("button", { name: "Live Situation" }),
     ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "Global feed" }),
+    ).not.toBeInTheDocument();
   });
 
   it("keeps a country neutral when both map and deep reporting are unavailable", async () => {
@@ -946,9 +918,6 @@ describe("WorldPulse interactions", () => {
     const egyptRequestsBeforeClick = fetchMock.mock.calls.filter(([input]) =>
       String(input).includes("country=Egypt"),
     ).length;
-    fireEvent.click(
-      await screen.findByRole("button", { name: "Global feed" }),
-    );
     fireEvent.change(screen.getByRole("searchbox", { name: "Search news" }), {
       target: { value: "unrelated search" },
     });
@@ -1016,15 +985,15 @@ describe("WorldPulse interactions", () => {
     render(<WorldPulseApp MapComponent={TestMap} />);
 
     expect(
-      await screen.findByText("8/9 country feeds checked"),
+      await screen.findByText("Loading news · 8/9 regions"),
     ).toBeInTheDocument();
     expect(
-      screen.getByRole("heading", { name: "Loading the live world map" }),
+      screen.getByRole("heading", { name: "Preparing the live world" }),
     ).toBeInTheDocument();
     expect(
-      screen.queryByRole("button", { name: "Global feed" }),
+      screen.queryByRole("button", { name: "Live Situation" }),
     ).not.toBeInTheDocument();
-    expect(screen.queryByTestId("countries-with-news")).not.toBeInTheDocument();
+    expect(screen.getByTestId("countries-with-news")).not.toBeVisible();
 
     await act(async () => {
       finishMexico?.();
@@ -1035,7 +1004,7 @@ describe("WorldPulse interactions", () => {
       await screen.findByText("Live country index complete"),
     ).toBeInTheDocument();
     expect(
-      screen.queryByRole("heading", { name: "Loading the live world map" }),
+      screen.queryByRole("heading", { name: "Preparing the live world" }),
     ).not.toBeInTheDocument();
     expect(screen.getByTestId("countries-with-news")).toHaveTextContent("9");
     expect(screen.getByTestId("countries-syncing")).toHaveTextContent("0");
@@ -1372,7 +1341,13 @@ describe("WorldPulse interactions", () => {
     ).toBeInTheDocument();
     expect(screen.getByTestId("countries-syncing")).toHaveTextContent("0");
 
-    fireEvent.click(screen.getByRole("button", { name: "Global feed" }));
+    fireEvent.click(screen.getByRole("button", { name: "Live Situation" }));
+    fireEvent.click(
+      within(screen.getByRole("dialog", { name: "Live Situation" })).getByRole(
+        "button",
+        { name: "Close" },
+      ),
+    );
     expect(screen.getByTestId("canada-map-category")).toHaveTextContent(
       "Conflict and security",
     );

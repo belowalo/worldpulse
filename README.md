@@ -1,8 +1,8 @@
 # WorldPulse
 
-WorldPulse is a production-quality MVP for exploring recent world news through an interactive map. Each country's hue represents the category of its highest-impact active event, while intensity represents a deterministic 0–100 importance estimate. Clicking any mapped country opens its current RSS-indexed headlines, publisher links, timestamps, geographic scope, and a plain-language score explanation.
+WorldPulse is a production-quality MVP for exploring recent world news through an interactive globe. Each country's hue represents the category of its highest-impact active event, while intensity represents a deterministic 0–100 importance estimate. Clicking any mapped country opens its prepared RSS-indexed headlines, publisher links, timestamps, geographic scope, and a plain-language score explanation.
 
-The hosted site keeps its startup screen in place until the country directory, every country signal, the global feed, and the interactive globe have all reached a usable terminal state. Only articles with an explicit country reference are eligible for that country's map signal. Recent valid country snapshots remain available during transient provider outages, while countries with no verified current coverage resolve to an explicit neutral state instead of silently failing. Selected-country refreshes and focused event searches can add newer or broader coverage without blocking the globe. The site reads headline-level public feed metadata and leaves article bodies on publisher websites.
+The hosted site keeps its staged startup screen in place until the country directory, every country signal, the global feed, capital coordinates, and the interactive globe have all reached a usable terminal state. Only articles with an explicit country reference are eligible for that country's map signal. Recent valid country snapshots remain available during transient provider outages, while countries with no verified current coverage resolve to an explicit neutral state instead of silently failing. Country selection reads the in-memory index and does not redraw the full globe texture. Selected-country refreshes and focused event searches can add newer or broader coverage without blocking interaction. The site reads headline-level public feed metadata and leaves article bodies on publisher websites.
 
 ## Screenshots
 
@@ -10,12 +10,12 @@ The deployed application is the preferred live preview. A social preview is avai
 
 ## Architecture
 
-- **Web:** Next.js 16, React 19, strict TypeScript, Tailwind CSS, a lightweight Three.js globe renderer, and local country geometry.
+- **Web:** Next.js 16, React 19, strict TypeScript, Tailwind CSS, an antialiased high-density Three.js globe renderer, local country geometry, and local capital coordinates.
 - **Hosted news API:** A same-origin Cloudflare Worker endpoint queries public RSS indexes, validates and deduplicates articles, and returns country, global, map-summary, and event-coverage feeds.
 - **Hosted cache:** Cloudflare edge caching plus D1 persistence streams a recent live index immediately, refreshes it in the background, and provides resilience for deeper country and event feeds.
 - **Reference API:** FastAPI, Pydantic validation, SQLAlchemy 2, and PostgreSQL remain available for local full-stack development.
 - **Local orchestration:** Docker Compose starts PostgreSQL, migrates and seeds the API, then starts the web app with health checks.
-- **Hosted preview:** The browser starts the bounded batched country sweep and global feed automatically, keeps a detailed readiness screen visible until every request has settled and the globe runtime is prepared, and then reveals the complete interface at once. Stable batch identities, stale-if-error responses, and bounded deep retries preserve recent valid signals through upstream timeouts. Results are occurrence-matched, publisher-deduplicated, and scored as one canonical event record used by the globe, country panel, breaking-news ticker, and global feed. The two uninhabited map areas remain neutral when no current reporting exists.
+- **Hosted preview:** The browser starts the bounded batched country sweep and global feed automatically, keeps a staged readiness screen visible until every request has settled and the HD globe runtime is prepared, and then reveals the complete interface at once. Stable batch identities, stale-if-error responses, and bounded deep retries preserve recent valid signals through upstream timeouts. Results are occurrence-matched and publisher-deduplicated. The globe and country panel use the prepared country index, the right-to-left source feed has been replaced by a left-to-right breaking ticker, and Live Situation presents the ten strongest current global stories with one primary source each. The two uninhabited map areas remain neutral when no current reporting exists.
 
 The web app lives at the repository root to preserve the hosting runtime's required structure. `apps/api` contains the backend. See [architecture.md](docs/architecture.md) for details.
 
@@ -115,17 +115,19 @@ Scores are clamped to 0–100. Labels are `Major` (80–100), `Significant` (60�
 ## Responsible presentation
 
 - Every event links to its underlying attributed sources.
-- Metadata summaries are concise and link directly to the underlying reporting.
+- Metadata summaries are short factual extracts from available feed descriptions and link directly to the underlying reporting.
 - Political reporting uses neutral interface language.
 - Timestamps, source counts, geographic scope, and affected countries are retained.
 - Countries with less digital reporting or fewer accessible sources may appear less active.
 - The map summary and live feeds retain canonical source links and publisher attribution.
+- Cross-border lines appear only after a story is selected and only when at least two countries are explicitly named in its headline evidence.
+- Capital markers are geographic reference points; they do not imply that an event happened in the capital.
 
 ## Current limitations
 
 - Live coverage depends on the upstream RSS index and can be delayed, incomplete, or uneven across countries.
 - Headlines are clustered heuristically; they are not reviewed by a human editor.
-- Country geometry is intentionally low-resolution for fast rendering.
+- Country geometry and globe textures are rendered locally; visual detail is bounded to keep interaction responsive on ordinary devices.
 - No authentication, personalization, alerting, or editorial administration is included.
 - Event clustering and multilingual entity extraction remain heuristic rather than editorially reviewed.
 - Source prominence and country-significance inputs require editorial governance in a real deployment.

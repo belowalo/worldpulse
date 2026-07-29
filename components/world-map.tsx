@@ -16,6 +16,8 @@ export interface WorldMapProps {
   countries: MapCountry[];
   selectedMapId: string | null;
   onSelect: (country: MapCountry) => void;
+  onReady?: () => void;
+  readyForDisplay?: boolean;
   statusLabel?: string;
   linkEvents?: Event[];
 }
@@ -48,8 +50,17 @@ interface GlobeArc {
 }
 
 interface GlobePoint {
+  capital: string;
   color: string;
   country: MapCountry;
+  lat: number;
+  lng: number;
+}
+
+interface CapitalCoordinate {
+  iso2: string | null;
+  iso3: string | null;
+  capital: string;
   lat: number;
   lng: number;
 }
@@ -62,6 +73,7 @@ interface GlobeScene {
   controls: OrbitControls;
   hitCanvas: HTMLCanvasElement;
   hitCountries: Array<MapCountry | undefined>;
+  markerTexture: Three.CanvasTexture;
   points: Three.Points | null;
   raycaster: Three.Raycaster;
   renderer: Three.WebGLRenderer;
@@ -77,8 +89,8 @@ interface HoveredCountry {
   y: number;
 }
 
-const TEXTURE_WIDTH = 1536;
-const TEXTURE_HEIGHT = 768;
+const TEXTURE_WIDTH = 3072;
+const TEXTURE_HEIGHT = 1536;
 const SPHERE_RADIUS = 1;
 const POINT_LIMIT = 90;
 const ARC_LIMIT = 20;
@@ -86,6 +98,7 @@ const ARC_LIMIT = 20;
 let geometryPromise: Promise<WorldFeatureCollection> | null = null;
 let geometryFetchIdentity: typeof fetch | null = null;
 let globeRuntimePromise: Promise<GlobeRuntime> | null = null;
+let capitalsPromise: Promise<CapitalCoordinate[]> | null = null;
 
 export function loadWorldGeometry({
   fresh = false,
@@ -130,8 +143,41 @@ function loadGlobeRuntime() {
   return globeRuntimePromise;
 }
 
+function loadCapitalCoordinates() {
+  if (!capitalsPromise) {
+    capitalsPromise = fetch("/world-capitals.json", {
+      signal: AbortSignal.timeout(20_000),
+    })
+      .then(async (response) => {
+        if (!response.ok) {
+          throw new Error("Capital coordinates are temporarily unavailable.");
+        }
+        return (await response.json()) as CapitalCoordinate[];
+      })
+      .then((capitals) =>
+        capitals.filter(
+          (capital) =>
+            Number.isFinite(capital.lat) &&
+            Number.isFinite(capital.lng) &&
+            capital.capital !== "N/A" &&
+            !(capital.lat === 0 && capital.lng === 0),
+        ),
+      )
+      .catch((error) => {
+        capitalsPromise = null;
+        console.warn("Capital coordinates were unavailable; using country centers.", error);
+        return [];
+      });
+  }
+  return capitalsPromise;
+}
+
 export async function preloadWorldGlobe() {
-  await Promise.all([loadWorldGeometry(), loadGlobeRuntime()]);
+  await Promise.all([
+    loadWorldGeometry(),
+    loadGlobeRuntime(),
+    loadCapitalCoordinates(),
+  ]);
 }
 
 function featureName(feature: WorldFeature) {
@@ -224,13 +270,11 @@ function drawWorldTexture({
   geometry,
   byId,
   byName,
-  selectedMapId,
 }: {
   scene: GlobeScene;
   geometry: WorldFeatureCollection;
   byId: Map<string, MapCountry>;
   byName: Map<string, MapCountry>;
-  selectedMapId: string | null;
 }) {
   const context = scene.textureCanvas.getContext("2d");
   const hitContext = scene.hitCanvas.getContext("2d", {
@@ -239,21 +283,38 @@ function drawWorldTexture({
   if (!context || !hitContext) return;
 
   context.clearRect(0, 0, TEXTURE_WIDTH, TEXTURE_HEIGHT);
-  context.fillStyle = "#07111d";
+  context.imageSmoothingEnabled = true;
+  context.imageSmoothingQuality = "high";
+  const ocean = context.createLinearGradient(0, 0, 0, TEXTURE_HEIGHT);
+  ocean.addColorStop(0, "#0b1d2d");
+  ocean.addColorStop(0.48, "#071522");
+  ocean.addColorStop(1, "#040c15");
+  context.fillStyle = ocean;
   context.fillRect(0, 0, TEXTURE_WIDTH, TEXTURE_HEIGHT);
+  context.beginPath();
+  for (let longitude = -165; longitude <= 165; longitude += 15) {
+    const x = ((longitude + 180) / 360) * TEXTURE_WIDTH;
+    context.moveTo(x, 0);
+    context.lineTo(x, TEXTURE_HEIGHT);
+  }
+  for (let latitude = -75; latitude <= 75; latitude += 15) {
+    const y = ((90 - latitude) / 180) * TEXTURE_HEIGHT;
+    context.moveTo(0, y);
+    context.lineTo(TEXTURE_WIDTH, y);
+  }
+  context.strokeStyle = "rgba(109, 156, 181, 0.1)";
+  context.lineWidth = 1;
+  context.stroke();
   hitContext.clearRect(0, 0, TEXTURE_WIDTH, TEXTURE_HEIGHT);
   scene.hitCountries = [undefined];
 
   geometry.features.forEach((feature) => {
     const country = countryForFeature(feature, byId, byName);
-    const selected = country?.mapId === selectedMapId;
     traceFeature(context, feature);
     context.fillStyle = countryColor(country);
     context.fill("evenodd");
-    context.strokeStyle = selected
-      ? "rgba(245, 255, 255, 0.98)"
-      : "rgba(130, 174, 197, 0.58)";
-    context.lineWidth = selected ? 2.4 : 0.72;
+    context.strokeStyle = "rgba(147, 193, 216, 0.68)";
+    context.lineWidth = 1.25;
     context.stroke();
 
     if (country) {
@@ -298,6 +359,33 @@ function disposeObject(object: Three.Object3D) {
   });
 }
 
+function createCapitalMarkerCanvas() {
+  const canvas = document.createElement("canvas");
+  canvas.width = 96;
+  canvas.height = 96;
+  const context = canvas.getContext("2d");
+  if (!context) return canvas;
+  const glow = context.createRadialGradient(48, 48, 3, 48, 48, 43);
+  glow.addColorStop(0, "rgba(255,255,255,1)");
+  glow.addColorStop(0.16, "rgba(255,255,255,0.95)");
+  glow.addColorStop(0.36, "rgba(255,255,255,0.3)");
+  glow.addColorStop(1, "rgba(255,255,255,0)");
+  context.fillStyle = glow;
+  context.fillRect(0, 0, 96, 96);
+  context.strokeStyle = "rgba(255,255,255,0.92)";
+  context.lineWidth = 3;
+  context.beginPath();
+  context.arc(48, 48, 18, 0, Math.PI * 2);
+  context.stroke();
+  context.save();
+  context.translate(48, 48);
+  context.rotate(Math.PI / 4);
+  context.fillStyle = "rgba(255,255,255,0.96)";
+  context.fillRect(-5, -5, 10, 10);
+  context.restore();
+  return canvas;
+}
+
 function updatePoints(
   runtime: GlobeRuntime,
   globeScene: GlobeScene,
@@ -330,11 +418,15 @@ function updatePoints(
   );
   geometry.setAttribute("color", new runtime.THREE.BufferAttribute(colors, 3));
   const material = new runtime.THREE.PointsMaterial({
-    size: 0.026,
+    size: 0.07,
     sizeAttenuation: true,
     transparent: true,
-    opacity: 0.94,
+    opacity: 0.95,
     vertexColors: true,
+    map: globeScene.markerTexture,
+    alphaTest: 0.025,
+    depthWrite: false,
+    blending: runtime.THREE.AdditiveBlending,
   });
   globeScene.points = new runtime.THREE.Points(geometry, material);
   globeScene.points.renderOrder = 3;
@@ -375,13 +467,22 @@ function updateArcs(
         .multiplyScalar(1.025 + Math.sin(Math.PI * progress) * peak);
       vertices.push(position);
     }
-    const geometry = new runtime.THREE.BufferGeometry().setFromPoints(vertices);
-    const material = new runtime.THREE.LineBasicMaterial({
+    const curve = new runtime.THREE.CatmullRomCurve3(vertices);
+    const geometry = new runtime.THREE.TubeGeometry(
+      curve,
+      64,
+      0.0027,
+      6,
+      false,
+    );
+    const material = new runtime.THREE.MeshBasicMaterial({
       color: arc.color,
       transparent: true,
-      opacity: 0.6,
+      opacity: 0.74,
+      blending: runtime.THREE.AdditiveBlending,
+      depthWrite: false,
     });
-    globeScene.arcs.add(new runtime.THREE.Line(geometry, material));
+    globeScene.arcs.add(new runtime.THREE.Mesh(geometry, material));
   }
   globeScene.scene.add(globeScene.arcs);
 }
@@ -415,6 +516,8 @@ export function WorldMap({
   countries,
   selectedMapId,
   onSelect,
+  onReady,
+  readyForDisplay = true,
   statusLabel = "Live feed · auto-refresh",
   linkEvents = [],
 }: WorldMapProps) {
@@ -423,12 +526,17 @@ export function WorldMap({
   const globeSceneRef = useRef<GlobeScene | null>(null);
   const geometryRef = useRef<WorldFeatureCollection | null>(null);
   const onSelectRef = useRef(onSelect);
+  const onReadyRef = useRef(onReady);
+  const readyNotifiedRef = useRef(false);
   const hoverFrameRef = useRef<number | null>(null);
   const pointerStartRef = useRef({ x: 0, y: 0 });
   const [hovered, setHovered] = useState<HoveredCountry | null>(null);
   const [mapError, setMapError] = useState<string | null>(null);
   const [worldGeometry, setWorldGeometry] =
     useState<WorldFeatureCollection | null>(null);
+  const [capitalCoordinates, setCapitalCoordinates] = useState<
+    CapitalCoordinate[]
+  >([]);
 
   const countryIndex = useMemo(() => {
     const byId = new Map<string, MapCountry>();
@@ -447,14 +555,36 @@ export function WorldMap({
         : ({} as Record<string, MapPosition>),
     [worldGeometry],
   );
+  const capitalIndex = useMemo(() => {
+    const byIso2 = new Map<string, CapitalCoordinate>();
+    const byIso3 = new Map<string, CapitalCoordinate>();
+    for (const capital of capitalCoordinates) {
+      if (capital.iso2) byIso2.set(capital.iso2, capital);
+      if (capital.iso3) byIso3.set(capital.iso3, capital);
+    }
+    return { byIso2, byIso3 };
+  }, [capitalCoordinates]);
+  const connectionCenters = useMemo(() => {
+    const centers = { ...countryCenters };
+    for (const country of countries) {
+      const capital =
+        (country.iso2 ? capitalIndex.byIso2.get(country.iso2) : undefined) ??
+        (country.iso3 ? capitalIndex.byIso3.get(country.iso3) : undefined);
+      if (!capital) continue;
+      const position: MapPosition = [capital.lng, capital.lat];
+      centers[country.name] = position;
+      centers[country.mapId] = position;
+    }
+    return centers;
+  }, [capitalIndex, countries, countryCenters]);
 
   const eventArcs = useMemo<GlobeArc[]>(() => {
-    if (!Object.keys(countryCenters).length) return [];
+    if (!Object.keys(connectionCenters).length) return [];
     return buildEventLinkCollection({
       events: linkEvents,
       countries,
       selectedMapId,
-      centers: countryCenters,
+      centers: connectionCenters,
       maxLinks: ARC_LIMIT,
     }).features.flatMap((feature) => {
       const start = feature.geometry.coordinates[0];
@@ -471,7 +601,7 @@ export function WorldMap({
         },
       ];
     });
-  }, [countries, countryCenters, linkEvents, selectedMapId]);
+  }, [connectionCenters, countries, linkEvents, selectedMapId]);
 
   const signalPoints = useMemo<GlobePoint[]>(
     () =>
@@ -484,27 +614,35 @@ export function WorldMap({
         )
         .slice(0, POINT_LIMIT)
         .flatMap((country) => {
-          const center =
+          const capital =
+            (country.iso2 ? capitalIndex.byIso2.get(country.iso2) : undefined) ??
+            (country.iso3 ? capitalIndex.byIso3.get(country.iso3) : undefined);
+          const fallback =
             countryCenters[country.name] ?? countryCenters[country.mapId];
-          if (!center) return [];
+          if (!capital && !fallback) return [];
           return [
             {
+              capital: capital?.capital ?? country.name,
               color: mapStyleForEvent(
                 country.topEvent?.category,
                 country.topEvent?.importanceScore,
               ).fillColor,
               country,
-              lat: center[1],
-              lng: center[0],
+              lat: capital?.lat ?? fallback?.[1] ?? 0,
+              lng: capital?.lng ?? fallback?.[0] ?? 0,
             },
           ];
         }),
-    [countries, countryCenters],
+    [capitalIndex, countries, countryCenters],
   );
 
   useEffect(() => {
     onSelectRef.current = onSelect;
   }, [onSelect]);
+
+  useEffect(() => {
+    onReadyRef.current = onReady;
+  }, [onReady]);
 
   useEffect(() => {
     const container = containerRef.current;
@@ -513,24 +651,31 @@ export function WorldMap({
     let animationFrame = 0;
     let resizeObserver: ResizeObserver | null = null;
 
-    void Promise.all([loadWorldGeometry(), loadGlobeRuntime()])
-      .then(([geometry, runtime]) => {
+    void Promise.all([
+      loadWorldGeometry(),
+      loadGlobeRuntime(),
+      loadCapitalCoordinates(),
+    ])
+      .then(([geometry, runtime, capitals]) => {
         if (cancelled || !containerRef.current) return;
         runtimeRef.current = runtime;
         geometryRef.current = geometry;
         setWorldGeometry(geometry);
+        setCapitalCoordinates(capitals);
 
         const scene = new runtime.THREE.Scene();
         const camera = new runtime.THREE.PerspectiveCamera(42, 1, 0.1, 100);
         camera.position.set(0, 0.2, 2.55);
         const renderer = new runtime.THREE.WebGLRenderer({
           alpha: true,
-          antialias: false,
+          antialias: true,
           powerPreference: "high-performance",
         });
         renderer.setClearColor(0x000000, 0);
         renderer.outputColorSpace = runtime.THREE.SRGBColorSpace;
-        renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.25));
+        renderer.toneMapping = runtime.THREE.ACESFilmicToneMapping;
+        renderer.toneMappingExposure = 1.08;
+        renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
         containerRef.current.replaceChildren(renderer.domElement);
 
         const textureCanvas = document.createElement("canvas");
@@ -541,24 +686,30 @@ export function WorldMap({
         hitCanvas.height = TEXTURE_HEIGHT;
         const texture = new runtime.THREE.CanvasTexture(textureCanvas);
         texture.colorSpace = runtime.THREE.SRGBColorSpace;
-        texture.minFilter = runtime.THREE.LinearFilter;
+        texture.minFilter = runtime.THREE.LinearMipmapLinearFilter;
         texture.magFilter = runtime.THREE.LinearFilter;
+        texture.generateMipmaps = true;
+        texture.anisotropy = Math.min(
+          8,
+          renderer.capabilities.getMaxAnisotropy(),
+        );
 
         const sphere = new runtime.THREE.Mesh(
-          new runtime.THREE.SphereGeometry(SPHERE_RADIUS, 64, 36),
-          new runtime.THREE.MeshPhongMaterial({
+          new runtime.THREE.SphereGeometry(SPHERE_RADIUS, 160, 96),
+          new runtime.THREE.MeshStandardMaterial({
             map: texture,
             color: 0xffffff,
             emissive: 0x02070d,
-            emissiveIntensity: 0.42,
-            shininess: 4,
+            emissiveIntensity: 0.22,
+            roughness: 0.72,
+            metalness: 0.08,
           }),
         );
         sphere.rotation.y = -Math.PI / 2;
         scene.add(sphere);
 
         const atmosphere = new runtime.THREE.Mesh(
-          new runtime.THREE.SphereGeometry(1.08, 48, 28),
+          new runtime.THREE.SphereGeometry(1.075, 96, 64),
           new runtime.THREE.MeshBasicMaterial({
             color: 0x5b9dbe,
             transparent: true,
@@ -567,10 +718,13 @@ export function WorldMap({
           }),
         );
         scene.add(atmosphere);
-        scene.add(new runtime.THREE.HemisphereLight(0xa8d8e8, 0x07111d, 2.1));
-        const light = new runtime.THREE.DirectionalLight(0xffffff, 1.6);
+        scene.add(new runtime.THREE.HemisphereLight(0xbdeeff, 0x06101a, 1.9));
+        const light = new runtime.THREE.DirectionalLight(0xe8fbff, 2.2);
         light.position.set(-3, 4, 5);
         scene.add(light);
+        const rimLight = new runtime.THREE.DirectionalLight(0x4f9dba, 1.25);
+        rimLight.position.set(4, -2, -3);
+        scene.add(rimLight);
 
         const controls = new runtime.OrbitControls(
           camera,
@@ -591,6 +745,9 @@ export function WorldMap({
           controls,
           hitCanvas,
           hitCountries: [undefined],
+          markerTexture: new runtime.THREE.CanvasTexture(
+            createCapitalMarkerCanvas(),
+          ),
           points: null,
           raycaster: new runtime.THREE.Raycaster(),
           renderer,
@@ -605,7 +762,6 @@ export function WorldMap({
           geometry,
           byId: new Map(),
           byName: new Map(),
-          selectedMapId: null,
         });
 
         const resize = () => {
@@ -635,6 +791,8 @@ export function WorldMap({
       .catch(() => {
         if (!cancelled) {
           setMapError("The interactive globe could not start on this device.");
+          readyNotifiedRef.current = true;
+          onReadyRef.current?.();
         }
       });
 
@@ -649,6 +807,7 @@ export function WorldMap({
       if (globeScene) {
         globeScene.controls.dispose();
         disposeObject(globeScene.scene);
+        globeScene.markerTexture.dispose();
         globeScene.texture.dispose();
         globeScene.renderer.dispose();
       }
@@ -662,18 +821,21 @@ export function WorldMap({
   useEffect(() => {
     const globeScene = globeSceneRef.current;
     const geometry = geometryRef.current;
-    if (!globeScene || !geometry) return;
+    if (!globeScene || !geometry || !readyForDisplay) return;
     const timeout = window.setTimeout(() => {
       drawWorldTexture({
         scene: globeScene,
         geometry,
         byId: countryIndex.byId,
         byName: countryIndex.byName,
-        selectedMapId,
       });
-    }, 40);
+      if (readyForDisplay && !readyNotifiedRef.current) {
+        readyNotifiedRef.current = true;
+        window.requestAnimationFrame(() => onReadyRef.current?.());
+      }
+    }, 120);
     return () => window.clearTimeout(timeout);
-  }, [countryIndex, selectedMapId, worldGeometry]);
+  }, [countryIndex, readyForDisplay, worldGeometry]);
 
   useEffect(() => {
     const runtime = runtimeRef.current;
@@ -711,11 +873,12 @@ export function WorldMap({
 
   const handlePointerMove = (event: React.PointerEvent<HTMLDivElement>) => {
     const { clientX, clientY } = event;
+    const currentTarget = event.currentTarget;
     if (hoverFrameRef.current != null) return;
     hoverFrameRef.current = window.requestAnimationFrame(() => {
       hoverFrameRef.current = null;
       const country = locateCountry(clientX, clientY);
-      const bounds = event.currentTarget.getBoundingClientRect();
+      const bounds = currentTarget.getBoundingClientRect();
       setHovered(
         country
           ? {
@@ -775,13 +938,6 @@ export function WorldMap({
         aria-live="polite"
       >
         {statusLabel}
-      </div>
-      <div className="pointer-events-none absolute bottom-28 left-4 z-10 hidden items-center gap-3 rounded-full border border-[#273548] bg-[#07101a]/82 px-3 py-2 font-mono text-[9px] uppercase tracking-[0.15em] text-[#8392a6] sm:flex">
-        <span className="inline-flex items-center gap-1.5">
-          <span className="h-2 w-2 rounded-full bg-[#73e2cc] shadow-[0_0_10px_#73e2cc]" />
-          Verified signal
-        </span>
-        <span>Three.js / WebGL</span>
       </div>
       {hovered ? (
         <div

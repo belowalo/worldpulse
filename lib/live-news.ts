@@ -18,6 +18,62 @@ import type {
   NewsSource,
 } from "./types";
 
+const SUMMARY_BOILERPLATE =
+  /^(?:expanded topic search|current reporting indexed|current reporting from|browse current|open the source|the displayed reports|live coverage)/i;
+
+function cleanFeedText(value: string) {
+  return value
+    .replace(/<[^>]+>/g, " ")
+    .replace(/&nbsp;/gi, " ")
+    .replace(/&amp;/gi, "&")
+    .replace(/&quot;/gi, '"')
+    .replace(/&#39;|&apos;/gi, "'")
+    .replace(/&lt;/gi, "<")
+    .replace(/&gt;/gi, ">")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function truncateSummary(value: string, maxLength = 180) {
+  if (value.length <= maxLength) return value;
+  const shortened = value.slice(0, maxLength - 1);
+  const wordBoundary = shortened.lastIndexOf(" ");
+  return `${shortened.slice(0, Math.max(80, wordBoundary))}…`;
+}
+
+function conciseEventSummary(
+  articles: LiveArticle[],
+  headline: string,
+  fallback = "",
+) {
+  const normalizedHeadline = cleanFeedText(headline).toLowerCase();
+  const candidates = articles
+    .map((article) => cleanFeedText(article.description ?? ""))
+    .filter(
+      (description) =>
+        description.length >= 35 &&
+        !SUMMARY_BOILERPLATE.test(description) &&
+        description.toLowerCase() !== normalizedHeadline,
+    )
+    .sort((left, right) => {
+      const leftComplete = /[.!?]$/.test(left) ? 1 : 0;
+      const rightComplete = /[.!?]$/.test(right) ? 1 : 0;
+      return rightComplete - leftComplete || left.length - right.length;
+    });
+  const candidate = candidates[0];
+  if (candidate) {
+    const firstSentence =
+      candidate.match(/^.*?[.!?](?:\s|$)/)?.[0]?.trim() ?? candidate;
+    return truncateSummary(firstSentence);
+  }
+  const cleanedFallback = cleanFeedText(fallback);
+  if (cleanedFallback && !SUMMARY_BOILERPLATE.test(cleanedFallback)) {
+    return truncateSummary(cleanedFallback);
+  }
+  const cleanedHeadline = cleanFeedText(headline).replace(/[.!?]+$/, "");
+  return truncateSummary(`${cleanedHeadline}.`);
+}
+
 const CATEGORY_TERMS: Array<[Category, string[]]> = [
   [
     "Conflict and security",
@@ -1153,12 +1209,26 @@ export function mergeCanonicalEvents(
     ),
   };
   const scoring = calculateImportance(scoringInput);
+  const normalizedHeadline = cleanFeedText(canonicalEvent.headline).toLowerCase();
+  const summary =
+    [canonicalEvent.summary, duplicateEvent.summary]
+      .map(cleanFeedText)
+      .filter((candidate) => candidate && !SUMMARY_BOILERPLATE.test(candidate))
+      .sort((left, right) => {
+        const leftRepeatsHeadline =
+          left.replace(/[.!?]+$/, "").toLowerCase() ===
+          normalizedHeadline.replace(/[.!?]+$/, "");
+        const rightRepeatsHeadline =
+          right.replace(/[.!?]+$/, "").toLowerCase() ===
+          normalizedHeadline.replace(/[.!?]+$/, "");
+        return (
+          Number(leftRepeatsHeadline) - Number(rightRepeatsHeadline) ||
+          left.length - right.length
+        );
+      })[0] ?? `${cleanFeedText(canonicalEvent.headline).replace(/[.!?]+$/, "")}.`;
   return {
     ...canonicalEvent,
-    summary:
-      independentSourceCount > 1
-        ? `${independentSourceCount} independent publishers matched this occurrence. The displayed reports prioritize viewpoint diversity, publisher prominence, and recency.`
-        : canonicalEvent.summary,
+    summary: truncateSummary(summary),
     geographicScope:
       affectedCountries.length > 1
         ? "International"
@@ -1359,17 +1429,7 @@ export function buildLiveEvents(
         ageHours: youngestAge,
         articlesPerHour: Math.max(0.2, cluster.length / 6),
       });
-      const publisherNames = visibleSourceArticles.map(
-        (article) => article.publisherName,
-      );
-      const summary =
-        sources.size > 1
-          ? `${sources.size} independent publishers matched this occurrence, including ${publisherNames.join(
-              ", ",
-            )}. The displayed reports prioritize viewpoint diversity, publisher prominence, and recency.`
-          : `Current reporting indexed from ${
-              publisherNames[0] ?? "the original publisher"
-            }. Open the source for the complete report.`;
+      const summary = conciseEventSummary(cluster, headline);
       const orderedDates = cluster
         .map((article) => article.publishedAt)
         .sort((left, right) => Date.parse(left) - Date.parse(right));
@@ -1486,10 +1546,11 @@ export function enrichEventWithCoverage(
 
   return {
     ...event,
-    summary:
-      matchedPublisherCount > 1
-        ? `Expanded topic search matched ${matchedPublisherCount} independent publishers. The ${visibleArticles.length} displayed reports prioritize left, right, and center-rated publishers when available, then publisher prominence and recency.`
-        : "Expanded topic search found one matching publisher in the current seven-day window.",
+    summary: conciseEventSummary(
+      matchingCoverage,
+      event.headline,
+      event.summary,
+    ),
     matchedPublisherCount,
     articles: visibleArticles,
   };

@@ -58,6 +58,7 @@ select:focus-visible {
   display: block;
   outline: none;
   touch-action: none;
+  image-rendering: auto;
 }
 
 .world-globe-tooltip {
@@ -155,10 +156,165 @@ select:focus-visible {
 
 @keyframes breaking-news-scroll {
   from {
-    transform: translate3d(0, 0, 0);
+    transform: translate3d(-50%, 0, 0);
   }
   to {
-    transform: translate3d(-50%, 0, 0);
+    transform: translate3d(0, 0, 0);
+  }
+}
+
+.loading-command-center {
+  isolation: isolate;
+  background:
+    radial-gradient(circle at 50% 44%, rgba(64, 147, 143, 0.12), transparent 26rem),
+    linear-gradient(145deg, #03070d 0%, #07111c 52%, #040810 100%);
+}
+
+.loading-grid {
+  opacity: 0.22;
+  background-image:
+    linear-gradient(rgba(115, 226, 204, 0.08) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(115, 226, 204, 0.08) 1px, transparent 1px);
+  background-size: 42px 42px;
+  mask-image: radial-gradient(circle at center, black, transparent 72%);
+}
+
+.loading-glow {
+  background: rgba(60, 165, 154, 0.08);
+  filter: blur(55px);
+  animation: loading-breathe 4.8s ease-in-out infinite;
+}
+
+.loading-orbit {
+  position: relative;
+  display: grid;
+  place-items: center;
+  filter: drop-shadow(0 0 28px rgba(115, 226, 204, 0.16));
+}
+
+.loading-orbit__ring {
+  position: absolute;
+  inset: 0;
+  border: 1px solid rgba(115, 226, 204, 0.28);
+  border-radius: 50%;
+}
+
+.loading-orbit__ring::before,
+.loading-orbit__ring::after {
+  position: absolute;
+  width: 0.46rem;
+  height: 0.46rem;
+  border-radius: 999px;
+  background: #b4fff0;
+  box-shadow: 0 0 16px rgba(115, 226, 204, 0.9);
+  content: "";
+}
+
+.loading-orbit__ring::before {
+  left: 14%;
+  top: 18%;
+}
+
+.loading-orbit__ring::after {
+  bottom: 10%;
+  right: 19%;
+}
+
+.loading-orbit__ring--outer {
+  animation: loading-orbit 7s linear infinite;
+}
+
+.loading-orbit__ring--inner {
+  inset: 1.15rem;
+  border-color: rgba(105, 139, 255, 0.34);
+  transform: rotateX(66deg) rotateZ(18deg);
+  animation: loading-orbit-reverse 5s linear infinite;
+}
+
+.loading-orbit__ring--inner::before,
+.loading-orbit__ring--inner::after {
+  background: #8ba8ff;
+  box-shadow: 0 0 14px rgba(105, 139, 255, 0.9);
+}
+
+.loading-orbit__globe {
+  position: relative;
+  width: 7.7rem;
+  height: 7.7rem;
+  overflow: hidden;
+  border: 1px solid rgba(157, 214, 221, 0.56);
+  border-radius: 50%;
+  background:
+    radial-gradient(circle at 34% 28%, rgba(184, 255, 242, 0.2), transparent 22%),
+    radial-gradient(circle at 68% 67%, rgba(43, 110, 125, 0.34), transparent 43%),
+    #0b1c29;
+  box-shadow:
+    inset -18px -15px 35px rgba(0, 0, 0, 0.56),
+    inset 8px 8px 20px rgba(121, 220, 203, 0.09),
+    0 0 30px rgba(115, 226, 204, 0.18);
+}
+
+.loading-orbit__longitude,
+.loading-orbit__latitude {
+  position: absolute;
+  inset: 8%;
+  border: 1px solid rgba(115, 226, 204, 0.25);
+  border-radius: 50%;
+}
+
+.loading-orbit__longitude {
+  left: 32%;
+  right: 32%;
+}
+
+.loading-orbit__latitude {
+  top: 36%;
+  bottom: 36%;
+}
+
+.loading-orbit__scan {
+  position: absolute;
+  left: -15%;
+  right: -15%;
+  height: 2px;
+  background: linear-gradient(90deg, transparent, #aaffee, transparent);
+  box-shadow: 0 0 12px rgba(115, 226, 204, 0.95);
+  animation: loading-scan 2.8s ease-in-out infinite;
+}
+
+@keyframes loading-orbit {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes loading-orbit-reverse {
+  to {
+    transform: rotateX(66deg) rotateZ(-342deg);
+  }
+}
+
+@keyframes loading-scan {
+  0%,
+  100% {
+    top: 20%;
+    opacity: 0.2;
+  }
+  50% {
+    top: 80%;
+    opacity: 1;
+  }
+}
+
+@keyframes loading-breathe {
+  0%,
+  100% {
+    opacity: 0.65;
+    transform: translate(-50%, -50%) scale(0.92);
+  }
+  50% {
+    opacity: 1;
+    transform: translate(-50%, -50%) scale(1.06);
   }
 }
 
@@ -169,6 +325,13 @@ select:focus-visible {
 
 @media (prefers-reduced-motion: reduce) {
   .breaking-news-track {
+    animation: none;
+  }
+
+  .loading-glow,
+  .loading-orbit__ring--outer,
+  .loading-orbit__ring--inner,
+  .loading-orbit__scan {
     animation: none;
   }
 

@@ -35,7 +35,6 @@ import {
 import {
   countryPulses,
   defaultCountry,
-  flagEmoji,
 } from "@/lib/seed-data";
 import { calculateImportance, categoryColor } from "@/lib/scoring";
 import {
@@ -91,6 +90,7 @@ const EMPTY_FEED: FeedState = {
 const MAX_REMEMBERED_COUNTRY_FEEDS = 8;
 const INITIAL_VISIBLE_EVENT_LIMIT = 40;
 const MAP_BATCH_SIZE = 8;
+const INITIAL_MAP_CONCURRENCY = 6;
 const LIVE_REQUEST_TIMEOUT_MS = 30_000;
 
 function rememberCountryFeed(
@@ -126,12 +126,6 @@ function coverageForEvent(
         eventsDescribeSameOccurrence(coverage.event, event),
     )
   );
-}
-
-function feedIsFresh(feed: FeedState, lifetimeMs = 300_000) {
-  if (!feed.updatedAt) return false;
-  const updatedAt = Date.parse(feed.updatedAt);
-  return Number.isFinite(updatedAt) && Date.now() - updatedAt < lifetimeMs;
 }
 
 const countryMetadata = countryPulses.map(
@@ -220,6 +214,7 @@ function ImportancePill({ event }: { event: Event }) {
 
 function EventCard({
   event,
+  hasConnections,
   connectionFocused,
   coverageLoading,
   coverageError,
@@ -228,6 +223,7 @@ function EventCard({
   onVisible,
 }: {
   event: Event;
+  hasConnections: boolean;
   connectionFocused: boolean;
   coverageLoading: boolean;
   coverageError: string | null;
@@ -237,7 +233,6 @@ function EventCard({
 }) {
   const [expanded, setExpanded] = useState(false);
   const cardRef = useRef<HTMLElement | null>(null);
-  const hasConnections = event.affectedCountries.length > 1;
   const bias = biasDistributionForArticles(event.articles);
   const hasFullBiasRange =
     bias.left > 0 && bias.center > 0 && bias.right > 0;
@@ -543,7 +538,7 @@ function MethodologyModal({ onClose }: { onClose: () => void }) {
 
   return (
     <div
-      className="fixed inset-0 z-50 grid place-items-center bg-black/70 p-4"
+      className="fixed inset-0 z-50 grid place-items-center bg-black/75 p-4 backdrop-blur-md"
       role="dialog"
       aria-modal="true"
       aria-labelledby="methodology-title"
@@ -551,34 +546,35 @@ function MethodologyModal({ onClose }: { onClose: () => void }) {
         if (event.target === event.currentTarget) onClose();
       }}
     >
-      <section className="max-h-[85vh] w-full max-w-xl overflow-y-auto rounded-2xl border border-[#344157] bg-[#111927] p-6 shadow-2xl">
+      <section className="max-h-[88vh] w-full max-w-2xl overflow-y-auto rounded-2xl border border-[#344157] bg-[#0e1724] p-6 shadow-2xl">
         <div className="flex items-start justify-between gap-4">
           <div>
             <p className="font-mono text-[10px] uppercase tracking-[0.2em] text-[#73e2cc]">
-              About the signal
+              How WorldPulse works
             </p>
             <h2
               id="methodology-title"
               className="mt-2 text-2xl font-semibold tracking-[-0.04em]"
             >
-              Importance, with context
+              Transparent signals, careful limits
             </h2>
           </div>
           <button
             type="button"
             onClick={onClose}
             autoFocus
-            aria-label="Close methodology"
             className="rounded-full border border-[#3a4659] px-3 py-1.5 text-sm text-[#cad2dd] hover:bg-[#1a2537]"
           >
             Close
           </button>
         </div>
         <p className="mt-5 text-sm leading-6 text-[#b5bfcd]">
-          WorldPulse estimates impact on a 0–100 scale. It is a transparent
-          editorial aid, not an objective fact or a judgment about human worth.
+          WorldPulse groups public headline metadata into developing events and
+          estimates their relative impact on a 0–100 scale. The score is an
+          orientation tool, not an objective fact or a judgment about human
+          worth.
         </p>
-        <div className="mt-5 space-y-3">
+        <div className="mt-5 grid gap-3 sm:grid-cols-2">
           {[
             ["25%", "Independent sources and source-country diversity"],
             ["25%", "Countries affected and their relative significance"],
@@ -588,43 +584,169 @@ function MethodologyModal({ onClose }: { onClose: () => void }) {
           ].map(([weight, text]) => (
             <div
               key={text}
-              className="flex gap-4 rounded-lg bg-[#182234] px-4 py-3"
+              className="flex gap-4 rounded-xl border border-[#26354a] bg-[#152132] px-4 py-3"
             >
               <span className="w-10 font-mono text-xs text-[#73e2cc]">
                 {weight}
               </span>
-              <span className="text-xs text-[#d0d8e3]">{text}</span>
+              <span className="text-xs leading-5 text-[#d0d8e3]">{text}</span>
             </div>
           ))}
         </div>
-        <p className="mt-5 text-xs leading-5 text-[#8996a8]">
-          WorldPulse checks current local and international search results for
-          every country before opening the map. The completed live index
-          supplies each country panel, so clicking a country does not start
-          another search. Focused event searches and manual refreshes can add
-          broader coverage afterward.
-        </p>
-        <p className="mt-3 text-xs leading-5 text-[#8996a8]">
-          Coverage is uneven. Countries with less digital reporting or fewer
-          accessible sources may appear neutral until a current match is
-          available. Publication volume alone is never treated as importance.
-          Categories are inferred from the wording used across the matched
-          reporting. Headlines, dates, publisher names, and links come from
-          public feed metadata; article bodies remain on publisher websites.
-        </p>
-        <p className="mt-3 text-xs leading-5 text-[#8996a8]">
-          Visible events automatically run exact, keyword, and
-          viewpoint-targeted topic searches across local and international news
-          results. WorldPulse groups rewritten headlines into one occurrence,
-          deduplicates publishers by identity, and displays up to five recent
-          matches.
-          Publisher lean labels use a checked Ground News ratings snapshot
-          (July 26, 2026). They describe publications—not individual articles
-          or the event—use a U.S.-political reference frame, and exclude
-          unrated publishers from the percentage bar. When available, source
-          selection includes left- and right-rated publishers before filling
-          remaining slots with center-rated reporting.
-        </p>
+        <div className="mt-6 space-y-4 text-xs leading-5 text-[#8996a8]">
+          <p>
+            Before the interface opens, WorldPulse prepares the globe, global
+            situation feed, and a terminal result for every mapped country.
+            Country selection then reads the prepared index instead of
+            launching another world-scale request. Manual refreshes and focused
+            story searches are bounded and run independently.
+          </p>
+          <p>
+            Reports enter a country feed only when that country is explicitly
+            identified in available headline metadata. A country with no
+            current verified match stays neutral; WorldPulse does not invent a
+            story to fill the map. Coverage can still be uneven where
+            accessible digital reporting is limited.
+          </p>
+          <p>
+            Similar headlines are clustered conservatively, publishers are
+            deduplicated by identity, and event summaries are short extracts
+            from available feed descriptions rather than generated claims. The
+            globe draws a connection only after a story is selected and only
+            when at least two countries are explicitly named in that story’s
+            headline evidence. Capital markers are geographic reference points,
+            not claims that an event occurred in the capital.
+          </p>
+          <p>
+            Publisher lean labels use a checked Ground News ratings snapshot
+            dated July 26, 2026. They describe publications—not individual
+            articles or events—use a U.S.-political reference frame, and exclude
+            unrated publishers from percentage calculations. Where available,
+            source selection broadens viewpoint representation before using
+            prominence and recency as tie-breakers.
+          </p>
+        </div>
+      </section>
+    </div>
+  );
+}
+
+function LiveSituationModal({
+  events,
+  onClose,
+}: {
+  events: Event[];
+  onClose: () => void;
+}) {
+  useEffect(() => {
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") onClose();
+    };
+    window.addEventListener("keydown", closeOnEscape);
+    return () => window.removeEventListener("keydown", closeOnEscape);
+  }, [onClose]);
+
+  const stories = events.slice(0, 10);
+  return (
+    <div
+      className="fixed inset-0 z-50 overflow-y-auto bg-[#050910]/95 p-4 backdrop-blur-xl sm:p-7"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="live-situation-title"
+    >
+      <section className="mx-auto w-full max-w-6xl">
+        <div className="flex items-start justify-between gap-5 border-b border-[#28364a] pb-5">
+          <div>
+            <p className="font-mono text-[9px] uppercase tracking-[0.24em] text-[#ff727d]">
+              Updated live
+            </p>
+            <h2
+              id="live-situation-title"
+              className="mt-2 text-3xl font-semibold tracking-[-0.045em] text-white"
+            >
+              Live Situation
+            </h2>
+            <p className="mt-2 max-w-2xl text-sm leading-6 text-[#92a0b3]">
+              The ten strongest current global stories, with one primary source
+              per story for a fast, uncluttered briefing.
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            autoFocus
+            className="rounded-full border border-[#3a4659] px-4 py-2 text-xs text-[#cad2dd] transition hover:bg-[#1a2537]"
+          >
+            Close
+          </button>
+        </div>
+        {stories.length ? (
+          <div className="mt-6 grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+            {stories.map((event, index) => {
+              const source = event.articles[0];
+              const content = (
+                <>
+                  <div className="flex items-center justify-between gap-3">
+                    <span className="font-mono text-[9px] uppercase tracking-[0.18em] text-[#718197]">
+                      Situation {String(index + 1).padStart(2, "0")}
+                    </span>
+                    <span
+                      className="rounded-full border px-2 py-1 font-mono text-[8px] uppercase tracking-[0.12em]"
+                      style={{
+                        borderColor: `${categoryColor(event.category)}70`,
+                        color: categoryColor(event.category),
+                      }}
+                    >
+                      {event.importanceLabel} · {event.importanceScore}
+                    </span>
+                  </div>
+                  <div
+                    className="mt-5 h-px w-12"
+                    style={{ background: categoryColor(event.category) }}
+                  />
+                  <h3
+                    dir="auto"
+                    className="mt-4 text-lg font-semibold leading-snug tracking-[-0.025em] text-white"
+                  >
+                    {event.headline}
+                  </h3>
+                  <p
+                    dir="auto"
+                    className="mt-3 line-clamp-3 text-xs leading-5 text-[#a9b4c3]"
+                  >
+                    {event.summary}
+                  </p>
+                  <div className="mt-6 flex items-center justify-between gap-3 border-t border-[#263449] pt-4 font-mono text-[8px] uppercase tracking-[0.12em] text-[#718197]">
+                    <span>{source?.source.publisherName ?? event.category}</span>
+                    <span>{formatTime(event.lastUpdatedAt)}</span>
+                  </div>
+                </>
+              );
+              return source?.originalUrl ? (
+                <a
+                  key={event.id}
+                  href={source.originalUrl}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="min-h-64 rounded-2xl border border-[#2a394e] bg-[linear-gradient(145deg,#121d2d,#0b131f)] p-5 shadow-[0_18px_60px_rgba(0,0,0,0.22)] transition hover:-translate-y-0.5 hover:border-[#52667f]"
+                >
+                  {content}
+                </a>
+              ) : (
+                <article
+                  key={event.id}
+                  className="min-h-64 rounded-2xl border border-[#2a394e] bg-[linear-gradient(145deg,#121d2d,#0b131f)] p-5"
+                >
+                  {content}
+                </article>
+              );
+            })}
+          </div>
+        ) : (
+          <div className="mt-6 rounded-2xl border border-dashed border-[#34445a] p-12 text-center text-sm text-[#8996a8]">
+            The live situation feed is still settling. Try again shortly.
+          </div>
+        )}
       </section>
     </div>
   );
@@ -727,77 +849,119 @@ function WorldLoadingScreen({
   globeReady: boolean;
   settled: boolean;
 }) {
-  const countryProgress = total
-    ? Math.min(1, checked / total) * 90
-    : 0;
+  const newsProgress = total ? Math.min(1, checked / total) : 0;
   const progress = Math.max(
-    2,
+    3,
     Math.min(
       settled && globalReady && globeReady ? 100 : 99,
       Math.round(
-        countryProgress +
-          (globalReady ? 4 : 0) +
-          (globeReady ? 4 : 0) +
+        newsProgress * 86 +
+          (globalReady ? 5 : 0) +
+          (globeReady ? 7 : 0) +
           (settled ? 2 : 0),
       ),
     ),
   );
   const retrying = checked >= total && failed > 0;
-  const stage = !globeReady
-    ? "Preparing the interactive 3D globe"
-    : !globalReady
-      ? "Verifying the global breaking-news feed"
-      : checked < total
-        ? `${checked}/${total} country feeds checked`
-        : retrying
-          ? `Rechecking ${failed} feeds · pass ${pass}`
-          : "Finalizing every country and interaction";
+  const stage =
+    checked < total
+      ? `Loading news · ${checked}/${total} regions`
+      : retrying
+        ? `Verifying ${failed} remaining feeds · pass ${pass}`
+        : !globalReady
+          ? "Preparing the live situation"
+          : !globeReady
+            ? "Rendering the globe"
+            : "Finalizing the intelligence desk";
+  const steps = [
+    {
+      label: "Loading global news",
+      detail: globalReady ? "Ready" : "In progress",
+      ready: globalReady,
+    },
+    {
+      label: "Indexing every country",
+      detail: `${checked}/${total || "—"}`,
+      ready: settled,
+    },
+    {
+      label: "Rendering the HD globe",
+      detail: globeReady ? "Ready" : "In progress",
+      ready: globeReady,
+    },
+  ];
 
   return (
     <main
-      className="grid min-h-screen place-items-center overflow-hidden bg-[#080d15] px-6"
+      className="loading-command-center relative grid min-h-screen place-items-center overflow-hidden bg-[#040810] px-6"
       aria-busy="true"
     >
-      <section className="relative w-full max-w-lg text-center">
-        <div
-          className="absolute left-1/2 top-4 h-56 w-56 -translate-x-1/2 rounded-full border border-[#2d4b55] opacity-60 shadow-[0_0_80px_rgba(115,226,204,0.12)]"
-          aria-hidden="true"
-        />
-        <div
-          className="absolute left-1/2 top-11 h-[10.5rem] w-[10.5rem] -translate-x-1/2 rounded-full border border-dashed border-[#3b6670] opacity-70"
-          aria-hidden="true"
-        />
-        <div className="relative mx-auto grid h-20 w-20 place-items-center rounded-full border border-[#4d6572] bg-[#13232a] text-3xl text-[#73e2cc] shadow-[0_0_45px_rgba(115,226,204,0.18)]">
-          ◉
+      <div className="loading-grid absolute inset-0" aria-hidden="true" />
+      <div className="loading-glow absolute left-1/2 top-1/2 h-[34rem] w-[34rem] -translate-x-1/2 -translate-y-1/2 rounded-full" />
+      <section className="relative z-10 w-full max-w-3xl">
+        <div className="grid items-center gap-10 md:grid-cols-[230px_1fr]">
+          <div className="loading-orbit mx-auto h-52 w-52" aria-hidden="true">
+            <div className="loading-orbit__ring loading-orbit__ring--outer" />
+            <div className="loading-orbit__ring loading-orbit__ring--inner" />
+            <div className="loading-orbit__globe">
+              <div className="loading-orbit__longitude" />
+              <div className="loading-orbit__latitude" />
+              <div className="loading-orbit__scan" />
+            </div>
+          </div>
+          <div>
+            <p className="font-mono text-[9px] uppercase tracking-[0.28em] text-[#73e2cc]">
+              WorldPulse intelligence network
+            </p>
+            <h1 className="mt-3 text-3xl font-semibold tracking-[-0.05em] text-white sm:text-4xl">
+              Preparing the live world
+            </h1>
+            <p className="mt-3 max-w-lg text-sm leading-6 text-[#8e9caf]">
+              News, geography, and interaction data are being prepared together
+              so the interface opens complete and ready to use.
+            </p>
+            <div className="mt-7 space-y-2">
+              {steps.map((step) => (
+                <div
+                  key={step.label}
+                  className="flex items-center justify-between gap-4 rounded-xl border border-[#203044] bg-[#09121e]/80 px-4 py-3"
+                >
+                  <span className="flex items-center gap-3 text-xs text-[#c4ceda]">
+                    <span
+                      className={`h-2 w-2 rounded-full ${
+                        step.ready
+                          ? "bg-[#73e2cc] shadow-[0_0_12px_#73e2cc]"
+                          : "animate-pulse bg-[#53647a]"
+                      }`}
+                    />
+                    {step.label}
+                  </span>
+                  <span className="font-mono text-[8px] uppercase tracking-[0.14em] text-[#738197]">
+                    {step.detail}
+                  </span>
+                </div>
+              ))}
+            </div>
+          </div>
         </div>
-        <p className="relative mt-8 font-mono text-[10px] uppercase tracking-[0.24em] text-[#73e2cc]">
-          WorldPulse live verification
-        </p>
-        <h1 className="relative mt-3 text-3xl font-semibold tracking-[-0.045em] text-white">
-          Loading the live world map
-        </h1>
-        <p className="relative mx-auto mt-3 max-w-md text-sm leading-6 text-[#9eabba]">
-          WorldPulse will open only when every country, the breaking-news feed,
-          and the interactive globe are fully prepared.
-        </p>
-        <div className="relative mt-8 overflow-hidden rounded-full bg-[#1b2737]">
-          <div
-            className="h-2 rounded-full bg-gradient-to-r from-[#2f8b82] via-[#73e2cc] to-[#a7fff0] transition-[width] duration-300"
-            style={{ width: `${progress}%` }}
-          />
+        <div className="mt-10">
+          <div className="flex items-center justify-between gap-4 font-mono text-[9px] uppercase tracking-[0.14em] text-[#8090a5]">
+            <span role="status" aria-live="polite">
+              {stage}
+            </span>
+            <span>{progress}%</span>
+          </div>
+          <div className="mt-3 h-1 overflow-hidden rounded-full bg-[#192638]">
+            <div
+              className="h-full rounded-full bg-[linear-gradient(90deg,#2e817a,#73e2cc,#d4fff7)] shadow-[0_0_18px_rgba(115,226,204,0.5)] transition-[width] duration-300"
+              style={{ width: `${progress}%` }}
+            />
+          </div>
+          <div className="mt-3 flex justify-between gap-4 text-[10px] text-[#65758a]">
+            <span>{matched} countries with current coverage</span>
+            <span>Nothing opens partially loaded</span>
+          </div>
         </div>
-        <div
-          className="relative mt-3 flex items-center justify-between gap-3 font-mono text-[9px] uppercase tracking-[0.13em] text-[#8290a3]"
-          role="status"
-          aria-live="polite"
-        >
-          <span>{stage}</span>
-          <span>{progress}% ready · {matched} countries with coverage</span>
-        </div>
-        <p className="relative mt-7 text-[11px] leading-5 text-[#718095]">
-          Nothing is revealed early. No-result and temporarily unavailable
-          feeds are settled into clear terminal states before the globe opens.
-        </p>
       </section>
     </main>
   );
@@ -842,6 +1006,7 @@ export function WorldPulseApp({
   const [timeRange, setTimeRange] = useState<TimeFilter>("7 days");
   const [search, setSearch] = useState("");
   const [showMethodology, setShowMethodology] = useState(false);
+  const [showLiveSituation, setShowLiveSituation] = useState(false);
   const [visibleEventLimit, setVisibleEventLimit] = useState(
     INITIAL_VISIBLE_EVENT_LIMIT,
   );
@@ -980,23 +1145,16 @@ export function WorldPulseApp({
 
   useEffect(() => {
     if (!liveUpdates) return;
-    let cancelled = false;
     if (MapComponent === WorldMap) {
       void preloadWorldGlobe()
         .catch(() => {
           // A terminal preload failure is handled by the globe's own
           // retry/error state. It must not trap the user here forever.
-        })
-        .finally(() => {
-          if (!cancelled) setGlobeReady(true);
         });
     } else {
       setGlobeReady(true);
     }
     void fetchGlobalNews();
-    return () => {
-      cancelled = true;
-    };
   }, [MapComponent, fetchGlobalNews, liveUpdates]);
 
   useEffect(() => {
@@ -1241,7 +1399,10 @@ export function WorldPulseApp({
       await Promise.all(
         Array.from(
           {
-            length: Math.min(forceFresh ? 2 : 4, batches.length),
+            length: Math.min(
+              forceFresh ? 2 : INITIAL_MAP_CONCURRENCY,
+              batches.length,
+            ),
           },
           () => worker(),
         ),
@@ -1753,14 +1914,9 @@ export function WorldPulseApp({
     (event) => event.id === connectionEventId,
   );
   const visibleEvents = filteredEvents.slice(0, visibleEventLimit);
-  const mapLinkEvents =
-    connectionEventId !== null
-      ? focusedConnectionEvent
-        ? [focusedConnectionEvent]
-        : []
-      : globalView
-        ? []
-        : filteredEvents;
+  const mapLinkEvents = focusedConnectionEvent
+    ? [focusedConnectionEvent]
+    : [];
   const breakingEvents = useMemo(() => {
     const candidates = globalFeed.events.length
       ? globalFeed.events
@@ -1777,8 +1933,20 @@ export function WorldPulseApp({
         seen.add(event.id);
         return true;
       })
-      .slice(0, 6);
+      .slice(0, 10);
   }, [globalFeed.events, mapCountries]);
+  const situationEvents = useMemo(
+    () =>
+      [...globalFeed.events]
+        .sort(
+          (left, right) =>
+            right.importanceScore - left.importanceScore ||
+            Date.parse(right.lastUpdatedAt) -
+              Date.parse(left.lastUpdatedAt),
+        )
+        .slice(0, 10),
+    [globalFeed.events],
+  );
 
   const handleSelect = useCallback((country: MapCountry) => {
     const resolvedCountry =
@@ -1818,10 +1986,14 @@ export function WorldPulseApp({
     startCountryTransition,
   ]);
   const handleEventActivate = (event: Event) => {
-    if (event.affectedCountries.length > 1) {
+    const hasExplicitConnections =
+      countriesMentionedByEvent(event, mapCountries).length > 1;
+    if (hasExplicitConnections) {
       setConnectionEventId((current) =>
         current === event.id ? null : event.id,
       );
+    } else {
+      setConnectionEventId(null);
     }
     const coverage = coverageForEvent(event, eventCoverage);
     if (!coverage?.loading && !coverageIsFresh(coverage)) {
@@ -1867,28 +2039,33 @@ export function WorldPulseApp({
       ? `Indexing countries · ${worldLoad.loaded}/${countryDirectory.length}`
       : `Rechecking ${worldLoad.retrying} country signals · pass ${worldLoad.pass}`;
 
-  if (!initialWorldReady) {
-    return (
-      <WorldLoadingScreen
-        checked={worldLoad.loaded}
-        matched={mapCountries.filter((country) => country.topEvent).length}
-        total={worldLoad.total || countryDirectory.length}
-        failed={worldLoad.retrying}
-        pass={worldLoad.pass}
-        globalReady={globalFeedReady}
-        globeReady={globeReady}
-        settled={worldScanSettled}
-      />
-    );
-  }
-
   return (
-    <main className="min-h-screen bg-[#080d15]">
+    <>
+      {!initialWorldReady ? (
+        <WorldLoadingScreen
+          checked={worldLoad.loaded}
+          matched={mapCountries.filter((country) => country.topEvent).length}
+          total={worldLoad.total || countryDirectory.length}
+          failed={worldLoad.retrying}
+          pass={worldLoad.pass}
+          globalReady={globalFeedReady}
+          globeReady={globeReady}
+          settled={worldScanSettled}
+        />
+      ) : null}
+      <main
+        className="min-h-screen bg-[#080d15]"
+        hidden={!initialWorldReady}
+        aria-hidden={!initialWorldReady || undefined}
+      >
       <BreakingNewsBar events={breakingEvents} />
       <header className="sticky top-9 z-40 flex h-16 items-center justify-between border-b border-[#222d3e] bg-[#080d15]/95 px-3 backdrop-blur sm:px-6">
         <div className="flex items-center gap-3">
-          <div className="grid h-8 w-8 place-items-center rounded-full border border-[#4d6572] bg-[#13232a] text-sm text-[#73e2cc]">
-            ◉
+          <div
+            className="relative h-8 w-8 rounded-full border border-[#4d6572] bg-[#13232a] shadow-[inset_0_0_0_6px_#0b151f,0_0_18px_rgba(115,226,204,0.12)]"
+            aria-hidden="true"
+          >
+            <span className="absolute inset-[11px] rounded-full bg-[#73e2cc]" />
           </div>
           <div>
             <div className="text-sm font-semibold tracking-[-0.02em]">
@@ -1902,32 +2079,10 @@ export function WorldPulseApp({
         <nav className="flex items-center gap-2" aria-label="Main navigation">
           <button
             type="button"
-            onClick={() => {
-              const nextGlobalView = !globalView;
-              setGlobalView(nextGlobalView);
-              setVisibleEventLimit(INITIAL_VISIBLE_EVENT_LIMIT);
-              if (
-                nextGlobalView &&
-                liveUpdates &&
-                !globalFeed.loading &&
-                !feedIsFresh(globalFeed)
-              ) {
-                void fetchGlobalNews();
-              }
-              setConnectionEventId(null);
-              setCategory("All");
-              setImportance("All");
-              setTimeRange("7 days");
-              setSearch("");
-            }}
-            aria-pressed={globalView}
-            className={`whitespace-nowrap rounded-full border px-2.5 py-2 text-[10px] transition sm:px-4 ${
-              globalView
-                ? "border-[#73e2cc] bg-[#14332f] text-[#b7fff1]"
-                : "border-[#344157] text-[#c5cfdb] hover:bg-[#151f30]"
-            }`}
+            onClick={() => setShowLiveSituation(true)}
+            className="whitespace-nowrap rounded-full border border-[#88414a] bg-[#2b141b] px-2.5 py-2 text-[10px] text-[#ffc5ca] transition hover:border-[#d45f69] hover:bg-[#3a1820] sm:px-4"
           >
-            {globalView ? "Country feed" : "Global feed"}
+            Live Situation
           </button>
           <button
             type="button"
@@ -1945,6 +2100,8 @@ export function WorldPulseApp({
             countries={mapCountries}
             selectedMapId={globalView ? null : selectedCountry.mapId}
             onSelect={handleSelect}
+            onReady={() => setGlobeReady(true)}
+            readyForDisplay={worldIndexComplete && globalFeedReady}
             linkEvents={mapLinkEvents}
             statusLabel={worldStatusLabel}
           />
@@ -1957,7 +2114,8 @@ export function WorldPulseApp({
                 <span>Intensity = estimated importance</span>
                 <span className="inline-flex items-center gap-1.5">
                   <span className="h-2 w-5 rounded-[50%] border-t-2 border-[#d8fff7] shadow-[0_0_6px_#73e2cc]" />
-                  Curves = cross-border events; select a card to isolate one
+                  Connections appear only for a selected story with explicit
+                  cross-border evidence
                 </span>
               </div>
             </div>
@@ -1993,12 +2151,11 @@ export function WorldPulseApp({
             <div className="flex items-start justify-between gap-4">
               <div>
                 <div className="flex items-center gap-2">
-                  <span className="text-2xl" aria-hidden="true">
-                    {globalView
-                      ? "🌐"
-                      : activeCountry.iso2
-                        ? flagEmoji(activeCountry.iso2)
-                        : "◎"}
+                  <span
+                    className="grid h-8 min-w-8 place-items-center rounded-lg border border-[#34455b] bg-[#172233] px-1.5 font-mono text-[9px] uppercase tracking-[0.12em] text-[#73e2cc]"
+                    aria-hidden="true"
+                  >
+                    {activeCountry.iso2 ?? "WP"}
                   </span>
                   <h2 className="text-xl font-semibold tracking-[-0.035em]">
                     {globalView ? "Global events" : activeCountry.name}
@@ -2149,6 +2306,9 @@ export function WorldPulseApp({
                   <EventCard
                     key={event.id}
                     event={event}
+                    hasConnections={
+                      countriesMentionedByEvent(event, mapCountries).length > 1
+                    }
                     connectionFocused={connectionEventId === event.id}
                     coverageLoading={
                       coverageForEvent(event, eventCoverage)?.loading ?? false
@@ -2184,7 +2344,10 @@ export function WorldPulseApp({
             ) : (
               <div className="grid min-h-60 place-items-center rounded-xl border border-dashed border-[#354157] p-8 text-center">
                 <div>
-                  <div className="text-2xl text-[#59687d]">◎</div>
+                  <div
+                    className="mx-auto h-8 w-8 rounded-full border border-[#59687d] shadow-[inset_0_0_0_8px_#101722]"
+                    aria-hidden="true"
+                  />
                   <h3 className="mt-3 text-sm font-medium">
                     {noRecentEvents
                       ? "No events in the last 7 days"
@@ -2246,6 +2409,13 @@ export function WorldPulseApp({
       {showMethodology ? (
         <MethodologyModal onClose={() => setShowMethodology(false)} />
       ) : null}
-    </main>
+      {showLiveSituation ? (
+        <LiveSituationModal
+          events={situationEvents}
+          onClose={() => setShowLiveSituation(false)}
+        />
+      ) : null}
+      </main>
+    </>
   );
 }

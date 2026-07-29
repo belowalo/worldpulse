@@ -367,7 +367,9 @@ describe("live news normalization", () => {
     expect(events).toHaveLength(1);
     expect(events[0].articles).toHaveLength(5);
     expect(events[0].scoringInput.independentSourceCount).toBe(6);
-    expect(events[0].summary).toContain("6 independent publishers");
+    expect(events[0].summary).toBe(
+      "The latest attack involved military facilities in Iran and the United States.",
+    );
   });
 
   it("matches rewritten country and global headlines to one occurrence", () => {
@@ -537,7 +539,10 @@ describe("live news normalization", () => {
     expect(expanded.importanceLabel).toBe(event.importanceLabel);
     expect(expanded.scoringComponents).toEqual(event.scoringComponents);
     expect(expanded.scoringInput).toEqual(event.scoringInput);
-    expect(expanded.summary).toContain("Expanded topic search matched 6");
+    expect(expanded.summary).toBe(
+      "Canada wildfire response expands across western provinces.",
+    );
+    expect(expanded.summary).not.toMatch(/publishers|expanded topic search/i);
     expect(
       new Set(
         expanded.articles.map((article) => article.source.publisherName),
@@ -630,7 +635,9 @@ describe("live news normalization", () => {
       expanded.articles.map((article) => article.source.publisherName),
     ).toEqual(expect.arrayContaining(["BBC News", "Reuters"]));
     expect(expanded.articles).toHaveLength(2);
-    expect(expanded.summary).toContain("2 independent publishers");
+    expect(expanded.summary).toBe(
+      "The dispute concerns the opening celebration for a Canada-US bridge.",
+    );
   });
 
   it("builds a Ground News publisher mix and excludes unrated outlets", () => {

@@ -30,9 +30,3 @@ export const defaultCountry = "CA";
 export function countryByIso(iso2: string) {
   return countryPulses.find((country) => country.iso2 === iso2);
 }
-
-export function flagEmoji(iso2: string) {
-  return [...iso2.toUpperCase()]
-    .map((character) => String.fromCodePoint(127397 + character.charCodeAt(0)))
-    .join("");
-}
