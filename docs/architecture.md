@@ -28,7 +28,7 @@ The web app is at the repository root because the deployable Sites runtime expec
 ## Web boundaries
 
 - `components/world-map.tsx` owns the lean Three.js/WebGL lifecycle, high-density canvas country texture and hit map, orbit controls, capital signal markers, selected-story arcs, hover, and selection.
-- `components/world-pulse-app.tsx` owns startup readiness, filters, country selection, the breaking-news ticker, image-backed Live Situation briefing, switchable Live News video screen, event cards, and methodology.
+- `components/world-pulse-app.tsx` owns startup readiness, filters, country selection, the breaking-news ticker, image-backed Live Situation briefing, story-specific Live News video screen, event cards, and methodology.
 - `lib/globe-runtime.ts` is the dynamically loaded, tree-shaken Three.js runtime boundary.
 - `lib/scoring.ts` is UI-independent and contains score labels plus reusable category/intensity globe styling.
 - `lib/live-news.ts` classifies and clusters live headline metadata into scored events.
@@ -40,7 +40,7 @@ The globe supports pointer navigation and direct country selection across all 21
 
 Startup keeps the staged readiness screen visible while one cached world snapshot, the global feed, globe runtime, country geometry, and capital index load in parallel. Every country resolves to a verified signal or a truthful terminal neutral state before the interface opens. That response populates both the color signal and country panel, avoiding a 215-country request storm. Background refresh slices reuse persisted snapshots, and recent valid signals survive transient provider failures.
 
-Ten-minute active-feed updates and periodic full-world refreshes keep signals current. Country selection is local, selected-country refreshes remain focused, and concurrent event-coverage searches are capped so clicks cannot trigger an unbounded request cascade. The map receives no connection data on country selection; a line is produced only after a story is selected and at least two countries are explicitly present in the story and article headlines.
+Ten-minute active-feed updates and periodic full-world refreshes keep signals current. Country selection is local, but selecting a country whose prepared snapshot has no current event requests one forced, focused refresh so a neutral startup result cannot permanently suppress later coverage. Concurrent event-coverage searches are capped so clicks cannot trigger an unbounded request cascade. The map receives no connection data on country selection; a line is produced only after a story is selected and at least two countries are explicitly present in the story and article headlines.
 
 ## API boundaries
 
@@ -57,7 +57,7 @@ FastAPI exposes OpenAPI documentation at `/docs` and its schema at `/openapi.jso
 
 Articles remain separate from events. An event can have many articles, each with one source. Events have a primary country and many affected countries through `event_countries`. This supports future clustering without inflating event importance from duplicate articles.
 
-The hosted worker also stores successful JSON feed snapshots in D1 by normalized request identity. Edge cache hits younger than five minutes return immediately. Recent map snapshots can be served stale while a background refresh runs, and a forced refresh merges current results with still-valid stored articles rather than replacing good signals with transient empty responses. Selected-country, global, and event queries use the same stale-while-refresh and stale-if-error behavior for temporary upstream resilience.
+The hosted worker also stores successful JSON feed snapshots in D1 by normalized request identity. Edge cache hits younger than five minutes return immediately. Recent map snapshots can be served stale while a background refresh runs, and a forced refresh merges current results with still-valid stored articles rather than replacing good signals with transient empty responses. Selected-country, global, and event queries use the same stale-while-refresh and stale-if-error behavior for temporary upstream resilience. The `/api/live-video` route is a short-lived, on-demand lookup: it searches the selected headline with YouTube's live filter, accepts only currently live video results with sufficient headline-token overlap, ranks them by viewer count and relevance, and returns an empty list instead of forcing an unrelated feed.
 
 ## Failure behavior
 
@@ -65,4 +65,4 @@ The API validates pagination bounds and returns a consistent `{"error": ...}` en
 
 ## Deployment
 
-Docker Compose is the full local reference deployment. The hosted app packages the Next.js surface, cached feed-metadata proxy, and D1 migration as a Cloudflare-compatible worker. A readiness screen remains above the interface until the country directory, full world sweep, global feed, capital index, and globe runtime are all prepared. Country relevance is checked before a result enters the prepared signal shared by the panel and globe. The breaking ticker, twelve-story Live Situation briefing, and Live News topic selector read the global event feed without exposing a second global-feed panel. RSS media metadata is retained when providers publish a safe article image. Live video loads only after the viewer opens Live News, keeping the primary experience lean. Missing current coverage stays neutral.
+Docker Compose is the full local reference deployment. The hosted app packages the Next.js surface, cached feed-metadata proxy, and D1 migration as a Cloudflare-compatible worker. A readiness screen remains above the interface until the country directory, full world sweep, global feed, capital index, and globe runtime are all prepared. Country relevance is checked before a result enters the prepared signal shared by the panel and globe. The breaking ticker, twelve-story Live Situation briefing, and Live News story selector read the global event feed without exposing a second global-feed panel. RSS media metadata is retained when providers publish a safe article image. Live video lookup begins only after the viewer opens Live News and is repeated when the selected story changes, keeping primary startup lean while ensuring the player follows the story. If no relevant active broadcast is found, the screen says so explicitly. Missing current article coverage stays neutral but visibly distinct from the ocean.

@@ -266,6 +266,24 @@ describe("WorldPulse interactions", () => {
       if (url.includes("scope=map")) {
         return liveMapResponse(url);
       }
+      if (url.startsWith("/api/live-video")) {
+        return Response.json({
+          headline,
+          generatedAt: "2026-07-25T00:00:00.000Z",
+          videos: [
+            {
+              id: "testlive001",
+              title: `${headline} live`,
+              channelName: "Example Live",
+              viewerCount: 1250,
+              thumbnailUrl: "https://i.ytimg.com/vi/testlive001/hqdefault.jpg",
+              watchUrl: "https://www.youtube.com/watch?v=testlive001",
+              embedUrl:
+                "https://www.youtube-nocookie.com/embed/testlive001?autoplay=1&mute=1&playsinline=1",
+            },
+          ],
+        });
+      }
       const countryName =
         new URL(url, "https://worldpulse.test").searchParams.get(
           "country",
@@ -306,14 +324,110 @@ describe("WorldPulse interactions", () => {
     fireEvent.click(screen.getByRole("button", { name: "Live News" }));
     const liveNewsDialog = screen.getByRole("dialog", { name: "Live News" });
     expect(
-      within(liveNewsDialog).getByTitle("Al Jazeera English live news"),
+      await within(liveNewsDialog).findByTitle(
+        `Example Live: ${headline} live`,
+      ),
     ).toHaveAttribute(
       "src",
-      expect.stringContaining("youtube-nocookie.com/embed/live_stream"),
+      expect.stringContaining("youtube-nocookie.com/embed/testlive001"),
     );
     expect(
-      within(liveNewsDialog).getByText("Other live feeds"),
+      within(liveNewsDialog).getByText("Available live feeds"),
     ).toBeInTheDocument();
+  });
+
+  it("changes Live News coverage with the selected story and shows an explicit empty state", async () => {
+    const coveredHeadline =
+      "Trump meets Netanyahu at the White House summit";
+    const uncoveredHeadline =
+      "Australia expands a remote coastal rail project";
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === "/countries.geojson") {
+        return Response.json({
+          features: [{ id: "124", properties: { name: "Canada" } }],
+        });
+      }
+      if (url.includes("scope=map")) return liveMapResponse(url);
+      if (url.startsWith("/api/live-video")) {
+        const requestedHeadline = new URL(
+          url,
+          "https://worldpulse.test",
+        ).searchParams.get("headline");
+        return Response.json({
+          headline: requestedHeadline,
+          generatedAt: "2026-07-25T00:00:00.000Z",
+          videos:
+            requestedHeadline === coveredHeadline
+              ? [
+                  {
+                    id: "covered001",
+                    title: `${coveredHeadline} live`,
+                    channelName: "World News Live",
+                    viewerCount: 2400,
+                    watchUrl:
+                      "https://www.youtube.com/watch?v=covered001",
+                    embedUrl:
+                      "https://www.youtube-nocookie.com/embed/covered001?autoplay=1&mute=1&playsinline=1",
+                  },
+                ]
+              : [],
+        });
+      }
+      return Response.json({
+        countryName: null,
+        scope: "global",
+        generatedAt: "2026-07-25T00:00:00.000Z",
+        refreshAfterSeconds: 600,
+        provider: "Test live index",
+        articles: [
+          {
+            id: "covered-story",
+            title: coveredHeadline,
+            url: "https://publisher-one.example/covered",
+            publisherName: "Publisher One",
+            publisherUrl: "https://publisher-one.example/",
+            publishedAt: "2026-07-25T00:00:00.000Z",
+          },
+          {
+            id: "uncovered-story",
+            title: uncoveredHeadline,
+            url: "https://publisher-two.example/uncovered",
+            publisherName: "Publisher Two",
+            publisherUrl: "https://publisher-two.example/",
+            publishedAt: "2026-07-25T00:01:00.000Z",
+          },
+        ],
+      });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<WorldPulseApp MapComponent={TestMap} />);
+    fireEvent.click(await screen.findByRole("button", { name: "Live News" }));
+    const dialog = screen.getByRole("dialog", { name: "Live News" });
+
+    fireEvent.click(
+      within(dialog).getByRole("button", {
+        name: new RegExp(coveredHeadline),
+      }),
+    );
+    expect(
+      await within(dialog).findByTitle(
+        `World News Live: ${coveredHeadline} live`,
+      ),
+    ).toBeInTheDocument();
+
+    fireEvent.click(
+      within(dialog).getByRole("button", {
+        name: new RegExp(uncoveredHeadline),
+      }),
+    );
+    expect(
+      await within(dialog).findByText(
+        "No active live coverage for this story",
+      ),
+    ).toBeInTheDocument();
+    expect(within(dialog).queryByTitle(/World News Live/)).not.toBeInTheDocument();
   });
 
   it("limits Live Situation to the twelve strongest global stories", async () => {
@@ -812,6 +926,18 @@ describe("WorldPulse interactions", () => {
         String(input).includes("scope=global"),
       ),
     ).toBe(true);
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "Select Spain on map" }),
+    );
+    await waitFor(() =>
+      expect(
+        fetchMock.mock.calls.some(([input]) => {
+          const url = String(input);
+          return url.includes("country=Spain") && url.includes("fresh=1");
+        }),
+      ).toBe(true),
+    );
   });
 
   it("offers older indexed reporting when the default window is empty", async () => {
@@ -1003,11 +1129,15 @@ describe("WorldPulse interactions", () => {
     expect(screen.getByRole("searchbox", { name: "Search news" })).toHaveValue(
       "",
     );
+    const egyptRequestsAfterClick = fetchMock.mock.calls.filter(([input]) =>
+      String(input).includes("country=Egypt"),
+    );
+    expect(egyptRequestsAfterClick).toHaveLength(egyptRequestsBeforeClick + 1);
     expect(
-      fetchMock.mock.calls.filter(([input]) =>
-        String(input).includes("country=Egypt"),
+      egyptRequestsAfterClick.some(([input]) =>
+        String(input).includes("fresh=1"),
       ),
-    ).toHaveLength(egyptRequestsBeforeClick);
+    ).toBe(true);
   });
 
   it("keeps the loading screen up until the complete country index is ready", async () => {

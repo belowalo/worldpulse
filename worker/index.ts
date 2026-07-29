@@ -8,6 +8,7 @@ import {
 } from "../db/news-cache";
 import { mergeCachedPayloads } from "./live-cache";
 import { handleLiveNews, isLikelyEnglishHeadline } from "./live-news";
+import { handleLiveVideo } from "./live-video";
 
 interface Env {
   ASSETS: Fetcher;
@@ -404,6 +405,10 @@ const worker = {
         return handleWorldSnapshot(request, env, ctx);
       }
       return handleCachedLiveNews(request, env, ctx);
+    }
+
+    if (url.pathname === "/api/live-video") {
+      return handleLiveVideo(request);
     }
 
     if (url.pathname === "/_vinext/image") {

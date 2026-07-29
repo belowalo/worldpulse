@@ -164,6 +164,11 @@ select:focus-visible {
   box-shadow: 0 0 0 0 rgba(255, 89, 100, 0.36);
 }
 
+.live-news-button-pulse {
+  animation: world-live-pulse 1.8s ease-in-out infinite;
+  box-shadow: 0 0 0 0 rgba(255, 89, 100, 0.36);
+}
+
 .world-live-status__dot {
   box-shadow: 0 0 8px rgba(255, 255, 255, 0.85);
 }
@@ -361,7 +366,8 @@ select:focus-visible {
     animation: breaking-news-scroll 42s linear infinite !important;
   }
 
-  .world-live-status {
+  .world-live-status,
+  .live-news-button-pulse {
     animation: world-live-pulse 1.8s ease-in-out infinite !important;
   }
 }

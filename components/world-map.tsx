@@ -184,8 +184,9 @@ function featureName(feature: WorldFeature) {
 }
 
 function countryColor(country?: MapCountry) {
-  if (!country?.topEvent) {
-    return country?.signalReady === false ? "#273443" : "#192634";
+  if (!country) return "#213749";
+  if (!country.topEvent) {
+    return country.signalReady === false ? "#3a5064" : "#31566d";
   }
   return mapStyleForEvent(
     country.topEvent.category,

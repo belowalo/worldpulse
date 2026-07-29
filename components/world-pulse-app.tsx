@@ -787,96 +787,216 @@ function LiveSituationModal({
   );
 }
 
-interface LiveNewsChannel {
+interface LiveVideo {
   id: string;
-  name: string;
-  channelId: string;
-  channelUrl: string;
-  publisherMatches: string[];
+  title: string;
+  channelName: string;
+  viewerCount: number;
+  thumbnailUrl?: string;
+  watchUrl: string;
+  embedUrl: string;
 }
 
-const LIVE_NEWS_CHANNELS: LiveNewsChannel[] = [
-  {
-    id: "al-jazeera",
-    name: "Al Jazeera English",
-    channelId: "UCNye-wNBqNL5ZzHSJj3l8Bg",
-    channelUrl: "https://www.youtube.com/@aljazeeraenglish/live",
-    publisherMatches: ["al jazeera"],
-  },
-  {
-    id: "sky-news",
-    name: "Sky News",
-    channelId: "UCoMdktPbSTixAyNGwb-UYkQ",
-    channelUrl: "https://www.youtube.com/@SkyNews/live",
-    publisherMatches: ["sky news"],
-  },
-  {
-    id: "bbc-news",
-    name: "BBC News",
-    channelId: "UC16niRr50-MSBwiO3YDb3RA",
-    channelUrl: "https://www.youtube.com/@BBCNews/live",
-    publisherMatches: ["bbc", "bbc news"],
-  },
-  {
-    id: "dw-news",
-    name: "DW News",
-    channelId: "UCknLrEdhRCp1aegoMqRaCZg",
-    channelUrl: "https://www.youtube.com/@dwnews/live",
-    publisherMatches: ["deutsche welle", "dw", "dw news"],
-  },
-  {
-    id: "france-24",
-    name: "France 24 English",
-    channelId: "UCQfwfsi5VrQ8yKZ-UWmAEFg",
-    channelUrl: "https://www.youtube.com/@France24_en/live",
-    publisherMatches: ["france 24"],
-  },
-  {
-    id: "nbc-news",
-    name: "NBC News",
-    channelId: "UCeY0bbntWzzVIaj2z3QigXg",
-    channelUrl: "https://www.youtube.com/@NBCNews/live",
-    publisherMatches: ["nbc", "nbc news"],
-  },
-  {
-    id: "abc-news",
-    name: "ABC News",
-    channelId: "UCBi2mrWuNuyYy4gbM6fU18Q",
-    channelUrl: "https://www.youtube.com/@ABCNews/live",
-    publisherMatches: ["abc", "abc news"],
-  },
-  {
-    id: "cbs-news",
-    name: "CBS News",
-    channelId: "UC8p1vwvWtl6T73JiExfWs1g",
-    channelUrl: "https://www.youtube.com/@CBSNews/live",
-    publisherMatches: ["cbs", "cbs news"],
-  },
-];
-
-function normalizedPublisher(value: string) {
-  return value.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, " ").trim();
+interface LiveVideoState {
+  loading: boolean;
+  error: string | null;
+  videos: LiveVideo[];
+  selectedVideoId: string;
 }
 
-function channelsForBreakingEvent(event?: Event) {
-  if (!event) return LIVE_NEWS_CHANNELS;
-  const publishers = event.articles.map((article) =>
-    normalizedPublisher(article.source.publisherName),
-  );
-  return [...LIVE_NEWS_CHANNELS].sort((left, right) => {
-    const leftMatch = left.publisherMatches.some((match) =>
-      publishers.some((publisher) => publisher.includes(match)),
-    );
-    const rightMatch = right.publisherMatches.some((match) =>
-      publishers.some((publisher) => publisher.includes(match)),
-    );
-    return Number(rightMatch) - Number(leftMatch);
+function formatViewerCount(value: number) {
+  return new Intl.NumberFormat("en", {
+    notation: value >= 1_000 ? "compact" : "standard",
+    maximumFractionDigits: 1,
+  }).format(value);
+}
+
+function LiveNewsCoverage({ event }: { event: Event }) {
+  const [coverage, setCoverage] = useState<LiveVideoState>({
+    loading: true,
+    error: null,
+    videos: [],
+    selectedVideoId: "",
   });
-}
 
-function liveStorySearchUrl(event: Event, channel: LiveNewsChannel) {
-  const query = encodeURIComponent(`${event.headline} ${channel.name} live`);
-  return `https://www.youtube.com/results?search_query=${query}&sp=EgJAAQ%253D%253D`;
+  useEffect(() => {
+    const controller = new AbortController();
+    void fetch(
+      `/api/live-video?headline=${encodeURIComponent(event.headline)}`,
+      { signal: controller.signal },
+    )
+      .then(async (response) => {
+        const payload = (await response.json()) as {
+          error?: string;
+          videos?: LiveVideo[];
+        };
+        if (!response.ok) {
+          throw new Error(
+            payload.error ?? "Live coverage could not be checked right now.",
+          );
+        }
+        const videos = payload.videos ?? [];
+        setCoverage({
+          loading: false,
+          error: null,
+          videos,
+          selectedVideoId: videos[0]?.id ?? "",
+        });
+      })
+      .catch((error) => {
+        if (controller.signal.aborted) return;
+        setCoverage({
+          loading: false,
+          error:
+            error instanceof Error
+              ? error.message
+              : "Live coverage could not be checked right now.",
+          videos: [],
+          selectedVideoId: "",
+        });
+      });
+    return () => controller.abort();
+  }, [event.headline]);
+
+  if (coverage.loading) {
+    return (
+      <div
+        className="mt-5 grid min-h-[420px] place-items-center rounded-2xl border border-[#313d50] bg-[#080e17]"
+        aria-busy="true"
+      >
+        <div className="text-center">
+          <div className="mx-auto h-7 w-7 animate-spin rounded-full border-2 border-[#4e5e73] border-t-[#ff6874]" />
+          <p className="mt-4 font-mono text-[9px] uppercase tracking-[0.18em] text-[#8290a3]">
+            Checking active live coverage
+          </p>
+        </div>
+      </div>
+    );
+  }
+
+  if (coverage.error) {
+    return (
+      <div className="mt-5 grid min-h-[360px] place-items-center rounded-2xl border border-[#4a3037] bg-[#140c11] px-6 text-center">
+        <div>
+          <p className="text-lg font-semibold text-white">
+            Live coverage could not be checked
+          </p>
+          <p className="mt-2 text-xs leading-5 text-[#a9999f]">
+            {coverage.error}
+          </p>
+        </div>
+      </div>
+    );
+  }
+
+  if (!coverage.videos.length) {
+    return (
+      <div className="mt-5 grid min-h-[360px] place-items-center rounded-2xl border border-[#343f50] bg-[#09111c] px-6 text-center">
+        <div className="max-w-lg">
+          <div className="mx-auto h-3 w-3 rounded-full bg-[#5d6979]" />
+          <p className="mt-4 text-xl font-semibold text-white">
+            No active live coverage for this story
+          </p>
+          <p className="mt-2 text-xs leading-5 text-[#8996a8]">
+            No currently live YouTube news feed closely matches this headline.
+            Select another breaking story to continue.
+          </p>
+        </div>
+      </div>
+    );
+  }
+
+  const selectedVideo =
+    coverage.videos.find((video) => video.id === coverage.selectedVideoId) ??
+    coverage.videos[0];
+
+  return (
+    <div className="mt-5 grid gap-5 lg:grid-cols-[minmax(0,1fr)_340px]">
+      <div className="overflow-hidden rounded-2xl border border-[#313d50] bg-black shadow-2xl">
+        <div className="aspect-video">
+          <iframe
+            key={`${event.id}-${selectedVideo.id}`}
+            className="h-full w-full"
+            src={selectedVideo.embedUrl}
+            title={`${selectedVideo.channelName}: ${selectedVideo.title}`}
+            allow="autoplay; encrypted-media; picture-in-picture"
+            allowFullScreen
+          />
+        </div>
+        <div className="flex flex-wrap items-center justify-between gap-3 border-t border-[#2a3445] bg-[#0a101a] px-4 py-3">
+          <div className="min-w-0">
+            <div className="font-mono text-[8px] uppercase tracking-[0.16em] text-[#ff7480]">
+              Most watched matching live feed
+            </div>
+            <div className="mt-1 truncate text-sm font-semibold text-white">
+              {selectedVideo.channelName}
+            </div>
+            <div className="mt-1 line-clamp-1 text-[10px] text-[#8996a8]">
+              {selectedVideo.title}
+            </div>
+          </div>
+          <a
+            href={selectedVideo.watchUrl}
+            target="_blank"
+            rel="noreferrer"
+            className="rounded-full border border-[#3a4659] px-3 py-2 text-[10px] text-[#cad2dd] transition hover:bg-[#182335]"
+          >
+            Open YouTube
+          </a>
+        </div>
+      </div>
+
+      <aside className="rounded-2xl border border-[#273549] bg-[#09111c] p-4">
+        <p className="font-mono text-[9px] uppercase tracking-[0.2em] text-[#718197]">
+          Available live feeds
+        </p>
+        <div className="mt-3 space-y-2">
+          {coverage.videos.map((video) => (
+            <button
+              type="button"
+              key={video.id}
+              onClick={() =>
+                setCoverage((current) => ({
+                  ...current,
+                  selectedVideoId: video.id,
+                }))
+              }
+              className={`w-full overflow-hidden rounded-xl border text-left transition ${
+                video.id === selectedVideo.id
+                  ? "border-[#b94552] bg-[#32151d] text-white"
+                  : "border-[#253247] bg-[#0d1724] text-[#b8c2cf] hover:border-[#4b5c73]"
+              }`}
+            >
+              {video.thumbnailUrl ? (
+                <div
+                  aria-hidden="true"
+                  className="h-16 w-full bg-cover bg-center opacity-65"
+                  style={{
+                    backgroundImage: `linear-gradient(90deg, rgba(7,12,20,0.08), rgba(7,12,20,0.72)), url("${video.thumbnailUrl}")`,
+                  }}
+                />
+              ) : null}
+              <div className="px-3 py-2.5">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-xs font-medium">
+                    {video.channelName}
+                  </span>
+                  <span className="shrink-0 font-mono text-[8px] uppercase text-[#ff7a84]">
+                    {video.viewerCount
+                      ? `${formatViewerCount(video.viewerCount)} watching`
+                      : "Live"}
+                  </span>
+                </div>
+                <span className="mt-1 line-clamp-2 block text-[10px] leading-4 text-[#8f9caf]">
+                  {video.title}
+                </span>
+              </div>
+            </button>
+          ))}
+        </div>
+      </aside>
+    </div>
+  );
 }
 
 function LiveNewsModal({
@@ -892,13 +1012,6 @@ function LiveNewsModal({
   );
   const selectedEvent =
     stories.find((event) => event.id === selectedEventId) ?? stories[0];
-  const orderedChannels = channelsForBreakingEvent(selectedEvent);
-  const [selectedChannelId, setSelectedChannelId] = useState(
-    orderedChannels[0]?.id ?? "",
-  );
-  const selectedChannel =
-    orderedChannels.find((channel) => channel.id === selectedChannelId) ??
-    orderedChannels[0];
 
   useEffect(() => {
     const closeOnEscape = (event: KeyboardEvent) => {
@@ -928,8 +1041,8 @@ function LiveNewsModal({
               Live News
             </h2>
             <p className="mt-2 max-w-2xl text-sm leading-6 text-[#92a0b3]">
-              Watch a leading live newsroom, switch networks instantly, or find
-              live YouTube coverage focused on a specific breaking story.
+              Select a breaking story to find active YouTube news coverage,
+              ranked by current viewers. Switch between every matching feed.
             </p>
           </div>
           <button
@@ -942,21 +1055,14 @@ function LiveNewsModal({
           </button>
         </div>
 
-        {selectedEvent && selectedChannel ? (
+        {selectedEvent ? (
           <>
             <div className="mt-6 flex gap-2 overflow-x-auto pb-2">
               {stories.map((event, index) => (
                 <button
                   type="button"
                   key={event.id}
-                  onClick={() => {
-                    setSelectedEventId(event.id);
-                    const preferredChannel =
-                      channelsForBreakingEvent(event)[0];
-                    if (preferredChannel) {
-                      setSelectedChannelId(preferredChannel.id);
-                    }
-                  }}
+                  onClick={() => setSelectedEventId(event.id)}
                   className={`min-w-56 rounded-xl border px-4 py-3 text-left transition ${
                     event.id === selectedEvent.id
                       ? "border-[#a83d49] bg-[#30151c]"
@@ -973,82 +1079,7 @@ function LiveNewsModal({
               ))}
             </div>
 
-            <div className="mt-5 grid gap-5 lg:grid-cols-[minmax(0,1fr)_320px]">
-              <div className="overflow-hidden rounded-2xl border border-[#313d50] bg-black shadow-2xl">
-                <div className="aspect-video">
-                  <iframe
-                    key={selectedChannel.id}
-                    className="h-full w-full"
-                    src={`https://www.youtube-nocookie.com/embed/live_stream?channel=${selectedChannel.channelId}&autoplay=1&mute=1&playsinline=1`}
-                    title={`${selectedChannel.name} live news`}
-                    allow="autoplay; encrypted-media; picture-in-picture"
-                    allowFullScreen
-                  />
-                </div>
-                <div className="flex flex-wrap items-center justify-between gap-3 border-t border-[#2a3445] bg-[#0a101a] px-4 py-3">
-                  <div>
-                    <div className="font-mono text-[8px] uppercase tracking-[0.16em] text-[#718197]">
-                      Featured live network
-                    </div>
-                    <div className="mt-1 text-sm font-semibold text-white">
-                      {selectedChannel.name}
-                    </div>
-                  </div>
-                  <div className="flex gap-2">
-                    <a
-                      href={liveStorySearchUrl(selectedEvent, selectedChannel)}
-                      target="_blank"
-                      rel="noreferrer"
-                      className="rounded-full border border-[#9e3b47] bg-[#34151d] px-3 py-2 text-[10px] text-[#ffc5ca] transition hover:bg-[#4b1b25]"
-                    >
-                      Find this story
-                    </a>
-                    <a
-                      href={selectedChannel.channelUrl}
-                      target="_blank"
-                      rel="noreferrer"
-                      className="rounded-full border border-[#3a4659] px-3 py-2 text-[10px] text-[#cad2dd] transition hover:bg-[#182335]"
-                    >
-                      Open YouTube
-                    </a>
-                  </div>
-                </div>
-              </div>
-
-              <aside className="rounded-2xl border border-[#273549] bg-[#09111c] p-4">
-                <p className="font-mono text-[9px] uppercase tracking-[0.2em] text-[#718197]">
-                  Other live feeds
-                </p>
-                <div className="mt-3 space-y-2">
-                  {orderedChannels.map((channel) => (
-                    <button
-                      type="button"
-                      key={channel.id}
-                      onClick={() => setSelectedChannelId(channel.id)}
-                      className={`flex w-full items-center justify-between rounded-xl border px-3 py-3 text-left transition ${
-                        channel.id === selectedChannel.id
-                          ? "border-[#b94552] bg-[#32151d] text-white"
-                          : "border-[#253247] bg-[#0d1724] text-[#b8c2cf] hover:border-[#4b5c73]"
-                      }`}
-                    >
-                      <span className="text-xs font-medium">{channel.name}</span>
-                      <span
-                        className={`h-2 w-2 rounded-full ${
-                          channel.id === selectedChannel.id
-                            ? "bg-[#ff6570] shadow-[0_0_9px_#ff6570]"
-                            : "bg-[#53657b]"
-                        }`}
-                        aria-hidden="true"
-                      />
-                    </button>
-                  ))}
-                </div>
-                <p className="mt-4 text-[10px] leading-4 text-[#6f7d90]">
-                  Live schedules change throughout the day. If a network is
-                  between broadcasts, switch feeds or open the story search.
-                </p>
-              </aside>
-            </div>
+            <LiveNewsCoverage key={selectedEvent.id} event={selectedEvent} />
 
             <div className="mt-5 rounded-2xl border border-[#2b394d] bg-[#0b131f] p-4">
               <div className="font-mono text-[8px] uppercase tracking-[0.16em] text-[#ff7480]">
@@ -2017,9 +2048,14 @@ export function WorldPulseApp({
       setTimeRange("7 days");
       setSearch("");
     });
-    if (liveUpdates && !resolvedCountry.signalReady && !cachedFeed) {
+    const needsFocusedDiscovery =
+      !resolvedCountry.topEvent || !cachedFeed?.events.length;
+    if (liveUpdates && needsFocusedDiscovery) {
       window.setTimeout(() => {
-        void fetchCountryNews(resolvedCountry, { promoteToPanel: true });
+        void fetchCountryNews(resolvedCountry, {
+          promoteToPanel: true,
+          forceFresh: true,
+        });
       }, 0);
     }
   }, [
@@ -2118,7 +2154,7 @@ export function WorldPulseApp({
             type="button"
             onClick={() => setShowLiveNews(true)}
             aria-label="Live News"
-            className="whitespace-nowrap rounded-full border border-[#a13d49] bg-[#38151d] px-2.5 py-2 text-[10px] text-[#ffd1d5] transition hover:border-[#e15e69] hover:bg-[#4a1a24] sm:px-4"
+            className="live-news-button-pulse whitespace-nowrap rounded-full border border-[#df5b67] bg-[#701822] px-2.5 py-2 text-[10px] text-white transition hover:border-[#ff8b94] sm:px-4"
           >
             <span className="sm:hidden">Live</span>
             <span className="hidden sm:inline">Live News</span>
@@ -2127,7 +2163,7 @@ export function WorldPulseApp({
             type="button"
             onClick={() => setShowLiveSituation(true)}
             aria-label="Live Situation"
-            className="whitespace-nowrap rounded-full border border-[#88414a] bg-[#2b141b] px-2.5 py-2 text-[10px] text-[#ffc5ca] transition hover:border-[#d45f69] hover:bg-[#3a1820] sm:px-4"
+            className="whitespace-nowrap rounded-full border border-[#3978b7] bg-[#122a44] px-2.5 py-2 text-[10px] text-[#d5ebff] transition hover:border-[#65a9e8] hover:bg-[#193a5d] sm:px-4"
           >
             <span className="sm:hidden">Situation</span>
             <span className="hidden sm:inline">Live Situation</span>
