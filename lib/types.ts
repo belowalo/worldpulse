@@ -50,6 +50,8 @@ export interface Article {
   extractedCountries: string[];
   category: Category;
   eventId: string;
+  originalHeadline?: string;
+  originalLanguage?: string;
 }
 
 export interface ScoringInput {
@@ -87,6 +89,9 @@ export interface Event {
   scoringInput: ScoringInput;
   articles: Article[];
   generatedSummary: boolean;
+  originalHeadline?: string;
+  originalSummary?: string;
+  originalLanguage?: string;
 }
 
 export interface CountryPulse extends Country {
@@ -113,6 +118,9 @@ export interface LiveArticle {
   publisherName: string;
   publisherUrl: string;
   publishedAt: string;
+  originalTitle?: string;
+  originalDescription?: string;
+  originalLanguage?: string;
 }
 
 export interface LiveNewsPayload {

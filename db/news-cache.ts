@@ -10,6 +10,11 @@ export interface StoredNewsFeed {
   refreshed_at: number;
 }
 
+export interface StoredNewsPayload {
+  payload: string;
+  generated_at: number;
+}
+
 const initializedDatabases = new WeakSet<object>();
 
 async function ensureNewsCache(db: D1Database) {
@@ -58,4 +63,18 @@ export async function writeStoredNewsFeed(
     )
     .bind(cacheKey, payload, generatedAt, Date.now())
     .run();
+}
+
+export async function readStoredMapFeeds(db: D1Database) {
+  await ensureNewsCache(db);
+  const result = await db
+    .prepare(
+      `SELECT payload, generated_at
+       FROM news_feed_cache
+       WHERE cache_key LIKE '%scope=map%'
+       ORDER BY generated_at DESC
+       LIMIT 160`,
+    )
+    .all<StoredNewsPayload>();
+  return result.results ?? [];
 }

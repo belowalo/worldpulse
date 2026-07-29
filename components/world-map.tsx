@@ -405,7 +405,7 @@ function updatePoints(
       runtime.THREE,
       point.lat,
       point.lng,
-      1.018,
+      1.006,
     );
     const color = new runtime.THREE.Color(point.color);
     position.toArray(positions, index * 3);
@@ -418,7 +418,7 @@ function updatePoints(
   );
   geometry.setAttribute("color", new runtime.THREE.BufferAttribute(colors, 3));
   const material = new runtime.THREE.PointsMaterial({
-    size: 0.07,
+    size: 0.055,
     sizeAttenuation: true,
     transparent: true,
     opacity: 0.95,
@@ -518,7 +518,7 @@ export function WorldMap({
   onSelect,
   onReady,
   readyForDisplay = true,
-  statusLabel = "Live feed · auto-refresh",
+  statusLabel = "Ready",
   linkEvents = [],
 }: WorldMapProps) {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -923,7 +923,7 @@ export function WorldMap({
       <div className="pointer-events-none absolute inset-x-0 top-0 h-28 bg-gradient-to-b from-[#050a11]/80 to-transparent" />
       <div className="pointer-events-none absolute left-5 top-5 z-10 max-w-[260px]">
         <div className="font-mono text-[10px] uppercase tracking-[0.24em] text-[#73e2cc]">
-          Live intelligence globe
+          Live world map
         </div>
         <h1 className="mt-2 text-2xl font-semibold tracking-[-0.04em] text-white sm:text-3xl">
           The world, in context.
@@ -954,13 +954,13 @@ export function WorldMap({
           <div className="world-globe-tooltip__headline">
             {hovered.country.topEvent?.headline ??
               (hovered.country.signalReady === false
-                ? "Checking current country coverage…"
-                : "No verified country-specific headline is currently indexed.")}
+                ? "Stories are being updated."
+                : "No recent headline is available.")}
           </div>
           <div className="world-globe-tooltip__meta">
             {hovered.country.topEvent
               ? `${hovered.country.topEvent.category} · ${hovered.country.topEvent.importanceLabel}`
-              : "Country feed ready"}
+              : "Select country"}
           </div>
         </div>
       ) : null}

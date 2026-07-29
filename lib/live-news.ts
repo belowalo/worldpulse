@@ -1400,6 +1400,8 @@ export function buildLiveEvents(
             extractedCountries: country ? [primaryCountry] : [],
             category: classifyLiveHeadline(article.title),
             eventId,
+            originalHeadline: article.originalTitle,
+            originalLanguage: article.originalLanguage,
           };
         })
         .sort(
@@ -1458,6 +1460,9 @@ export function buildLiveEvents(
         },
         articles,
         generatedSummary: true,
+        originalHeadline: representative?.originalTitle,
+        originalSummary: representative?.originalDescription,
+        originalLanguage: representative?.originalLanguage,
       };
     })
     .sort(

@@ -24,6 +24,9 @@ type TestLiveArticle = {
   publisherName: string;
   publisherUrl: string;
   publishedAt: string;
+  originalTitle?: string;
+  originalDescription?: string;
+  originalLanguage?: string;
 };
 
 function liveArticleFor(countryName: string): TestLiveArticle {
@@ -634,6 +637,59 @@ describe("WorldPulse interactions", () => {
     expect(screen.getByText("No matching events")).toBeInTheDocument();
   });
 
+  it("shows English by default and toggles one story back to its original language", async () => {
+    const englishHeadline = "Egypt announces a new public transport plan";
+    const originalHeadline = "مصر تعلن خطة جديدة للنقل العام";
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === "/countries.geojson") {
+        return Response.json({
+          features: [{ id: "818", properties: { name: "Egypt" } }],
+        });
+      }
+      if (url.includes("scope=map")) {
+        return liveMapResponse(url, {
+          Egypt: [
+            {
+              ...liveArticleFor("Egypt"),
+              title: englishHeadline,
+              description: "The plan will expand service across major cities.",
+              originalTitle: originalHeadline,
+              originalDescription: "ستوسع الخطة الخدمة في المدن الكبرى.",
+              originalLanguage: "ar",
+            },
+          ],
+        });
+      }
+      return Response.json({
+        countryName: null,
+        scope: "global",
+        generatedAt: "2026-07-25T00:00:00.000Z",
+        refreshAfterSeconds: 600,
+        provider: "Test live index",
+        articles: [],
+      });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<WorldPulseApp MapComponent={TestMap} />);
+    await screen.findByText("Live country index complete");
+    fireEvent.click(
+      screen.getByRole("button", { name: "Select Egypt on map" }),
+    );
+
+    expect(
+      await screen.findByRole("heading", { name: englishHeadline }),
+    ).toBeInTheDocument();
+    fireEvent.click(
+      screen.getByRole("button", { name: "Original · AR" }),
+    );
+    expect(
+      screen.getByRole("heading", { name: originalHeadline }),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "English" })).toBeInTheDocument();
+  });
+
   it("opens every mapped country even when no seed news is available", () => {
     render(<WorldPulseApp MapComponent={TestMap} liveUpdates={false} />);
     fireEvent.click(
@@ -641,14 +697,14 @@ describe("WorldPulse interactions", () => {
     );
     expect(screen.getByRole("heading", { name: "Spain" })).toBeInTheDocument();
     expect(
-      screen.getByText("No indexed news for Spain"),
+      screen.getByText("No recent news for Spain"),
     ).toBeInTheDocument();
     expect(
       screen.queryByRole("button", { name: "Japan" }),
     ).not.toBeInTheDocument();
   });
 
-  it("deep-checks unresolved countries and preloads global news before opening", async () => {
+  it("uses one prepared snapshot and preloads global news before opening", async () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input);
       if (url === "/countries.geojson") {
@@ -689,7 +745,7 @@ describe("WorldPulse interactions", () => {
       requestedUrls.some((url) =>
         url.includes("/api/live-news?country="),
       ),
-    ).toBe(true);
+    ).toBe(false);
     expect(requestedUrls).toContain("/api/live-news?scope=global");
     expect(
       await screen.findByRole("button", { name: "Live Situation" }),
@@ -699,7 +755,7 @@ describe("WorldPulse interactions", () => {
     ).not.toBeInTheDocument();
   });
 
-  it("keeps a country neutral when both map and deep reporting are unavailable", async () => {
+  it("keeps a country neutral when prepared reporting is unavailable", async () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input);
       if (url === "/countries.geojson") {
@@ -735,7 +791,7 @@ describe("WorldPulse interactions", () => {
       fetchMock.mock.calls.some(([input]) =>
         String(input).includes("/api/live-news?country="),
       ),
-    ).toBe(true);
+    ).toBe(false);
     expect(
       fetchMock.mock.calls.some(([input]) =>
         String(input).includes("scope=global"),
@@ -796,7 +852,7 @@ describe("WorldPulse interactions", () => {
         name: "No events in the last 7 days",
       }),
     ).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Show all indexed" }));
+    fireEvent.click(screen.getByRole("button", { name: "Show all stories" }));
     expect(
       screen.getByRole("heading", { name: oldHeadline }),
     ).toBeInTheDocument();
@@ -985,7 +1041,7 @@ describe("WorldPulse interactions", () => {
     render(<WorldPulseApp MapComponent={TestMap} />);
 
     expect(
-      await screen.findByText("Loading news · 8/9 regions"),
+      await screen.findByText("Preparing every country"),
     ).toBeInTheDocument();
     expect(
       screen.getByRole("heading", { name: "Preparing the live world" }),

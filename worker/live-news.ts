@@ -14,6 +14,9 @@ export interface FeedArticle {
   publisherName: string;
   publisherUrl: string;
   publishedAt: string;
+  originalTitle?: string;
+  originalDescription?: string;
+  originalLanguage?: string;
 }
 
 interface CandidateArticle extends FeedArticle {
@@ -169,7 +172,11 @@ function tagValue(block: string, tag: string) {
 }
 
 function stripMarkup(value: string) {
-  return decodeXml(value.replace(/<[^>]+>/g, " ").replace(/\s+/g, " "));
+  return decodeXml(value.replace(/<[^>]+>/g, " ").replace(/\s+/g, " "))
+    .replace(/[\u{1F1E6}-\u{1F1FF}]/gu, "")
+    .replace(/\p{Extended_Pictographic}/gu, "")
+    .replace(/\s+/g, " ")
+    .trim();
 }
 
 function safeIsoDate(value: string) {
@@ -581,9 +588,9 @@ function googleCountryProvider(countryName: string): NewsProvider {
     url: () => {
       const url = new URL("https://news.google.com/rss/search");
       url.searchParams.set("q", `"${queryTerm}" when:7d`);
-      url.searchParams.set("hl", locale.hl);
+      url.searchParams.set("hl", "en");
       url.searchParams.set("gl", locale.region);
-      url.searchParams.set("ceid", locale.ceid);
+      url.searchParams.set("ceid", `${locale.region}:en`);
       return url;
     },
     parse: parseGoogleNewsFeed,
@@ -916,6 +923,9 @@ function mergeArticles(results: ProviderResult[], limit: number) {
       publisherName: article.publisherName,
       publisherUrl: article.publisherUrl,
       publishedAt: article.publishedAt,
+      originalTitle: article.originalTitle,
+      originalDescription: article.originalDescription,
+      originalLanguage: article.originalLanguage,
     }));
 }
 
@@ -952,6 +962,9 @@ function mergeRankedArticles(results: ProviderResult[], limit: number) {
         publisherName: article.publisherName,
         publisherUrl: article.publisherUrl,
         publishedAt: article.publishedAt,
+        originalTitle: article.originalTitle,
+        originalDescription: article.originalDescription,
+        originalLanguage: article.originalLanguage,
       });
       if (articles.length === limit) break;
     }

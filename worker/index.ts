@@ -2,6 +2,7 @@
 import { handleImageOptimization, DEFAULT_DEVICE_SIZES, DEFAULT_IMAGE_SIZES } from "vinext/server/image-optimization";
 import handler from "vinext/server/app-router-entry";
 import {
+  readStoredMapFeeds,
   readStoredNewsFeed,
   writeStoredNewsFeed,
 } from "../db/news-cache";
@@ -29,6 +30,106 @@ const LIVE_CACHE_NAME = "worldpulse-live-v19";
 const LIVE_CACHE_FRESH_MS = 5 * 60_000;
 const LIVE_CACHE_RETENTION_SECONDS = 3 * 24 * 60 * 60;
 const LIVE_MAP_STALE_MS = LIVE_CACHE_RETENTION_SECONDS * 1_000;
+
+interface StoredMapCountry {
+  countryName: string;
+  generatedAt: string;
+  available: boolean;
+  articles: unknown[];
+}
+
+function isStoredMapCountry(value: unknown): value is StoredMapCountry {
+  if (!value || typeof value !== "object") return false;
+  const country = value as Partial<StoredMapCountry>;
+  return (
+    typeof country.countryName === "string" &&
+    typeof country.generatedAt === "string" &&
+    Array.isArray(country.articles)
+  );
+}
+
+async function handleWorldSnapshot(
+  request: Request,
+  env: Env,
+  ctx: ExecutionContext,
+) {
+  if (!env.DB) {
+    return Response.json(
+      { error: "The prepared world news snapshot is unavailable." },
+      { status: 503, headers: { "Cache-Control": "no-store" } },
+    );
+  }
+  const storedFeeds = await readStoredMapFeeds(env.DB);
+  const countries = new Map<string, StoredMapCountry>();
+  let latestGeneratedAt = 0;
+  for (const stored of storedFeeds) {
+    try {
+      const payload = JSON.parse(stored.payload) as {
+        scope?: string;
+        countries?: unknown[];
+      };
+      if (payload.scope !== "map" || !Array.isArray(payload.countries)) {
+        continue;
+      }
+      latestGeneratedAt = Math.max(latestGeneratedAt, stored.generated_at);
+      for (const candidate of payload.countries) {
+        if (!isStoredMapCountry(candidate) || countries.has(candidate.countryName)) {
+          continue;
+        }
+        countries.set(candidate.countryName, {
+          ...candidate,
+          available: candidate.articles.length > 0,
+        });
+      }
+    } catch {
+      // Ignore a malformed historical cache row and continue with the others.
+    }
+  }
+  const requestUrl = new URL(request.url);
+  const requestedCountries = [
+    ...new Set(
+      (requestUrl.searchParams.get("countries") ?? "")
+        .split("|")
+        .map((country) => country.trim())
+        .filter(Boolean),
+    ),
+  ];
+  if (requestedCountries.length) {
+    const batchSize = 12;
+    const batchCount = Math.ceil(requestedCountries.length / batchSize);
+    const batchIndex = Math.floor(Date.now() / 60_000) % batchCount;
+    const refreshCountries = requestedCountries.slice(
+      batchIndex * batchSize,
+      (batchIndex + 1) * batchSize,
+    );
+    const refreshUrl = new URL(request.url);
+    refreshUrl.searchParams.delete("snapshot");
+    refreshUrl.searchParams.set("scope", "map");
+    refreshUrl.searchParams.set("countries", refreshCountries.join("|"));
+    refreshUrl.searchParams.set("fresh", "1");
+    ctx.waitUntil(
+      handleCachedLiveNews(
+        new Request(refreshUrl.toString(), { method: "GET" }),
+        env,
+        ctx,
+      ).then((response) => response.body?.cancel()),
+    );
+  }
+  return Response.json(
+    {
+      scope: "map",
+      generatedAt: new Date(latestGeneratedAt || Date.now()).toISOString(),
+      refreshAfterSeconds: LIVE_CACHE_FRESH_MS / 1_000,
+      provider: "WorldPulse",
+      countries: [...countries.values()],
+    },
+    {
+      headers: {
+        "Cache-Control": "public, max-age=60, s-maxage=300, stale-while-revalidate=86400",
+      },
+    },
+  );
+}
 
 function normalizedLiveCacheKey(request: Request) {
   const url = new URL(request.url);
@@ -287,6 +388,12 @@ const worker = {
     const url = new URL(request.url);
 
     if (url.pathname === "/api/live-news") {
+      if (
+        url.searchParams.get("scope") === "snapshot" ||
+        url.searchParams.get("snapshot") === "1"
+      ) {
+        return handleWorldSnapshot(request, env, ctx);
+      }
       return handleCachedLiveNews(request, env, ctx);
     }
 
