@@ -106,6 +106,42 @@ const COUNTRY_NEWS_QUERY_OVERRIDES: Record<string, string> = {
   "Saint Pierre and Miquelon": "Saint-Pierre-et-Miquelon",
   "South Georgia and the South Sandwich Islands": "South Georgia island",
 };
+const ENGLISH_SIGNAL_WORDS = new Set([
+  "a", "after", "and", "are", "as", "at", "for", "from", "has", "in",
+  "is", "new", "of", "on", "says", "the", "to", "with",
+]);
+const NON_ENGLISH_SIGNAL_WORDS = new Set([
+  "al", "avec", "că", "care", "ce", "da", "dans", "de", "del", "des",
+  "di", "din", "do", "du", "el", "en", "et", "für", "gli", "il", "în",
+  "la", "las", "le", "les", "los", "mais", "más", "nel", "o", "pe",
+  "pela", "pentru", "por", "pour", "que", "qui", "și", "sous", "su",
+  "sur", "un", "una", "une", "va", "și",
+]);
+
+export function isLikelyEnglishHeadline(value: string) {
+  if (
+    /[\p{Script=Arabic}\p{Script=Armenian}\p{Script=Bengali}\p{Script=Cyrillic}\p{Script=Devanagari}\p{Script=Georgian}\p{Script=Greek}\p{Script=Han}\p{Script=Hangul}\p{Script=Hebrew}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Thai}]/u.test(
+      value,
+    )
+  ) {
+    return false;
+  }
+  const words = value
+    .toLocaleLowerCase("en")
+    .match(/\p{L}+/gu) ?? [];
+  const englishSignals = words.filter((word) =>
+    ENGLISH_SIGNAL_WORDS.has(word),
+  ).length;
+  const nonEnglishSignals = words.filter((word) =>
+    NON_ENGLISH_SIGNAL_WORDS.has(word),
+  ).length;
+  const hasAccentedLatin = /[\u00c0-\u024f]/u.test(value);
+  return !(
+    (nonEnglishSignals >= 3 ||
+      (hasAccentedLatin && nonEnglishSignals >= 2)) &&
+    englishSignals < nonEnglishSignals
+  );
+}
 
 function newsSearchTerms(countryName: string, requestedRegion = "") {
   const terms = countrySearchTerms(countryName);
@@ -899,6 +935,7 @@ function mergeArticles(results: ProviderResult[], limit: number) {
   const seenTitles = new Set<string>();
   return results
     .flatMap((result) => result.articles)
+    .filter((article) => isLikelyEnglishHeadline(article.title))
     .sort(
       (left, right) =>
         Date.parse(right.publishedAt) - Date.parse(left.publishedAt),
@@ -946,6 +983,7 @@ function mergeRankedArticles(results: ProviderResult[], limit: number) {
     for (const result of results) {
       const article = result.articles[depth];
       if (!article) continue;
+      if (!isLikelyEnglishHeadline(article.title)) continue;
       const urlKey = canonicalArticleKey(article);
       const titleKey = article.title
         .toLowerCase()

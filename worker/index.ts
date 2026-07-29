@@ -7,7 +7,7 @@ import {
   writeStoredNewsFeed,
 } from "../db/news-cache";
 import { mergeCachedPayloads } from "./live-cache";
-import { handleLiveNews } from "./live-news";
+import { handleLiveNews, isLikelyEnglishHeadline } from "./live-news";
 
 interface Env {
   ASSETS: Fetcher;
@@ -76,9 +76,18 @@ async function handleWorldSnapshot(
         if (!isStoredMapCountry(candidate) || countries.has(candidate.countryName)) {
           continue;
         }
+        const articles = candidate.articles.filter((article) => {
+          if (!article || typeof article !== "object") return false;
+          const title = (article as { title?: unknown }).title;
+          return (
+            typeof title === "string" &&
+            isLikelyEnglishHeadline(title)
+          );
+        });
         countries.set(candidate.countryName, {
           ...candidate,
-          available: candidate.articles.length > 0,
+          articles,
+          available: articles.length > 0,
         });
       }
     } catch {

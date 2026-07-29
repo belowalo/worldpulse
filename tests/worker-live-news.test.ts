@@ -7,6 +7,7 @@ import {
   articleMatchesCountry,
   articleHeadlineMatchesCountry,
   handleLiveNews,
+  isLikelyEnglishHeadline,
   parseBingNewsFeed,
   parseGdeltJson,
   parseGoogleNewsFeed,
@@ -33,6 +34,18 @@ afterEach(() => {
 });
 
 describe("worker live-news providers", () => {
+  it("keeps English headlines and rejects clearly non-English headlines", () => {
+    expect(
+      isLikelyEnglishHeadline("Canada announces a new national housing plan"),
+    ).toBe(true);
+    expect(
+      isLikelyEnglishHeadline(
+        "Noul premier al Republicii Moldova face prima sa vizită externă la București",
+      ),
+    ).toBe(false);
+    expect(isLikelyEnglishHeadline("مصر تعلن خطة جديدة للنقل العام")).toBe(false);
+  });
+
   it("parses publisher RSS and retains text for country matching", () => {
     const articles = parsePublisherRss(
       rssItem,
@@ -249,8 +262,8 @@ describe("worker live-news providers", () => {
     const requestedUrls: string[] = [];
     const bingItems = `
       <rss><channel><item>
-        <title>Le Sénégal lance un nouveau programme</title>
-        <description>Une annonce faite à Dakar.</description>
+        <title>Senegal launches a new public program</title>
+        <description>The announcement was made in Dakar.</description>
         <link>https://www.bing.com/news/apiclick.aspx?ref=FexRss&amp;url=https%3A%2F%2Faps.sn%2Fsenegal-local</link>
         <guid>senegal-local</guid>
         <pubDate>Fri, 24 Jul 2026 21:00:00 GMT</pubDate>
