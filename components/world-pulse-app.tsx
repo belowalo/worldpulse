@@ -1649,7 +1649,6 @@ export function WorldPulseApp({
       ) => {
         const parameters = new URLSearchParams({
           scope: "map",
-          snapshot: "1",
           countries: countryNames.join("|"),
         });
         if (forceFresh) parameters.set("fresh", "1");

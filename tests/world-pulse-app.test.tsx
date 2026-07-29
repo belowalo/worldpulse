@@ -1534,7 +1534,11 @@ describe("WorldPulse interactions", () => {
             .get("countries")
             ?.split("|")
             .filter(Boolean) ?? [];
-        return countries.length > 0 && countries.length <= 12;
+        return (
+          countries.length > 0 &&
+          countries.length <= 12 &&
+          !new URL(url, "https://worldpulse.test").searchParams.has("snapshot")
+        );
       }),
     ).toBe(true);
   }, 20_000);
