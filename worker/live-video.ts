@@ -8,6 +8,10 @@ interface YouTubeVideoRenderer {
   title?: YouTubeText;
   ownerText?: YouTubeText;
   longBylineText?: YouTubeText;
+  descriptionSnippet?: YouTubeText;
+  detailedMetadataSnippets?: Array<{
+    snippetText?: YouTubeText;
+  }>;
   badges?: Array<{
     metadataBadgeRenderer?: {
       style?: string;
@@ -114,6 +118,17 @@ function cleanDisplayText(value: string) {
     .replace(/[\p{Extended_Pictographic}\uFE0F\u200D]/gu, "")
     .replace(/\s+/g, " ")
     .trim();
+}
+
+function cleanCoverageDescription(value: string) {
+  const cleaned = cleanDisplayText(value)
+    .replace(/https?:\/\/\S+/gi, "")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (cleaned.length <= 320) return cleaned;
+  const shortened = cleaned.slice(0, 317);
+  const lastSpace = shortened.lastIndexOf(" ");
+  return `${shortened.slice(0, Math.max(220, lastSpace))}...`;
 }
 
 function searchTokens(value: string) {
@@ -235,6 +250,10 @@ function parsedLiveVideos(body: string) {
       const channelName = cleanDisplayText(
         textValue(video.ownerText) || textValue(video.longBylineText),
       );
+      const coverageDescription = cleanCoverageDescription(
+        textValue(video.detailedMetadataSnippets?.[0]?.snippetText) ||
+          textValue(video.descriptionSnippet),
+      );
       const isLive = video.badges?.some(
         (badge) =>
           badge.metadataBadgeRenderer?.style ===
@@ -263,6 +282,12 @@ function parsedLiveVideos(body: string) {
           id: videoId,
           title,
           channelName,
+          coverageDescription:
+            coverageDescription &&
+            normalizedChannelName(coverageDescription) !==
+              normalizedChannelName(title)
+              ? coverageDescription
+              : undefined,
           viewerCount: liveViewerCount(video.viewCountText),
           thumbnailUrl: thumbnail?.startsWith("http") ? thumbnail : undefined,
           watchUrl: `https://www.youtube.com/watch?v=${videoId}`,
@@ -298,6 +323,7 @@ export function parseLiveVideoSearch(body: string, headline: string) {
       id: video.id,
       title: video.title,
       channelName: video.channelName,
+      coverageDescription: video.coverageDescription,
       viewerCount: video.viewerCount,
       thumbnailUrl: video.thumbnailUrl,
       watchUrl: video.watchUrl,

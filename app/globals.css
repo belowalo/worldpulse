@@ -346,13 +346,6 @@ select:focus-visible {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .loading-glow,
-  .loading-orbit__ring--outer,
-  .loading-orbit__ring--inner,
-  .loading-orbit__scan {
-    animation: none;
-  }
-
   *,
   *::before,
   *::after {
@@ -360,6 +353,22 @@ select:focus-visible {
     transition-duration: 0.01ms !important;
     animation-duration: 0.01ms !important;
     animation-iteration-count: 1 !important;
+  }
+
+  .loading-glow {
+    animation: loading-breathe 6s ease-in-out infinite !important;
+  }
+
+  .loading-orbit__ring--outer {
+    animation: loading-orbit 12s linear infinite !important;
+  }
+
+  .loading-orbit__ring--inner {
+    animation: loading-orbit-reverse 9s linear infinite !important;
+  }
+
+  .loading-orbit__scan {
+    animation: loading-scan 4.8s ease-in-out infinite !important;
   }
 
   .breaking-news-track {

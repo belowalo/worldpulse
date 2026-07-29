@@ -12,12 +12,14 @@ function liveRenderer({
   title,
   channel,
   viewers,
+  description,
   live = true,
 }: {
   id: string;
   title: string;
   channel: string;
   viewers: string;
+  description?: string;
   live?: boolean;
 }) {
   return {
@@ -25,6 +27,9 @@ function liveRenderer({
       videoId: id,
       title: { runs: [{ text: title }] },
       ownerText: { runs: [{ text: channel }] },
+      detailedMetadataSnippets: description
+        ? [{ snippetText: { runs: [{ text: description }] } }]
+        : undefined,
       viewCountText: { runs: [{ text: viewers }, { text: " watching" }] },
       badges: live
         ? [
@@ -138,6 +143,8 @@ describe("live video discovery", () => {
         title: "🔴 Reuters world briefing live",
         channel: "Reuters",
         viewers: "2.4K",
+        description:
+          "Live coverage of diplomatic talks and the latest world developments.",
       }),
       liveRenderer({
         id: "lookalike02",
@@ -159,6 +166,8 @@ describe("live video discovery", () => {
         id: "reuters001",
         newsroomName: "Reuters",
         title: "Reuters world briefing live",
+        coverageDescription:
+          "Live coverage of diplomatic talks and the latest world developments.",
         viewerCount: 2400,
       }),
     ]);

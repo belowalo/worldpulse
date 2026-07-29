@@ -90,6 +90,17 @@ const EMPTY_FEED: FeedState = {
 const MAX_REMEMBERED_COUNTRY_FEEDS = 8;
 const INITIAL_VISIBLE_EVENT_LIMIT = 40;
 const LIVE_REQUEST_TIMEOUT_MS = 30_000;
+const WORLD_BATCH_REQUEST_TIMEOUT_MS = 60_000;
+const WORLD_BATCH_SIZE = 12;
+const WORLD_BATCH_CONCURRENCY = 6;
+
+function chunkItems<T>(items: T[], size: number) {
+  const chunks: T[][] = [];
+  for (let index = 0; index < items.length; index += size) {
+    chunks.push(items.slice(index, index + size));
+  }
+  return chunks;
+}
 
 function rememberCountryFeed(
   feeds: Record<string, FeedState>,
@@ -792,6 +803,7 @@ interface LiveVideo {
   title: string;
   channelName: string;
   newsroomName?: string;
+  coverageDescription?: string;
   viewerCount: number;
   thumbnailUrl?: string;
   watchUrl: string;
@@ -814,6 +826,15 @@ function formatViewerCount(value: number) {
     notation: value >= 1_000 ? "compact" : "standard",
     maximumFractionDigits: 1,
   }).format(value);
+}
+
+function liveCoverageSummary(video: LiveVideo) {
+  const newsroom = video.newsroomName ?? video.channelName;
+  const introduction = `${newsroom} is currently broadcasting “${video.title}.”`;
+  const detail = video.coverageDescription
+    ? `The broadcaster describes the live coverage this way: ${video.coverageDescription.replace(/[.!?]?$/, ".")}`
+    : "The broadcaster has not published a more detailed description for this live feed.";
+  return `${introduction} ${detail} This summary updates automatically when the newsroom changes its live listing.`;
 }
 
 function LiveNewsDirectory() {
@@ -1032,6 +1053,17 @@ function LiveNewsDirectory() {
               </a>
             </div>
           </div>
+          <div
+            className="border-t border-[#273244] bg-[#0c1420] px-4 py-4"
+            aria-live="polite"
+          >
+            <div className="font-mono text-[8px] uppercase tracking-[0.16em] text-[#73e2cc]">
+              What this stream is covering
+            </div>
+            <p className="mt-2 text-xs leading-5 text-[#aab5c4]">
+              {liveCoverageSummary(selectedVideo)}
+            </p>
+          </div>
         </div>
 
         <aside className="rounded-2xl border border-[#273549] bg-[#09111c] p-4">
@@ -1230,27 +1262,41 @@ interface WorldPulseAppProps {
 }
 
 function WorldLoadingScreen({
+  countryDirectoryReady,
+  preparedCountryCount,
+  totalCountryCount,
   globalReady,
   globeReady,
   settled,
 }: {
+  countryDirectoryReady: boolean;
+  preparedCountryCount: number;
+  totalCountryCount: number;
   globalReady: boolean;
   globeReady: boolean;
   settled: boolean;
 }) {
-  const progress =
-    settled && globalReady && globeReady
-      ? 100
-      : globalReady && settled
-        ? 82
-        : globalReady
-          ? 56
-          : 24;
+  const countryProgress =
+    totalCountryCount > 0
+      ? Math.min(1, preparedCountryCount / totalCountryCount)
+      : settled
+        ? 1
+        : 0;
+  const progress = Math.min(
+    100,
+    Math.round(
+      (globalReady ? 15 : 5) +
+        countryProgress * 70 +
+        (globeReady ? 15 : 0),
+    ),
+  );
   const stage =
     !globalReady
       ? "Loading the latest stories"
+      : !countryDirectoryReady
+        ? "Loading the country index"
       : !settled
-        ? "Preparing the world"
+        ? `Preparing ${preparedCountryCount} of ${totalCountryCount} countries`
         : !globeReady
           ? "Rendering the globe"
           : "Ready";
@@ -1262,7 +1308,11 @@ function WorldLoadingScreen({
     },
     {
       label: "Preparing every country",
-      detail: settled ? "Ready" : "In progress",
+      detail: settled
+        ? "Ready"
+        : countryDirectoryReady && totalCountryCount
+          ? `${preparedCountryCount} / ${totalCountryCount}`
+          : "In progress",
       ready: settled,
     },
     {
@@ -1363,6 +1413,7 @@ export function WorldPulseApp({
   >({});
   const [countryDirectoryReady, setCountryDirectoryReady] = useState(false);
   const [worldScanSettled, setWorldScanSettled] = useState(!liveUpdates);
+  const [preparedCountryCount, setPreparedCountryCount] = useState(0);
   const [globalFeedReady, setGlobalFeedReady] = useState(!liveUpdates);
   const [globeReady, setGlobeReady] = useState(!liveUpdates);
   const [globalView, setGlobalView] = useState(false);
@@ -1580,31 +1631,65 @@ export function WorldPulseApp({
     );
 
     setLiveCountryFeeds({});
+    setPreparedCountryCount(0);
     setWorldScanSettled(false);
 
     const loadPreparedWorld = async () => {
-      try {
+      const checkedAt = new Date().toISOString();
+      const neutralFeed = (): FeedState => ({
+        events: [],
+        updatedAt: checkedAt,
+        provider: "WorldPulse",
+        loading: false,
+        error: null,
+      });
+      const requestBatch = async (
+        countryNames: string[],
+        forceFresh = false,
+      ) => {
         const parameters = new URLSearchParams({
           scope: "map",
           snapshot: "1",
-          countries: countryDirectory.map((country) => country.name).join("|"),
+          countries: countryNames.join("|"),
         });
+        if (forceFresh) parameters.set("fresh", "1");
         const response = await fetch(`/api/live-news?${parameters.toString()}`, {
-          signal: AbortSignal.timeout(LIVE_REQUEST_TIMEOUT_MS),
+          signal: AbortSignal.timeout(WORLD_BATCH_REQUEST_TIMEOUT_MS),
         });
         if (!response.ok) throw new Error("World news is temporarily unavailable.");
-        const payload = (await response.json()) as MapNewsPayload;
-        if (cancelled) return;
-        const nextFeeds: Record<string, FeedState> = {};
-        for (const countryPayload of payload.countries) {
+        return (await response.json()) as MapNewsPayload;
+      };
+      const prepareBatch = async (countryNames: string[]) => {
+        let payloads: MapNewsPayload["countries"] = [];
+        try {
+          const first = await requestBatch(countryNames);
+          payloads = first.countries ?? [];
+          const received = new Set(
+            payloads.map((country) => country.countryName),
+          );
+          const missing = countryNames.filter((name) => !received.has(name));
+          if (missing.length) {
+            const retry = await requestBatch(missing, true);
+            payloads = [...payloads, ...(retry.countries ?? [])];
+          }
+        } catch {
+          try {
+            const retry = await requestBatch(countryNames, true);
+            payloads = retry.countries ?? [];
+          } catch {
+            payloads = [];
+          }
+        }
+        const batchFeeds: Record<string, FeedState> = {};
+        for (const countryPayload of payloads) {
           const country = countriesByName.get(countryPayload.countryName);
           if (!country) continue;
           const livePayload: LiveNewsPayload = {
             countryName: country.name,
             scope: "country",
             generatedAt: countryPayload.generatedAt,
-            refreshAfterSeconds: payload.refreshAfterSeconds,
-            provider: payload.provider,
+            refreshAfterSeconds: 300,
+            provider: "WorldPulse",
             articles: countryPayload.articles,
           };
           const countryArticles = articlesMentioningCountry(
@@ -1615,9 +1700,9 @@ export function WorldPulseApp({
             { ...livePayload, articles: countryArticles },
             country,
           ).map((event) =>
-            applyDetectedGeography(event, countryDirectory, country),
+              applyDetectedGeography(event, countryDirectory, country),
           );
-          nextFeeds[country.name] = {
+          batchFeeds[country.name] = {
             events,
             updatedAt: countryPayload.generatedAt,
             provider: "WorldPulse",
@@ -1625,37 +1710,43 @@ export function WorldPulseApp({
             error: null,
           };
         }
-        const checkedAt = payload.generatedAt || new Date().toISOString();
-        for (const country of countryDirectory) {
-          nextFeeds[country.name] ??= {
-            events: [],
-            updatedAt: checkedAt,
-            provider: "WorldPulse",
-            loading: false,
-            error: null,
-          };
+        for (const countryName of countryNames) {
+          batchFeeds[countryName] ??= neutralFeed();
         }
-        setLiveCountryFeeds(nextFeeds);
-      } catch {
         if (cancelled) return;
-        const checkedAt = new Date().toISOString();
-        setLiveCountryFeeds(
-          Object.fromEntries(
-            countryDirectory.map((country) => [
-              country.name,
-              {
-                events: [],
-                updatedAt: checkedAt,
-                provider: "WorldPulse",
-                loading: false,
-                error: null,
-              } satisfies FeedState,
-            ]),
+        setLiveCountryFeeds((current) => ({
+          ...current,
+          ...batchFeeds,
+        }));
+        setPreparedCountryCount((current) =>
+          Math.min(countryDirectory.length, current + countryNames.length),
+        );
+      };
+      const batches = chunkItems(
+        countryDirectory.map((country) => country.name),
+        WORLD_BATCH_SIZE,
+      );
+      let nextBatchIndex = 0;
+      const worker = async () => {
+        while (!cancelled) {
+          const batchIndex = nextBatchIndex;
+          nextBatchIndex += 1;
+          const batch = batches[batchIndex];
+          if (!batch) return;
+          await prepareBatch(batch);
+        }
+      };
+      try {
+        await Promise.all(
+          Array.from(
+            { length: Math.min(WORLD_BATCH_CONCURRENCY, batches.length) },
+            () => worker(),
           ),
         );
       } finally {
         if (!cancelled) {
-        setWorldScanSettled(true);
+          setPreparedCountryCount(countryDirectory.length);
+          setWorldScanSettled(true);
         }
       }
     };
@@ -2093,20 +2184,8 @@ export function WorldPulseApp({
       setTimeRange("7 days");
       setSearch("");
     });
-    const needsFocusedDiscovery =
-      !resolvedCountry.topEvent || !cachedFeed?.events.length;
-    if (liveUpdates && needsFocusedDiscovery) {
-      window.setTimeout(() => {
-        void fetchCountryNews(resolvedCountry, {
-          promoteToPanel: true,
-          forceFresh: true,
-        });
-      }, 0);
-    }
   }, [
-    fetchCountryNews,
     invalidateCoverage,
-    liveUpdates,
     mapCountries,
     startCountryTransition,
   ]);
@@ -2166,6 +2245,11 @@ export function WorldPulseApp({
     <>
       {!initialWorldReady ? (
         <WorldLoadingScreen
+          countryDirectoryReady={countryDirectoryReady}
+          preparedCountryCount={preparedCountryCount}
+          totalCountryCount={
+            countryDirectoryReady ? countryDirectory.length : 0
+          }
           globalReady={globalFeedReady}
           globeReady={globeReady}
           settled={worldScanSettled}

@@ -375,6 +375,9 @@ describe("WorldPulse interactions", () => {
                 : "BBC News live international coverage",
               channelName: "BBC News",
               newsroomName: "BBC News",
+              coverageDescription: updated
+                ? "Live reporting has moved to the international summit."
+                : "The feed is following diplomatic talks in Europe.",
               viewerCount: 3000,
               watchUrl: "https://www.youtube.com/watch?v=bbcnews001",
               embedUrl:
@@ -420,6 +423,9 @@ describe("WorldPulse interactions", () => {
       "src",
       expect.stringContaining("youtube-nocookie.com/embed/bbcnews001"),
     );
+    expect(
+      within(dialog).getByText(/following diplomatic talks in Europe/),
+    ).toBeInTheDocument();
 
     fireEvent.click(
       within(dialog).getByRole("button", { name: "Refresh" }),
@@ -433,6 +439,9 @@ describe("WorldPulse interactions", () => {
       "src",
       expect.stringContaining("youtube-nocookie.com/embed/bbcnews001"),
     );
+    expect(
+      within(dialog).getByText(/moved to the international summit/),
+    ).toBeInTheDocument();
     expect(within(dialog).queryByText(/Breaking 01/)).not.toBeInTheDocument();
   });
 
@@ -932,13 +941,13 @@ describe("WorldPulse interactions", () => {
       const url = String(input);
       if (url === "/countries.geojson") {
         return Response.json({
-          features: [{ id: "124", properties: { name: "Canada" } }],
+          features: [{ id: "724", properties: { name: "Spain" } }],
         });
       }
       if (url.includes("scope=map")) {
-        return liveMapResponse(url, { Canada: [] });
+        return liveMapResponse(url, { Spain: [] });
       }
-      if (url.includes("country=Canada")) {
+      if (url.includes("country=Spain")) {
         return new Response("Unavailable", { status: 503 });
       }
       return Response.json({
@@ -973,14 +982,15 @@ describe("WorldPulse interactions", () => {
     fireEvent.click(
       screen.getByRole("button", { name: "Select Spain on map" }),
     );
-    await waitFor(() =>
-      expect(
-        fetchMock.mock.calls.some(([input]) => {
-          const url = String(input);
-          return url.includes("country=Spain") && url.includes("fresh=1");
-        }),
-      ).toBe(true),
-    );
+    expect(
+      fetchMock.mock.calls.some(([input]) => {
+        const url = String(input);
+        return url.includes("country=Spain") && url.includes("fresh=1");
+      }),
+    ).toBe(false);
+    expect(
+      screen.getByText("No recent news for Spain"),
+    ).toBeInTheDocument();
   });
 
   it("offers older indexed reporting when the default window is empty", async () => {
@@ -1175,12 +1185,7 @@ describe("WorldPulse interactions", () => {
     const egyptRequestsAfterClick = fetchMock.mock.calls.filter(([input]) =>
       String(input).includes("country=Egypt"),
     );
-    expect(egyptRequestsAfterClick).toHaveLength(egyptRequestsBeforeClick + 1);
-    expect(
-      egyptRequestsAfterClick.some(([input]) =>
-        String(input).includes("fresh=1"),
-      ),
-    ).toBe(true);
+    expect(egyptRequestsAfterClick).toHaveLength(egyptRequestsBeforeClick);
   });
 
   it("keeps the loading screen up until the complete country index is ready", async () => {
@@ -1201,6 +1206,10 @@ describe("WorldPulse interactions", () => {
             { id: "724", properties: { name: "Spain" } },
             { id: "392", properties: { name: "Japan" } },
             { id: "818", properties: { name: "Egypt" } },
+            { id: "076", properties: { name: "Brazil" } },
+            { id: "032", properties: { name: "Argentina" } },
+            { id: "356", properties: { name: "India" } },
+            { id: "710", properties: { name: "South Africa" } },
             { id: "484", properties: { name: "Mexico" } },
           ],
         });
@@ -1234,6 +1243,10 @@ describe("WorldPulse interactions", () => {
     expect(
       screen.getByRole("heading", { name: "Preparing the live world" }),
     ).toBeInTheDocument();
+    expect(await screen.findByText("12 / 13")).toBeInTheDocument();
+    expect(
+      screen.getByText("Preparing 12 of 13 countries"),
+    ).toBeInTheDocument();
     expect(
       screen.queryByRole("button", { name: "Live Situation" }),
     ).not.toBeInTheDocument();
@@ -1250,8 +1263,22 @@ describe("WorldPulse interactions", () => {
     expect(
       screen.queryByRole("heading", { name: "Preparing the live world" }),
     ).not.toBeInTheDocument();
-    expect(screen.getByTestId("countries-with-news")).toHaveTextContent("9");
+    expect(screen.getByTestId("countries-with-news")).toHaveTextContent("13");
     expect(screen.getByTestId("countries-syncing")).toHaveTextContent("0");
+  });
+
+  it("keeps the loading visualization animated for every motion setting", () => {
+    const styles = readFileSync(resolve("app/globals.css"), "utf8");
+
+    expect(styles).toContain(
+      "animation: loading-orbit 12s linear infinite !important;",
+    );
+    expect(styles).toContain(
+      "animation: loading-orbit-reverse 9s linear infinite !important;",
+    );
+    expect(styles).toContain(
+      "animation: loading-scan 4.8s ease-in-out infinite !important;",
+    );
   });
 
   it("finishes the live sweep without inventing a headline for an empty country", async () => {
@@ -1496,6 +1523,20 @@ describe("WorldPulse interactions", () => {
     expect(
       screen.getByTestId("countries-with-valid-color-contract"),
     ).toHaveTextContent("215");
+    const worldRequests = fetchMock.mock.calls
+      .map(([input]) => String(input))
+      .filter((url) => url.includes("scope=map"));
+    expect(worldRequests.length).toBeGreaterThan(1);
+    expect(
+      worldRequests.every((url) => {
+        const countries =
+          new URL(url, "https://worldpulse.test").searchParams
+            .get("countries")
+            ?.split("|")
+            .filter(Boolean) ?? [];
+        return countries.length > 0 && countries.length <= 12;
+      }),
+    ).toBe(true);
   }, 20_000);
 
   it("keeps the map signal aligned when a selected country is refreshed", async () => {
