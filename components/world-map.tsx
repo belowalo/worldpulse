@@ -89,10 +89,9 @@ interface HoveredCountry {
   y: number;
 }
 
-const TEXTURE_WIDTH = 3072;
-const TEXTURE_HEIGHT = 1536;
+const TEXTURE_WIDTH = 4096;
+const TEXTURE_HEIGHT = 2048;
 const SPHERE_RADIUS = 1;
-const POINT_LIMIT = 90;
 const ARC_LIMIT = 20;
 
 let geometryPromise: Promise<WorldFeatureCollection> | null = null;
@@ -361,27 +360,27 @@ function disposeObject(object: Three.Object3D) {
 
 function createCapitalMarkerCanvas() {
   const canvas = document.createElement("canvas");
-  canvas.width = 96;
-  canvas.height = 96;
+  canvas.width = 192;
+  canvas.height = 192;
   const context = canvas.getContext("2d");
   if (!context) return canvas;
-  const glow = context.createRadialGradient(48, 48, 3, 48, 48, 43);
+  const glow = context.createRadialGradient(96, 96, 6, 96, 96, 86);
   glow.addColorStop(0, "rgba(255,255,255,1)");
   glow.addColorStop(0.16, "rgba(255,255,255,0.95)");
   glow.addColorStop(0.36, "rgba(255,255,255,0.3)");
   glow.addColorStop(1, "rgba(255,255,255,0)");
   context.fillStyle = glow;
-  context.fillRect(0, 0, 96, 96);
+  context.fillRect(0, 0, 192, 192);
   context.strokeStyle = "rgba(255,255,255,0.92)";
-  context.lineWidth = 3;
+  context.lineWidth = 5;
   context.beginPath();
-  context.arc(48, 48, 18, 0, Math.PI * 2);
+  context.arc(96, 96, 34, 0, Math.PI * 2);
   context.stroke();
   context.save();
-  context.translate(48, 48);
+  context.translate(96, 96);
   context.rotate(Math.PI / 4);
   context.fillStyle = "rgba(255,255,255,0.96)";
-  context.fillRect(-5, -5, 10, 10);
+  context.fillRect(-9, -9, 18, 18);
   context.restore();
   return canvas;
 }
@@ -405,7 +404,7 @@ function updatePoints(
       runtime.THREE,
       point.lat,
       point.lng,
-      1.006,
+      1.003,
     );
     const color = new runtime.THREE.Color(point.color);
     position.toArray(positions, index * 3);
@@ -418,7 +417,7 @@ function updatePoints(
   );
   geometry.setAttribute("color", new runtime.THREE.BufferAttribute(colors, 3));
   const material = new runtime.THREE.PointsMaterial({
-    size: 0.055,
+    size: 0.05,
     sizeAttenuation: true,
     transparent: true,
     opacity: 0.95,
@@ -518,7 +517,7 @@ export function WorldMap({
   onSelect,
   onReady,
   readyForDisplay = true,
-  statusLabel = "Ready",
+  statusLabel = "Live",
   linkEvents = [],
 }: WorldMapProps) {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -556,11 +555,21 @@ export function WorldMap({
     [worldGeometry],
   );
   const capitalIndex = useMemo(() => {
-    const byIso2 = new Map<string, CapitalCoordinate>();
-    const byIso3 = new Map<string, CapitalCoordinate>();
+    const byIso2 = new Map<string, CapitalCoordinate[]>();
+    const byIso3 = new Map<string, CapitalCoordinate[]>();
     for (const capital of capitalCoordinates) {
-      if (capital.iso2) byIso2.set(capital.iso2, capital);
-      if (capital.iso3) byIso3.set(capital.iso3, capital);
+      if (capital.iso2) {
+        byIso2.set(capital.iso2, [
+          ...(byIso2.get(capital.iso2) ?? []),
+          capital,
+        ]);
+      }
+      if (capital.iso3) {
+        byIso3.set(capital.iso3, [
+          ...(byIso3.get(capital.iso3) ?? []),
+          capital,
+        ]);
+      }
     }
     return { byIso2, byIso3 };
   }, [capitalCoordinates]);
@@ -568,8 +577,8 @@ export function WorldMap({
     const centers = { ...countryCenters };
     for (const country of countries) {
       const capital =
-        (country.iso2 ? capitalIndex.byIso2.get(country.iso2) : undefined) ??
-        (country.iso3 ? capitalIndex.byIso3.get(country.iso3) : undefined);
+        (country.iso2 ? capitalIndex.byIso2.get(country.iso2)?.[0] : undefined) ??
+        (country.iso3 ? capitalIndex.byIso3.get(country.iso3)?.[0] : undefined);
       if (!capital) continue;
       const position: MapPosition = [capital.lng, capital.lat];
       centers[country.name] = position;
@@ -605,33 +614,53 @@ export function WorldMap({
 
   const signalPoints = useMemo<GlobePoint[]>(
     () =>
-      countries
-        .filter((country) => country.topEvent)
+      [...countries]
         .sort(
           (left, right) =>
             (right.topEvent?.importanceScore ?? 0) -
-            (left.topEvent?.importanceScore ?? 0),
+              (left.topEvent?.importanceScore ?? 0) ||
+            left.name.localeCompare(right.name),
         )
-        .slice(0, POINT_LIMIT)
         .flatMap((country) => {
-          const capital =
+          const capitals =
             (country.iso2 ? capitalIndex.byIso2.get(country.iso2) : undefined) ??
-            (country.iso3 ? capitalIndex.byIso3.get(country.iso3) : undefined);
+            (country.iso3 ? capitalIndex.byIso3.get(country.iso3) : undefined) ??
+            [];
           const fallback =
             countryCenters[country.name] ?? countryCenters[country.mapId];
-          if (!capital && !fallback) return [];
-          return [
-            {
-              capital: capital?.capital ?? country.name,
-              color: mapStyleForEvent(
-                country.topEvent?.category,
-                country.topEvent?.importanceScore,
-              ).fillColor,
-              country,
-              lat: capital?.lat ?? fallback?.[1] ?? 0,
-              lng: capital?.lng ?? fallback?.[0] ?? 0,
-            },
-          ];
+          const locations = capitals.length
+            ? capitals
+            : fallback
+              ? [
+                  {
+                    capital: country.name,
+                    iso2: country.iso2 ?? null,
+                    iso3: country.iso3 ?? null,
+                    lat: fallback[1],
+                    lng: fallback[0],
+                  },
+                ]
+              : [];
+          const seen = new Set<string>();
+          return locations.flatMap((capital) => {
+            const key = `${capital.lat}:${capital.lng}`;
+            if (seen.has(key)) return [];
+            seen.add(key);
+            return [
+              {
+                capital: capital.capital,
+                color: country.topEvent
+                  ? mapStyleForEvent(
+                      country.topEvent.category,
+                      country.topEvent.importanceScore,
+                    ).fillColor
+                  : "#8aa3b2",
+                country,
+                lat: capital.lat,
+                lng: capital.lng,
+              },
+            ];
+          });
         }),
     [capitalIndex, countries, countryCenters],
   );
@@ -675,7 +704,7 @@ export function WorldMap({
         renderer.outputColorSpace = runtime.THREE.SRGBColorSpace;
         renderer.toneMapping = runtime.THREE.ACESFilmicToneMapping;
         renderer.toneMappingExposure = 1.08;
-        renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+        renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2.5));
         containerRef.current.replaceChildren(renderer.domElement);
 
         const textureCanvas = document.createElement("canvas");
@@ -695,7 +724,7 @@ export function WorldMap({
         );
 
         const sphere = new runtime.THREE.Mesh(
-          new runtime.THREE.SphereGeometry(SPHERE_RADIUS, 160, 96),
+          new runtime.THREE.SphereGeometry(SPHERE_RADIUS, 256, 160),
           new runtime.THREE.MeshStandardMaterial({
             map: texture,
             color: 0xffffff,
@@ -709,7 +738,7 @@ export function WorldMap({
         scene.add(sphere);
 
         const atmosphere = new runtime.THREE.Mesh(
-          new runtime.THREE.SphereGeometry(1.075, 96, 64),
+          new runtime.THREE.SphereGeometry(1.075, 192, 128),
           new runtime.THREE.MeshBasicMaterial({
             color: 0x5b9dbe,
             transparent: true,
@@ -735,9 +764,7 @@ export function WorldMap({
         controls.enablePan = false;
         controls.minDistance = 1.55;
         controls.maxDistance = 4;
-        controls.autoRotate =
-          !window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-        controls.autoRotateSpeed = 0.24;
+        controls.autoRotate = false;
 
         const globeScene: GlobeScene = {
           arcs: new runtime.THREE.Group(),
@@ -909,6 +936,12 @@ export function WorldMap({
   return (
     <div
       className="world-globe relative h-full min-h-[420px] w-full overflow-hidden bg-[#050a11]"
+      data-capital-country-count={
+        new Set(signalPoints.map((point) => point.country.mapId)).size
+      }
+      data-capital-marker-count={signalPoints.length}
+      data-globe-auto-rotate="false"
+      data-globe-texture={`${TEXTURE_WIDTH}x${TEXTURE_HEIGHT}`}
       aria-label="Interactive 3D world news globe. Drag to rotate, scroll to zoom, and click or tap a country to open its news panel."
       role="region"
       onPointerDown={(event) => {
@@ -933,10 +966,20 @@ export function WorldMap({
         </p>
       </div>
       <div
-        className="pointer-events-none absolute left-5 top-28 z-10 max-w-[calc(100%-2.5rem)] truncate rounded-full border border-[#354258] bg-[#0a121d]/90 px-3 py-1.5 font-mono text-[10px] uppercase tracking-[0.16em] text-[#aab5c5] sm:left-auto sm:right-4 sm:top-4 sm:max-w-[420px]"
+        className={`pointer-events-none absolute left-5 top-28 z-10 max-w-[calc(100%-2.5rem)] truncate rounded-full border px-3 py-1.5 font-mono text-[10px] uppercase tracking-[0.16em] sm:left-auto sm:right-4 sm:top-4 sm:max-w-[420px] ${
+          statusLabel === "Live"
+            ? "world-live-status border-[#ff5964]/70 bg-[#701822]/95 text-white"
+            : "border-[#354258] bg-[#0a121d]/90 text-[#aab5c5]"
+        }`}
         role="status"
         aria-live="polite"
       >
+        {statusLabel === "Live" ? (
+          <span
+            className="world-live-status__dot mr-2 inline-block h-1.5 w-1.5 rounded-full bg-white"
+            aria-hidden="true"
+          />
+        ) : null}
         {statusLabel}
       </div>
       {hovered ? (

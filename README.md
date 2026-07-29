@@ -15,7 +15,7 @@ The deployed application is the preferred live preview. A social preview is avai
 - **Hosted cache:** Cloudflare edge caching plus D1 persistence streams a recent live index immediately, refreshes it in the background, and provides resilience for deeper country and event feeds.
 - **Reference API:** FastAPI, Pydantic validation, SQLAlchemy 2, and PostgreSQL remain available for local full-stack development.
 - **Local orchestration:** Docker Compose starts PostgreSQL, migrates and seeds the API, then starts the web app with health checks.
-- **Hosted preview:** The browser starts the bounded batched country sweep and global feed automatically, keeps a staged readiness screen visible until every request has settled and the HD globe runtime is prepared, and then reveals the complete interface at once. Stable batch identities, stale-if-error responses, and bounded deep retries preserve recent valid signals through upstream timeouts. Results are occurrence-matched and publisher-deduplicated. The globe and country panel use the prepared country index, the right-to-left source feed has been replaced by a left-to-right breaking ticker, and Live Situation presents the ten strongest current global stories with one primary source each. The two uninhabited map areas remain neutral when no current reporting exists.
+- **Hosted preview:** The browser requests one cached world snapshot and the global feed, keeps the staged readiness screen visible until both feeds and the HD globe runtime are prepared, and then reveals the complete interface at once. Stable cache identities, stale-if-error responses, and bounded background refreshes preserve recent valid signals through upstream timeouts. Results are occurrence-matched and publisher-deduplicated. The globe and country panel use the prepared country index, the breaking ticker moves continuously from left to right, every mapped country receives a capital marker or geographic-center fallback, and Live Situation presents the ten strongest current global stories with one primary source each. The two uninhabited map areas remain neutral when no current reporting exists.
 
 The web app lives at the repository root to preserve the hosting runtime's required structure. `apps/api` contains the backend. See [architecture.md](docs/architecture.md) for details.
 
@@ -127,12 +127,11 @@ Scores are clamped to 0–100. Labels are `Major` (80–100), `Significant` (60�
 
 - Live coverage depends on the upstream RSS index and can be delayed, incomplete, or uneven across countries.
 - Headlines are clustered heuristically; they are not reviewed by a human editor.
-- Country geometry and globe textures are rendered locally; visual detail is bounded to keep interaction responsive on ordinary devices.
 - No authentication, personalization, alerting, or editorial administration is included.
 - Event clustering and multilingual entity extraction remain heuristic rather than editorially reviewed.
 - Source prominence and country-significance inputs require editorial governance in a real deployment.
 
-## Roadmap
+## Extensions requiring external services or editorial operations
 
 1. Add licensed news APIs and additional publisher-provided RSS feeds.
 2. Cluster articles into events with multilingual embeddings and human-review tooling.

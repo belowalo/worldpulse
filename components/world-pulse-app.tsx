@@ -822,7 +822,10 @@ function BreakingNewsBar({ events }: { events: Event[] }) {
         Breaking
       </div>
       <div className="breaking-news-viewport">
-        <div className="breaking-news-track">
+        <div
+          className="breaking-news-track"
+          data-breaking-direction="left-to-right"
+        >
           <div className="breaking-news-set">{renderItems()}</div>
           <div aria-hidden="true" className="breaking-news-set">
             {renderItems(true)}
@@ -1762,7 +1765,7 @@ export function WorldPulseApp({
   const worldStatusLabel = isSwitchingCountry
     ? "Opening country"
     : worldIndexComplete
-      ? "Ready"
+      ? "Live"
       : "Preparing the world";
 
   return (
