@@ -111,11 +111,12 @@ const ENGLISH_SIGNAL_WORDS = new Set([
   "is", "new", "of", "on", "says", "the", "to", "with",
 ]);
 const NON_ENGLISH_SIGNAL_WORDS = new Set([
-  "al", "avec", "că", "care", "ce", "da", "dans", "de", "del", "des",
-  "di", "din", "do", "du", "el", "en", "et", "für", "gli", "il", "în",
+  "al", "avec", "că", "care", "ce", "da", "dal", "dans", "de", "del",
+  "des", "di", "din", "do", "donde", "du", "el", "en", "et", "fehér",
+  "für", "gli", "il", "în",
   "la", "las", "le", "les", "los", "mais", "más", "nel", "o", "pe",
-  "pela", "pentru", "por", "pour", "que", "qui", "și", "sous", "su",
-  "sur", "un", "una", "une", "va", "și",
+  "pela", "pentru", "por", "pour", "que", "qui", "se", "și", "sous",
+  "su", "sur", "un", "una", "une", "va", "zöld", "nemcsak",
 ]);
 
 export function isLikelyEnglishHeadline(value: string) {
@@ -135,7 +136,7 @@ export function isLikelyEnglishHeadline(value: string) {
   const nonEnglishSignals = words.filter((word) =>
     NON_ENGLISH_SIGNAL_WORDS.has(word),
   ).length;
-  const hasAccentedLatin = /[\u00c0-\u024f]/u.test(value);
+  const hasAccentedLatin = /[\u00c0-\u02af]/u.test(value);
   return !(
     (nonEnglishSignals >= 3 ||
       (nonEnglishSignals >= 2 && englishSignals === 0) ||
