@@ -974,7 +974,7 @@ describe("WorldPulse interactions", () => {
     ).toHaveLength(egyptRequestsBeforeClick);
   });
 
-  it("keeps the loading screen visible until every live map batch is checked", async () => {
+  it("opens the interface after the first verified batch while the remaining index continues", async () => {
     let finishMexico: (() => void) | undefined;
     const mexicoReady = new Promise<void>((resolve) => {
       finishMexico = resolve;
@@ -1020,16 +1020,13 @@ describe("WorldPulse interactions", () => {
     render(<WorldPulseApp MapComponent={TestMap} />);
 
     expect(
-      await screen.findByRole("heading", {
-        name: "Loading the live world map",
-      }),
+      await screen.findByText("Indexing countries · 8/9"),
     ).toBeInTheDocument();
     expect(
-      await screen.findByText(/8\/9 country feeds checked/),
+      screen.getByRole("button", { name: "Global feed" }),
     ).toBeInTheDocument();
-    expect(
-      screen.queryByRole("button", { name: "Global feed" }),
-    ).not.toBeInTheDocument();
+    expect(screen.getByTestId("countries-with-news")).toHaveTextContent("8");
+    expect(screen.getByTestId("countries-syncing")).toHaveTextContent("1");
 
     await act(async () => {
       finishMexico?.();

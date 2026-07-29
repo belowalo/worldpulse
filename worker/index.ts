@@ -5,6 +5,7 @@ import {
   readStoredNewsFeed,
   writeStoredNewsFeed,
 } from "../db/news-cache";
+import { mergeCachedPayloads } from "./live-cache";
 import { handleLiveNews } from "./live-news";
 
 interface Env {
@@ -26,120 +27,8 @@ interface ExecutionContext {
 
 const LIVE_CACHE_NAME = "worldpulse-live-v19";
 const LIVE_CACHE_FRESH_MS = 5 * 60_000;
-const LIVE_MAP_STALE_MS = 30 * 60_000;
-const LIVE_CACHE_RETENTION_SECONDS = 24 * 60 * 60;
-const ARTICLE_RETENTION_MS = 8 * 24 * 60 * 60_000;
-
-type JsonRecord = Record<string, unknown>;
-
-function isJsonRecord(value: unknown): value is JsonRecord {
-  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
-}
-
-function cachedArticleKey(article: JsonRecord) {
-  for (const field of ["url", "id", "title"]) {
-    const value = article[field];
-    if (typeof value === "string" && value) return `${field}:${value}`;
-  }
-  return JSON.stringify(article);
-}
-
-function mergeCachedArticles(
-  freshArticles: unknown,
-  storedArticles: unknown,
-  limit: number,
-) {
-  const merged = new Map<string, JsonRecord>();
-  for (const candidate of [
-    ...(Array.isArray(freshArticles) ? freshArticles : []),
-    ...(Array.isArray(storedArticles) ? storedArticles : []),
-  ]) {
-    if (!isJsonRecord(candidate)) continue;
-    const publishedAt = candidate.publishedAt;
-    if (
-      typeof publishedAt === "string" &&
-      Number.isFinite(Date.parse(publishedAt)) &&
-      Date.now() - Date.parse(publishedAt) > ARTICLE_RETENTION_MS
-    ) {
-      continue;
-    }
-    const key = cachedArticleKey(candidate);
-    if (!merged.has(key)) merged.set(key, candidate);
-  }
-  return [...merged.values()]
-    .sort((left, right) => {
-      const leftDate =
-        typeof left.publishedAt === "string"
-          ? Date.parse(left.publishedAt)
-          : 0;
-      const rightDate =
-        typeof right.publishedAt === "string"
-          ? Date.parse(right.publishedAt)
-          : 0;
-      return rightDate - leftDate;
-    })
-    .slice(0, limit);
-}
-
-function mergeCachedPayloads(freshText: string, storedText: string) {
-  try {
-    const fresh = JSON.parse(freshText) as unknown;
-    const stored = JSON.parse(storedText) as unknown;
-    if (!isJsonRecord(fresh) || !isJsonRecord(stored)) return freshText;
-
-    if (fresh.scope === "map") {
-      const storedCountries = new Map<string, JsonRecord>();
-      for (const country of Array.isArray(stored.countries)
-        ? stored.countries
-        : []) {
-        if (
-          isJsonRecord(country) &&
-          typeof country.countryName === "string"
-        ) {
-          storedCountries.set(country.countryName, country);
-        }
-      }
-      const countries = (Array.isArray(fresh.countries)
-        ? fresh.countries
-        : []
-      ).flatMap((country) => {
-        if (
-          !isJsonRecord(country) ||
-          typeof country.countryName !== "string"
-        ) {
-          return [];
-        }
-        const previous = storedCountries.get(country.countryName);
-        return [
-          {
-            ...previous,
-            ...country,
-            articles: mergeCachedArticles(
-              country.articles,
-              previous?.articles,
-              32,
-            ),
-          },
-        ];
-      });
-      return JSON.stringify({ ...stored, ...fresh, countries });
-    }
-
-    const limit =
-      fresh.scope === "global" ? 700 : fresh.scope === "event" ? 40 : 180;
-    return JSON.stringify({
-      ...stored,
-      ...fresh,
-      articles: mergeCachedArticles(
-        fresh.articles,
-        stored.articles,
-        limit,
-      ),
-    });
-  } catch {
-    return freshText;
-  }
-}
+const LIVE_CACHE_RETENTION_SECONDS = 3 * 24 * 60 * 60;
+const LIVE_MAP_STALE_MS = LIVE_CACHE_RETENTION_SECONDS * 1_000;
 
 function normalizedLiveCacheKey(request: Request) {
   const url = new URL(request.url);
@@ -153,7 +42,7 @@ function normalizedLiveCacheKey(request: Request) {
 
 function responseWithCacheState(
   response: Response,
-  state: "hit" | "miss" | "refreshing",
+  state: "hit" | "miss" | "refreshing" | "stale-if-error",
 ) {
   const headers = new Headers(response.headers);
   headers.set("Cache-Control", "public, max-age=30, must-revalidate");
@@ -161,6 +50,36 @@ function responseWithCacheState(
   return new Response(response.body, {
     status: response.status,
     statusText: response.statusText,
+    headers,
+  });
+}
+
+function persistentResponse(payload: string, generatedAt: number) {
+  return new Response(payload, {
+    headers: {
+      "Cache-Control": `public, max-age=${LIVE_CACHE_RETENTION_SECONDS}`,
+      "Content-Type": "application/json; charset=utf-8",
+      "X-WorldPulse-Cached-At": String(generatedAt),
+    },
+  });
+}
+
+async function mergeFreshResponse(
+  fresh: Response,
+  fallback: Response | null,
+) {
+  if (!fallback) return fresh;
+  if (!fresh.ok) return responseWithCacheState(fallback, "stale-if-error");
+
+  const [freshPayload, storedPayload] = await Promise.all([
+    fresh.text(),
+    fallback.text(),
+  ]);
+  const headers = new Headers(fresh.headers);
+  headers.delete("content-length");
+  return new Response(mergeCachedPayloads(freshPayload, storedPayload), {
+    status: fresh.status,
+    statusText: fresh.statusText,
     headers,
   });
 }
@@ -246,16 +165,40 @@ async function handleCachedLiveNews(
   const requestUrl = new URL(request.url);
   const isMapSearch = requestUrl.searchParams.get("scope") === "map";
   const forceFresh = requestUrl.searchParams.get("fresh") === "1";
+  const cached = await cache.match(cacheKey);
   if (forceFresh) {
     requestUrl.searchParams.delete("fresh");
+    let fallback = cached?.clone() ?? null;
+    if (!fallback && env.DB) {
+      try {
+        const stored = await readStoredNewsFeed(env.DB, cacheKey.url);
+        if (
+          stored &&
+          Date.now() - stored.generated_at <
+            LIVE_CACHE_RETENTION_SECONDS * 1_000
+        ) {
+          fallback = persistentResponse(stored.payload, stored.generated_at);
+        }
+      } catch (error) {
+        console.warn(
+          JSON.stringify({
+            event: "news_persistent_cache_read_failed",
+            error: error instanceof Error ? error.message : "unknown error",
+          }),
+        );
+      }
+    }
     const fresh = await handleLiveNews(new Request(requestUrl, request));
+    if (!fresh.ok && fallback) {
+      return responseWithCacheState(fallback, "stale-if-error");
+    }
+    const merged = await mergeFreshResponse(fresh, fallback);
     ctx.waitUntil(
-      storeLiveResponse(cache, cacheKey, fresh.clone(), env.DB),
+      storeLiveResponse(cache, cacheKey, merged.clone(), env.DB),
     );
-    return responseWithCacheState(fresh, "miss");
+    return responseWithCacheState(merged, "miss");
   }
 
-  const cached = await cache.match(cacheKey);
   if (cached) {
     const cachedAt = Number(cached.headers.get("X-WorldPulse-Cached-At"));
     const cacheAge = Number.isFinite(cachedAt)
@@ -267,10 +210,14 @@ async function handleCachedLiveNews(
       isMapSearch && cacheAge < LIVE_MAP_STALE_MS;
     if (!isFresh && isMapSearch && !canStreamMapWhileRefreshing) {
       const fresh = await handleLiveNews(cacheKey);
+      if (!fresh.ok) {
+        return responseWithCacheState(cached, "stale-if-error");
+      }
+      const merged = await mergeFreshResponse(fresh, cached.clone());
       ctx.waitUntil(
-        storeLiveResponse(cache, cacheKey, fresh.clone(), env.DB),
+        storeLiveResponse(cache, cacheKey, merged.clone(), env.DB),
       );
-      return responseWithCacheState(fresh, "miss");
+      return responseWithCacheState(merged, "miss");
     }
     if (!isFresh) {
       ctx.waitUntil(refreshLiveResponse(cache, cacheKey, env.DB));
@@ -286,12 +233,10 @@ async function handleCachedLiveNews(
         Date.now() - stored.generated_at <
           LIVE_CACHE_RETENTION_SECONDS * 1_000
       ) {
-        const headers = new Headers({
-          "Cache-Control": `public, max-age=${LIVE_CACHE_RETENTION_SECONDS}`,
-          "Content-Type": "application/json; charset=utf-8",
-          "X-WorldPulse-Cached-At": String(stored.generated_at),
-        });
-        const persistentResponse = new Response(stored.payload, { headers });
+        const storedResponse = persistentResponse(
+          stored.payload,
+          stored.generated_at,
+        );
         const storedAge = Date.now() - stored.generated_at;
         const isFresh =
           storedAge < LIVE_CACHE_FRESH_MS;
@@ -305,11 +250,11 @@ async function handleCachedLiveNews(
         } else {
           ctx.waitUntil(
             isFresh
-              ? cache.put(cacheKey, persistentResponse.clone())
+              ? cache.put(cacheKey, storedResponse.clone())
               : refreshLiveResponse(cache, cacheKey, env.DB),
           );
           return responseWithCacheState(
-            persistentResponse,
+            storedResponse,
             isFresh ? "hit" : "refreshing",
           );
         }

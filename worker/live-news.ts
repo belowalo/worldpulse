@@ -3,6 +3,7 @@ import {
   countrySearchTerms,
   textMatchesCountry,
 } from "../lib/country-terms";
+import { googleNewsLocaleForCountry } from "../lib/country-locale";
 import { newsTextTokens } from "../lib/live-news";
 
 export interface FeedArticle {
@@ -102,6 +103,20 @@ const COUNTRY_NEWS_QUERY_OVERRIDES: Record<string, string> = {
   "Saint Pierre and Miquelon": "Saint-Pierre-et-Miquelon",
   "South Georgia and the South Sandwich Islands": "South Georgia island",
 };
+
+function newsSearchTerms(countryName: string, requestedRegion = "") {
+  const terms = countrySearchTerms(countryName);
+  const locale = googleNewsLocaleForCountry(countryName, requestedRegion);
+  try {
+    const localName = new Intl.DisplayNames([locale.language], {
+      type: "region",
+    }).of(locale.region);
+    if (localName) terms.push(localName);
+  } catch {
+    // The canonical and known alias terms remain sufficient as a fallback.
+  }
+  return [...new Set(terms)];
+}
 
 async function mapWithConcurrency<T, R>(
   items: T[],
@@ -557,6 +572,7 @@ function bingNewsProvider(name: string, query: string): NewsProvider {
 
 function googleCountryProvider(countryName: string): NewsProvider {
   const queryTerm = COUNTRY_NEWS_QUERY_OVERRIDES[countryName] ?? countryName;
+  const locale = googleNewsLocaleForCountry(countryName);
   return {
     name: "Google News · Current country search",
     publisherUrl: "https://news.google.com/",
@@ -565,9 +581,9 @@ function googleCountryProvider(countryName: string): NewsProvider {
     url: () => {
       const url = new URL("https://news.google.com/rss/search");
       url.searchParams.set("q", `"${queryTerm}" when:7d`);
-      url.searchParams.set("hl", "en-US");
-      url.searchParams.set("gl", "US");
-      url.searchParams.set("ceid", "US:en");
+      url.searchParams.set("hl", locale.hl);
+      url.searchParams.set("gl", locale.region);
+      url.searchParams.set("ceid", locale.ceid);
       return url;
     },
     parse: parseGoogleNewsFeed,
@@ -701,7 +717,7 @@ async function fetchMapCountry(
   fetchImpl: FetchImplementation,
 ) {
   const countryName = canonicalCountryName(requestedCountry);
-  const terms = countrySearchTerms(requestedCountry);
+  const terms = newsSearchTerms(requestedCountry);
   const googleProvider = googleCountryProvider(countryName);
   const countryProviders = countryBingProviders(countryName);
   const results = [
@@ -1051,7 +1067,7 @@ export async function handleLiveNews(
       : null;
   const terms =
     scope === "country" && countryName
-      ? countrySearchTerms(requestedCountry)
+      ? newsSearchTerms(requestedCountry, requestedRegion)
       : [];
   const providers =
     scope === "event"

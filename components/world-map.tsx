@@ -69,25 +69,36 @@ export function WorldMap({
   const onSelectRef = useRef(onSelect);
   const countriesRef = useRef(countries);
   const selectedMapIdRef = useRef(selectedMapId);
+  const hoverFrameRef = useRef<number | null>(null);
+  const pendingHoverRef = useRef<HoveredCountry | null>(null);
   const [countryCenters, setCountryCenters] = useState<
     Record<string, MapPosition>
   >({});
   const [hovered, setHovered] = useState<HoveredCountry | null>(null);
+  const countryIndex = useMemo(() => {
+    const byName = new Map<string, MapCountry>();
+    const byId = new Map<string, MapCountry>();
+    for (const country of countries) {
+      byName.set(country.name, country);
+      byId.set(country.mapId, country);
+    }
+    return { byName, byId };
+  }, [countries]);
+  const countryIndexRef = useRef(countryIndex);
   useEffect(() => {
     onSelectRef.current = onSelect;
     countriesRef.current = countries;
     selectedMapIdRef.current = selectedMapId;
-  }, [countries, onSelect, selectedMapId]);
+    countryIndexRef.current = countryIndex;
+  }, [countries, countryIndex, onSelect, selectedMapId]);
   const colorExpression = useMemo(
     () => buildCountryColorExpression(countries),
     [countries],
   );
   const hoveredCountry = hovered
-    ? (countries.find(
-        (country) =>
-          country.mapId === hovered.country.mapId ||
-          country.name === hovered.country.name,
-      ) ?? hovered.country)
+    ? (countryIndex.byId.get(hovered.country.mapId) ??
+      countryIndex.byName.get(hovered.country.name) ??
+      hovered.country)
     : null;
   const colorExpressionRef =
     useRef<ExpressionSpecification>(colorExpression);
@@ -289,11 +300,11 @@ export function WorldMap({
         typeof feature.properties?.name === "string"
           ? feature.properties.name.trim()
           : "";
-      const indexedCountry = countriesRef.current.find(
-        (country) =>
-          (name && country.name === name) ||
-          (feature.id != null && country.mapId === String(feature.id)),
-      );
+      const indexedCountry =
+        (name ? countryIndexRef.current.byName.get(name) : undefined) ??
+        (feature.id != null
+          ? countryIndexRef.current.byId.get(String(feature.id))
+          : undefined);
       if (indexedCountry) return indexedCountry;
 
       if (!name) return undefined;
@@ -309,18 +320,27 @@ export function WorldMap({
       map.getCanvas().style.cursor = country ? "pointer" : "";
       const mapWidth = containerRef.current?.clientWidth ?? 720;
       const mapHeight = containerRef.current?.clientHeight ?? 520;
-      setHovered(
-        country
-          ? {
-              x: Math.max(12, Math.min(event.point.x + 14, mapWidth - 272)),
-              y: Math.max(96, Math.min(event.point.y - 24, mapHeight - 150)),
-              country,
-            }
-          : null,
-      );
+      pendingHoverRef.current = country
+        ? {
+            x: Math.max(12, Math.min(event.point.x + 14, mapWidth - 272)),
+            y: Math.max(96, Math.min(event.point.y - 24, mapHeight - 150)),
+            country,
+          }
+        : null;
+      if (hoverFrameRef.current === null) {
+        hoverFrameRef.current = window.requestAnimationFrame(() => {
+          hoverFrameRef.current = null;
+          setHovered(pendingHoverRef.current);
+        });
+      }
     });
     map.on("mouseleave", FILL_LAYER, () => {
       map.getCanvas().style.cursor = "";
+      pendingHoverRef.current = null;
+      if (hoverFrameRef.current !== null) {
+        window.cancelAnimationFrame(hoverFrameRef.current);
+        hoverFrameRef.current = null;
+      }
       setHovered(null);
     });
     map.on("click", FILL_LAYER, (event: MapMouseEvent) => {
@@ -331,6 +351,10 @@ export function WorldMap({
     mapRef.current = map;
     return () => {
       resizeObserver.disconnect();
+      if (hoverFrameRef.current !== null) {
+        window.cancelAnimationFrame(hoverFrameRef.current);
+        hoverFrameRef.current = null;
+      }
       map.remove();
       mapRef.current = null;
     };
@@ -354,15 +378,15 @@ export function WorldMap({
   useEffect(() => {
     const map = mapRef.current;
     if (!map?.getLayer(SELECTED_LAYER)) return;
-    const selectedCountryName = countries.find(
-      (country) => country.mapId === selectedMapId,
-    )?.name;
+    const selectedCountryName = selectedMapId
+      ? countryIndex.byId.get(selectedMapId)?.name
+      : undefined;
     map.setFilter(SELECTED_LAYER, [
       "==",
       ["get", "name"],
       selectedCountryName ?? "__none__",
     ]);
-  }, [countries, selectedMapId]);
+  }, [countryIndex, selectedMapId]);
 
   return (
     <div
@@ -427,7 +451,9 @@ export function WorldMap({
             </>
           ) : (
             <p className="mt-2 text-xs text-[#8f9caf]">
-              No current coverage matched this country.
+              {hoveredCountry.signalReady === false
+                ? "Checking current country coverage…"
+                : "No verified country-specific headline is currently indexed."}
             </p>
           )}
         </div>
