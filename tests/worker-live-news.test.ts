@@ -61,6 +61,27 @@ describe("worker live-news providers", () => {
     expect(articleMatchesCountry(articles[0], ["Chad"])).toBe(false);
   });
 
+  it("retains safe article imagery from RSS media metadata", () => {
+    const [article] = parsePublisherRss(
+      `
+        <rss xmlns:media="http://search.yahoo.com/mrss/"><channel><item>
+          <title>Canada announces a new national housing plan</title>
+          <description>New homes will be built across Canada.</description>
+          <link>https://publisher.example/canada-housing</link>
+          <guid>canada-housing</guid>
+          <pubDate>Fri, 24 Jul 2026 20:00:00 GMT</pubDate>
+          <media:content url="https://images.publisher.example/housing.jpg" type="image/jpeg" width="1280" height="720" />
+        </item></channel></rss>
+      `,
+      "Example News",
+      "https://publisher.example/",
+    );
+
+    expect(article.imageUrl).toBe(
+      "https://images.publisher.example/housing.jpg",
+    );
+  });
+
   it("matches Egypt reporting written in Arabic", () => {
     expect(
       articleMatchesCountry(

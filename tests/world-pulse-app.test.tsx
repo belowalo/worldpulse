@@ -20,6 +20,7 @@ type TestLiveArticle = {
   id: string;
   title: string;
   description?: string;
+  imageUrl?: string;
   url: string;
   publisherName: string;
   publisherUrl: string;
@@ -282,6 +283,7 @@ describe("WorldPulse interactions", () => {
                 id: "canada-mexico-trade",
                 title: headline,
                 url: "https://publisher.example/canada-mexico-trade",
+                imageUrl: "https://images.publisher.example/trade.jpg",
                 publisherName: "Test Publisher",
                 publisherUrl: "https://publisher.example/",
                 publishedAt: "2026-07-25T00:00:00.000Z",
@@ -299,9 +301,22 @@ describe("WorldPulse interactions", () => {
     expect(
       screen.queryByRole("button", { name: /connections/i }),
     ).not.toBeInTheDocument();
+
+    fireEvent.click(within(dialog).getByRole("button", { name: "Close" }));
+    fireEvent.click(screen.getByRole("button", { name: "Live News" }));
+    const liveNewsDialog = screen.getByRole("dialog", { name: "Live News" });
+    expect(
+      within(liveNewsDialog).getByTitle("Al Jazeera English live news"),
+    ).toHaveAttribute(
+      "src",
+      expect.stringContaining("youtube-nocookie.com/embed/live_stream"),
+    );
+    expect(
+      within(liveNewsDialog).getByText("Other live feeds"),
+    ).toBeInTheDocument();
   });
 
-  it("limits Live Situation to the ten strongest global stories", async () => {
+  it("limits Live Situation to the twelve strongest global stories", async () => {
     const globalArticles = Array.from({ length: 45 }, (_, index) => ({
       id: `global-${index}`,
       title: `Distinct event marker${index} topic${index} dispatch${index}`,
@@ -332,8 +347,8 @@ describe("WorldPulse interactions", () => {
     render(<WorldPulseApp MapComponent={TestMap} />);
     fireEvent.click(await screen.findByRole("button", { name: "Live Situation" }));
     const dialog = screen.getByRole("dialog", { name: "Live Situation" });
-    expect(within(dialog).getByText("Situation 10")).toBeInTheDocument();
-    expect(within(dialog).getAllByRole("link")).toHaveLength(10);
+    expect(within(dialog).getByText("Situation 12")).toBeInTheDocument();
+    expect(within(dialog).getAllByRole("link")).toHaveLength(12);
   });
 
   it("automatically expands a visible event to five publishers and shows rated coverage mix", async () => {

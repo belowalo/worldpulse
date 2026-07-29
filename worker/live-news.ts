@@ -10,6 +10,7 @@ export interface FeedArticle {
   id: string;
   title: string;
   description?: string;
+  imageUrl?: string;
   url: string;
   publisherName: string;
   publisherUrl: string;
@@ -252,6 +253,36 @@ function safeHttpUrl(value: string) {
   }
 }
 
+function imageUrlFromFeedItem(item: string) {
+  const decodedItem = decodeXml(item);
+  const mediaTags =
+    decodedItem.match(
+      /<(?:media:content|media:thumbnail|enclosure)\b[^>]*>/gi,
+    ) ?? [];
+  for (const tag of mediaTags) {
+    if (
+      /^<enclosure/i.test(tag) &&
+      /\btype=["'](?!image\/)[^"']+["']/i.test(tag)
+    ) {
+      continue;
+    }
+    const url = tag.match(/\burl=["']([^"']+)["']/i)?.[1] ?? "";
+    const width = Number(tag.match(/\bwidth=["'](\d+)["']/i)?.[1]);
+    const height = Number(tag.match(/\bheight=["'](\d+)["']/i)?.[1]);
+    if ((width > 0 && width <= 2) || (height > 0 && height <= 2)) continue;
+    const safeUrl = safeHttpUrl(url);
+    if (safeUrl) return safeUrl;
+  }
+
+  for (const tag of ["News:Image", "News:ImageUrl", "image"]) {
+    const safeUrl = safeHttpUrl(tagValue(item, tag));
+    if (safeUrl) return safeUrl;
+  }
+
+  const imageTag = decodedItem.match(/<img\b[^>]*\bsrc=["']([^"']+)["']/i);
+  return safeHttpUrl(imageTag?.[1] ?? "") || undefined;
+}
+
 function canonicalArticleKey(article: FeedArticle) {
   try {
     const url = new URL(article.url);
@@ -269,6 +300,7 @@ function buildCandidate(
   publishedAt: string,
   description = "",
   id = "",
+  imageUrl = "",
 ): CandidateArticle | null {
   const safeUrl = safeHttpUrl(url);
   const cleanTitle = stripMarkup(title);
@@ -325,6 +357,7 @@ function buildCandidate(
     id: stableId(id || safeUrl),
     title: cleanTitle,
     description: cleanDescription || undefined,
+    imageUrl: safeHttpUrl(imageUrl) || undefined,
     url: safeUrl,
     publisherName: cleanPublisherName,
     publisherUrl: safeHttpUrl(publisherUrl) || new URL(safeUrl).origin,
@@ -354,6 +387,7 @@ export function parsePublisherRss(
         tagValue(item, "dc:date"),
       tagValue(item, "description") || tagValue(item, "content:encoded"),
       tagValue(item, "guid"),
+      imageUrlFromFeedItem(item),
     );
     return article ? [article] : [];
   });
@@ -377,6 +411,7 @@ export function parseGoogleNewsFeed(xml: string) {
       tagValue(item, "pubDate"),
       tagValue(item, "description"),
       tagValue(item, "guid"),
+      imageUrlFromFeedItem(item),
     );
     return article ? [article] : [];
   });
@@ -420,6 +455,7 @@ export function parseBingNewsFeed(xml: string) {
       tagValue(item, "pubDate"),
       tagValue(item, "description"),
       tagValue(item, "guid") || articleUrl,
+      imageUrlFromFeedItem(item),
     );
     return article ? [article] : [];
   });
@@ -433,6 +469,7 @@ export function parseGdeltJson(body: string) {
       domain?: string;
       seendate?: string;
       language?: string;
+      socialimage?: string;
     }>;
   };
   return (payload.articles ?? []).flatMap((item) => {
@@ -449,6 +486,7 @@ export function parseGdeltJson(body: string) {
       item.seendate ?? "",
       "",
       item.url,
+      item.socialimage,
     );
     return article ? [article] : [];
   });
@@ -960,6 +998,7 @@ function mergeArticles(results: ProviderResult[], limit: number) {
       id: article.id,
       title: article.title,
       description: article.description,
+      imageUrl: article.imageUrl,
       url: article.url,
       publisherName: article.publisherName,
       publisherUrl: article.publisherUrl,
@@ -1000,6 +1039,7 @@ function mergeRankedArticles(results: ProviderResult[], limit: number) {
         id: article.id,
         title: article.title,
         description: article.description,
+        imageUrl: article.imageUrl,
         url: article.url,
         publisherName: article.publisherName,
         publisherUrl: article.publisherUrl,

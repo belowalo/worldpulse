@@ -145,7 +145,7 @@ function normalizedLiveCacheKey(request: Request) {
   url.hash = "";
   url.searchParams.delete("release");
   url.searchParams.delete("fresh");
-  url.searchParams.set("__wp_cache", "19");
+  url.searchParams.set("__wp_cache", "20");
   url.searchParams.sort();
   return new Request(url.toString(), { method: "GET" });
 }

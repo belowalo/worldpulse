@@ -28,7 +28,7 @@ The web app is at the repository root because the deployable Sites runtime expec
 ## Web boundaries
 
 - `components/world-map.tsx` owns the lean Three.js/WebGL lifecycle, high-density canvas country texture and hit map, orbit controls, capital signal markers, selected-story arcs, hover, and selection.
-- `components/world-pulse-app.tsx` owns startup readiness, filters, country selection, the breaking-news ticker, Live Situation, event cards, and methodology.
+- `components/world-pulse-app.tsx` owns startup readiness, filters, country selection, the breaking-news ticker, image-backed Live Situation briefing, switchable Live News video screen, event cards, and methodology.
 - `lib/globe-runtime.ts` is the dynamically loaded, tree-shaken Three.js runtime boundary.
 - `lib/scoring.ts` is UI-independent and contains score labels plus reusable category/intensity globe styling.
 - `lib/live-news.ts` classifies and clusters live headline metadata into scored events.
@@ -65,4 +65,4 @@ The API validates pagination bounds and returns a consistent `{"error": ...}` en
 
 ## Deployment
 
-Docker Compose is the full local reference deployment. The hosted app packages the Next.js surface, cached feed-metadata proxy, and D1 migration as a Cloudflare-compatible worker. A readiness screen remains above the interface until the country directory, full world sweep, global feed, capital index, and globe runtime are all prepared. Country relevance is checked before a result enters the prepared signal shared by the panel and globe. The breaking ticker and Live Situation read the global event feed without exposing a second global-feed panel. Missing current coverage stays neutral.
+Docker Compose is the full local reference deployment. The hosted app packages the Next.js surface, cached feed-metadata proxy, and D1 migration as a Cloudflare-compatible worker. A readiness screen remains above the interface until the country directory, full world sweep, global feed, capital index, and globe runtime are all prepared. Country relevance is checked before a result enters the prepared signal shared by the panel and globe. The breaking ticker, twelve-story Live Situation briefing, and Live News topic selector read the global event feed without exposing a second global-feed panel. RSS media metadata is retained when providers publish a safe article image. Live video loads only after the viewer opens Live News, keeping the primary experience lean. Missing current coverage stays neutral.

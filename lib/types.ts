@@ -45,6 +45,7 @@ export interface Article {
   id: string;
   headline: string;
   originalUrl: string;
+  imageUrl?: string;
   source: NewsSource;
   publishedAt: string;
   extractedCountries: string[];
@@ -114,6 +115,7 @@ export interface LiveArticle {
   id: string;
   title: string;
   description?: string;
+  imageUrl?: string;
   url: string;
   publisherName: string;
   publisherUrl: string;

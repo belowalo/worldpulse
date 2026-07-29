@@ -654,7 +654,7 @@ function LiveSituationModal({
     return () => window.removeEventListener("keydown", closeOnEscape);
   }, [onClose]);
 
-  const stories = events.slice(0, 10);
+  const stories = events.slice(0, 12);
   return (
     <div
       className="fixed inset-0 z-50 overflow-y-auto bg-[#050910]/95 p-4 backdrop-blur-xl sm:p-7"
@@ -675,7 +675,7 @@ function LiveSituationModal({
               Live Situation
             </h2>
             <p className="mt-2 max-w-2xl text-sm leading-6 text-[#92a0b3]">
-              The ten strongest current global stories, with one primary source
+              The twelve strongest current global stories, with one primary source
               per story for a fast, uncluttered briefing.
             </p>
           </div>
@@ -691,9 +691,11 @@ function LiveSituationModal({
         {stories.length ? (
           <div className="mt-6 grid gap-4 md:grid-cols-2 xl:grid-cols-3">
             {stories.map((event, index) => {
-              const source = event.articles[0];
+              const source =
+                event.articles.find((article) => article.imageUrl) ??
+                event.articles[0];
               const content = (
-                <>
+                <div className="relative z-10 flex min-h-64 flex-col p-5">
                   <div className="flex items-center justify-between gap-3">
                     <span className="font-mono text-[9px] uppercase tracking-[0.18em] text-[#718197]">
                       Situation {String(index + 1).padStart(2, "0")}
@@ -724,11 +726,26 @@ function LiveSituationModal({
                   >
                     {event.summary}
                   </p>
-                  <div className="mt-6 flex items-center justify-between gap-3 border-t border-[#263449] pt-4 font-mono text-[8px] uppercase tracking-[0.12em] text-[#718197]">
+                  <div className="mt-auto flex items-center justify-between gap-3 border-t border-white/10 pt-4 font-mono text-[8px] uppercase tracking-[0.12em] text-[#aeb9c8]">
                     <span>{source?.source.publisherName ?? event.category}</span>
                     <span>{formatTime(event.lastUpdatedAt)}</span>
                   </div>
-                </>
+                </div>
+              );
+              const backdrop = source?.imageUrl ? (
+                <div
+                  aria-hidden="true"
+                  className="absolute inset-0 bg-cover bg-center opacity-45 transition duration-500 group-hover:scale-[1.025] group-hover:opacity-55"
+                  style={{ backgroundImage: `url("${source.imageUrl}")` }}
+                />
+              ) : (
+                <div
+                  aria-hidden="true"
+                  className="absolute inset-0 opacity-25"
+                  style={{
+                    background: `radial-gradient(circle at 85% 15%, ${categoryColor(event.category)}, transparent 52%)`,
+                  }}
+                />
               );
               return source?.originalUrl ? (
                 <a
@@ -736,15 +753,25 @@ function LiveSituationModal({
                   href={source.originalUrl}
                   target="_blank"
                   rel="noreferrer"
-                  className="min-h-64 rounded-2xl border border-[#2a394e] bg-[linear-gradient(145deg,#121d2d,#0b131f)] p-5 shadow-[0_18px_60px_rgba(0,0,0,0.22)] transition hover:-translate-y-0.5 hover:border-[#52667f]"
+                  className="group relative isolate min-h-64 overflow-hidden rounded-2xl border border-[#2a394e] bg-[#0b131f] shadow-[0_18px_60px_rgba(0,0,0,0.22)] transition hover:-translate-y-0.5 hover:border-[#52667f]"
                 >
+                  {backdrop}
+                  <div
+                    aria-hidden="true"
+                    className="absolute inset-0 bg-[linear-gradient(180deg,rgba(5,9,16,0.34),rgba(5,9,16,0.9)_66%,#08101b)]"
+                  />
                   {content}
                 </a>
               ) : (
                 <article
                   key={event.id}
-                  className="min-h-64 rounded-2xl border border-[#2a394e] bg-[linear-gradient(145deg,#121d2d,#0b131f)] p-5"
+                  className="group relative isolate min-h-64 overflow-hidden rounded-2xl border border-[#2a394e] bg-[#0b131f]"
                 >
+                  {backdrop}
+                  <div
+                    aria-hidden="true"
+                    className="absolute inset-0 bg-[linear-gradient(180deg,rgba(5,9,16,0.34),rgba(5,9,16,0.9)_66%,#08101b)]"
+                  />
                   {content}
                 </article>
               );
@@ -753,6 +780,291 @@ function LiveSituationModal({
         ) : (
           <div className="mt-6 rounded-2xl border border-dashed border-[#34445a] p-12 text-center text-sm text-[#8996a8]">
             The live situation feed is still settling. Try again shortly.
+          </div>
+        )}
+      </section>
+    </div>
+  );
+}
+
+interface LiveNewsChannel {
+  id: string;
+  name: string;
+  channelId: string;
+  channelUrl: string;
+  publisherMatches: string[];
+}
+
+const LIVE_NEWS_CHANNELS: LiveNewsChannel[] = [
+  {
+    id: "al-jazeera",
+    name: "Al Jazeera English",
+    channelId: "UCNye-wNBqNL5ZzHSJj3l8Bg",
+    channelUrl: "https://www.youtube.com/@aljazeeraenglish/live",
+    publisherMatches: ["al jazeera"],
+  },
+  {
+    id: "sky-news",
+    name: "Sky News",
+    channelId: "UCoMdktPbSTixAyNGwb-UYkQ",
+    channelUrl: "https://www.youtube.com/@SkyNews/live",
+    publisherMatches: ["sky news"],
+  },
+  {
+    id: "bbc-news",
+    name: "BBC News",
+    channelId: "UC16niRr50-MSBwiO3YDb3RA",
+    channelUrl: "https://www.youtube.com/@BBCNews/live",
+    publisherMatches: ["bbc", "bbc news"],
+  },
+  {
+    id: "dw-news",
+    name: "DW News",
+    channelId: "UCknLrEdhRCp1aegoMqRaCZg",
+    channelUrl: "https://www.youtube.com/@dwnews/live",
+    publisherMatches: ["deutsche welle", "dw", "dw news"],
+  },
+  {
+    id: "france-24",
+    name: "France 24 English",
+    channelId: "UCQfwfsi5VrQ8yKZ-UWmAEFg",
+    channelUrl: "https://www.youtube.com/@France24_en/live",
+    publisherMatches: ["france 24"],
+  },
+  {
+    id: "nbc-news",
+    name: "NBC News",
+    channelId: "UCeY0bbntWzzVIaj2z3QigXg",
+    channelUrl: "https://www.youtube.com/@NBCNews/live",
+    publisherMatches: ["nbc", "nbc news"],
+  },
+  {
+    id: "abc-news",
+    name: "ABC News",
+    channelId: "UCBi2mrWuNuyYy4gbM6fU18Q",
+    channelUrl: "https://www.youtube.com/@ABCNews/live",
+    publisherMatches: ["abc", "abc news"],
+  },
+  {
+    id: "cbs-news",
+    name: "CBS News",
+    channelId: "UC8p1vwvWtl6T73JiExfWs1g",
+    channelUrl: "https://www.youtube.com/@CBSNews/live",
+    publisherMatches: ["cbs", "cbs news"],
+  },
+];
+
+function normalizedPublisher(value: string) {
+  return value.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, " ").trim();
+}
+
+function channelsForBreakingEvent(event?: Event) {
+  if (!event) return LIVE_NEWS_CHANNELS;
+  const publishers = event.articles.map((article) =>
+    normalizedPublisher(article.source.publisherName),
+  );
+  return [...LIVE_NEWS_CHANNELS].sort((left, right) => {
+    const leftMatch = left.publisherMatches.some((match) =>
+      publishers.some((publisher) => publisher.includes(match)),
+    );
+    const rightMatch = right.publisherMatches.some((match) =>
+      publishers.some((publisher) => publisher.includes(match)),
+    );
+    return Number(rightMatch) - Number(leftMatch);
+  });
+}
+
+function liveStorySearchUrl(event: Event, channel: LiveNewsChannel) {
+  const query = encodeURIComponent(`${event.headline} ${channel.name} live`);
+  return `https://www.youtube.com/results?search_query=${query}&sp=EgJAAQ%253D%253D`;
+}
+
+function LiveNewsModal({
+  events,
+  onClose,
+}: {
+  events: Event[];
+  onClose: () => void;
+}) {
+  const stories = events.slice(0, 6);
+  const [selectedEventId, setSelectedEventId] = useState(
+    stories[0]?.id ?? "",
+  );
+  const selectedEvent =
+    stories.find((event) => event.id === selectedEventId) ?? stories[0];
+  const orderedChannels = channelsForBreakingEvent(selectedEvent);
+  const [selectedChannelId, setSelectedChannelId] = useState(
+    orderedChannels[0]?.id ?? "",
+  );
+  const selectedChannel =
+    orderedChannels.find((channel) => channel.id === selectedChannelId) ??
+    orderedChannels[0];
+
+  useEffect(() => {
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") onClose();
+    };
+    window.addEventListener("keydown", closeOnEscape);
+    return () => window.removeEventListener("keydown", closeOnEscape);
+  }, [onClose]);
+
+  return (
+    <div
+      className="fixed inset-0 z-50 overflow-y-auto bg-[#04070d]/97 p-4 backdrop-blur-xl sm:p-7"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="live-news-title"
+    >
+      <section className="mx-auto w-full max-w-7xl">
+        <div className="flex items-start justify-between gap-5 border-b border-[#332b35] pb-5">
+          <div>
+            <p className="font-mono text-[9px] uppercase tracking-[0.24em] text-[#ff6874]">
+              Live video coverage
+            </p>
+            <h2
+              id="live-news-title"
+              className="mt-2 text-3xl font-semibold tracking-[-0.045em] text-white"
+            >
+              Live News
+            </h2>
+            <p className="mt-2 max-w-2xl text-sm leading-6 text-[#92a0b3]">
+              Watch a leading live newsroom, switch networks instantly, or find
+              live YouTube coverage focused on a specific breaking story.
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            autoFocus
+            className="rounded-full border border-[#3a4659] px-4 py-2 text-xs text-[#cad2dd] transition hover:bg-[#1a2537]"
+          >
+            Close
+          </button>
+        </div>
+
+        {selectedEvent && selectedChannel ? (
+          <>
+            <div className="mt-6 flex gap-2 overflow-x-auto pb-2">
+              {stories.map((event, index) => (
+                <button
+                  type="button"
+                  key={event.id}
+                  onClick={() => {
+                    setSelectedEventId(event.id);
+                    const preferredChannel =
+                      channelsForBreakingEvent(event)[0];
+                    if (preferredChannel) {
+                      setSelectedChannelId(preferredChannel.id);
+                    }
+                  }}
+                  className={`min-w-56 rounded-xl border px-4 py-3 text-left transition ${
+                    event.id === selectedEvent.id
+                      ? "border-[#a83d49] bg-[#30151c]"
+                      : "border-[#273549] bg-[#0b131f] hover:border-[#4b5c73]"
+                  }`}
+                >
+                  <span className="font-mono text-[8px] uppercase tracking-[0.16em] text-[#ff7480]">
+                    Breaking {String(index + 1).padStart(2, "0")}
+                  </span>
+                  <span className="mt-1.5 line-clamp-2 block text-xs leading-5 text-white">
+                    {event.headline}
+                  </span>
+                </button>
+              ))}
+            </div>
+
+            <div className="mt-5 grid gap-5 lg:grid-cols-[minmax(0,1fr)_320px]">
+              <div className="overflow-hidden rounded-2xl border border-[#313d50] bg-black shadow-2xl">
+                <div className="aspect-video">
+                  <iframe
+                    key={selectedChannel.id}
+                    className="h-full w-full"
+                    src={`https://www.youtube-nocookie.com/embed/live_stream?channel=${selectedChannel.channelId}&autoplay=1&mute=1&playsinline=1`}
+                    title={`${selectedChannel.name} live news`}
+                    allow="autoplay; encrypted-media; picture-in-picture"
+                    allowFullScreen
+                  />
+                </div>
+                <div className="flex flex-wrap items-center justify-between gap-3 border-t border-[#2a3445] bg-[#0a101a] px-4 py-3">
+                  <div>
+                    <div className="font-mono text-[8px] uppercase tracking-[0.16em] text-[#718197]">
+                      Featured live network
+                    </div>
+                    <div className="mt-1 text-sm font-semibold text-white">
+                      {selectedChannel.name}
+                    </div>
+                  </div>
+                  <div className="flex gap-2">
+                    <a
+                      href={liveStorySearchUrl(selectedEvent, selectedChannel)}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="rounded-full border border-[#9e3b47] bg-[#34151d] px-3 py-2 text-[10px] text-[#ffc5ca] transition hover:bg-[#4b1b25]"
+                    >
+                      Find this story
+                    </a>
+                    <a
+                      href={selectedChannel.channelUrl}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="rounded-full border border-[#3a4659] px-3 py-2 text-[10px] text-[#cad2dd] transition hover:bg-[#182335]"
+                    >
+                      Open YouTube
+                    </a>
+                  </div>
+                </div>
+              </div>
+
+              <aside className="rounded-2xl border border-[#273549] bg-[#09111c] p-4">
+                <p className="font-mono text-[9px] uppercase tracking-[0.2em] text-[#718197]">
+                  Other live feeds
+                </p>
+                <div className="mt-3 space-y-2">
+                  {orderedChannels.map((channel) => (
+                    <button
+                      type="button"
+                      key={channel.id}
+                      onClick={() => setSelectedChannelId(channel.id)}
+                      className={`flex w-full items-center justify-between rounded-xl border px-3 py-3 text-left transition ${
+                        channel.id === selectedChannel.id
+                          ? "border-[#b94552] bg-[#32151d] text-white"
+                          : "border-[#253247] bg-[#0d1724] text-[#b8c2cf] hover:border-[#4b5c73]"
+                      }`}
+                    >
+                      <span className="text-xs font-medium">{channel.name}</span>
+                      <span
+                        className={`h-2 w-2 rounded-full ${
+                          channel.id === selectedChannel.id
+                            ? "bg-[#ff6570] shadow-[0_0_9px_#ff6570]"
+                            : "bg-[#53657b]"
+                        }`}
+                        aria-hidden="true"
+                      />
+                    </button>
+                  ))}
+                </div>
+                <p className="mt-4 text-[10px] leading-4 text-[#6f7d90]">
+                  Live schedules change throughout the day. If a network is
+                  between broadcasts, switch feeds or open the story search.
+                </p>
+              </aside>
+            </div>
+
+            <div className="mt-5 rounded-2xl border border-[#2b394d] bg-[#0b131f] p-4">
+              <div className="font-mono text-[8px] uppercase tracking-[0.16em] text-[#ff7480]">
+                Breaking story
+              </div>
+              <h3 className="mt-2 text-lg font-semibold leading-snug text-white">
+                {selectedEvent.headline}
+              </h3>
+              <p className="mt-2 max-w-4xl text-xs leading-5 text-[#9ba8b9]">
+                {selectedEvent.summary}
+              </p>
+            </div>
+          </>
+        ) : (
+          <div className="mt-6 rounded-2xl border border-dashed border-[#34445a] p-12 text-center text-sm text-[#8996a8]">
+            Live coverage will appear when the breaking feed is ready.
           </div>
         )}
       </section>
@@ -824,7 +1136,7 @@ function BreakingNewsBar({ events }: { events: Event[] }) {
       <div className="breaking-news-viewport">
         <div
           className="breaking-news-track"
-          data-breaking-direction="left-to-right"
+          data-breaking-direction="right-to-left"
         >
           <div className="breaking-news-set">{renderItems()}</div>
           <div aria-hidden="true" className="breaking-news-set">
@@ -987,6 +1299,7 @@ export function WorldPulseApp({
   const [search, setSearch] = useState("");
   const [showMethodology, setShowMethodology] = useState(false);
   const [showLiveSituation, setShowLiveSituation] = useState(false);
+  const [showLiveNews, setShowLiveNews] = useState(false);
   const [visibleEventLimit, setVisibleEventLimit] = useState(
     INITIAL_VISIBLE_EVENT_LIMIT,
   );
@@ -1675,7 +1988,7 @@ export function WorldPulseApp({
             Date.parse(right.lastUpdatedAt) -
               Date.parse(left.lastUpdatedAt),
         )
-        .slice(0, 10),
+        .slice(0, 12),
     [globalFeed.events],
   );
 
@@ -1803,17 +2116,30 @@ export function WorldPulseApp({
         <nav className="flex items-center gap-2" aria-label="Main navigation">
           <button
             type="button"
+            onClick={() => setShowLiveNews(true)}
+            aria-label="Live News"
+            className="whitespace-nowrap rounded-full border border-[#a13d49] bg-[#38151d] px-2.5 py-2 text-[10px] text-[#ffd1d5] transition hover:border-[#e15e69] hover:bg-[#4a1a24] sm:px-4"
+          >
+            <span className="sm:hidden">Live</span>
+            <span className="hidden sm:inline">Live News</span>
+          </button>
+          <button
+            type="button"
             onClick={() => setShowLiveSituation(true)}
+            aria-label="Live Situation"
             className="whitespace-nowrap rounded-full border border-[#88414a] bg-[#2b141b] px-2.5 py-2 text-[10px] text-[#ffc5ca] transition hover:border-[#d45f69] hover:bg-[#3a1820] sm:px-4"
           >
-            Live Situation
+            <span className="sm:hidden">Situation</span>
+            <span className="hidden sm:inline">Live Situation</span>
           </button>
           <button
             type="button"
             onClick={() => setShowMethodology(true)}
+            aria-label="Methodology"
             className="whitespace-nowrap rounded-full border border-[#344157] px-2.5 py-2 text-[10px] text-[#c5cfdb] hover:bg-[#151f30] sm:px-4"
           >
-            Methodology
+            <span className="sm:hidden">Method</span>
+            <span className="hidden sm:inline">Methodology</span>
           </button>
         </nav>
       </header>
@@ -2123,6 +2449,12 @@ export function WorldPulseApp({
         <LiveSituationModal
           events={situationEvents}
           onClose={() => setShowLiveSituation(false)}
+        />
+      ) : null}
+      {showLiveNews ? (
+        <LiveNewsModal
+          events={breakingEvents}
+          onClose={() => setShowLiveNews(false)}
         />
       ) : null}
       </main>
