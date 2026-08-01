@@ -3,6 +3,14 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type * as Three from "three";
 import type { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
+import {
+  buildCountryHitIndex,
+  countryFeatureAtCoordinates,
+  polygonsForFeature,
+  type CountryHitIndex,
+  type WorldFeature,
+  type WorldFeatureCollection,
+} from "@/lib/country-hit-test";
 import type { globeRuntime } from "@/lib/globe-runtime";
 import {
   buildEventLinkCollection,
@@ -22,23 +30,10 @@ export interface WorldMapProps {
   linkEvents?: Event[];
 }
 
-export interface WorldFeature {
-  type: "Feature";
-  id?: string | number;
-  properties?: {
-    name?: string;
-    [key: string]: unknown;
-  };
-  geometry: {
-    type: string;
-    coordinates: unknown;
-  };
-}
-
-export interface WorldFeatureCollection {
-  type: "FeatureCollection";
-  features: WorldFeature[];
-}
+export type {
+  WorldFeature,
+  WorldFeatureCollection,
+} from "@/lib/country-hit-test";
 
 interface GlobeArc {
   color: string;
@@ -71,8 +66,6 @@ interface GlobeScene {
   arcs: Three.Group;
   camera: Three.PerspectiveCamera;
   controls: OrbitControls;
-  hitCanvas: HTMLCanvasElement;
-  hitCountries: Array<MapCountry | undefined>;
   markerTexture: Three.CanvasTexture;
   points: Three.Points | null;
   raycaster: Three.Raycaster;
@@ -93,6 +86,20 @@ const TEXTURE_WIDTH = 4096;
 const TEXTURE_HEIGHT = 2048;
 const SPHERE_RADIUS = 1;
 const ARC_LIMIT = 20;
+const SMALL_ISLAND_HIT_OFFSETS = [
+  [0, -3],
+  [3, 0],
+  [0, 3],
+  [-3, 0],
+  [-3, -3],
+  [3, -3],
+  [3, 3],
+  [-3, 3],
+  [0, -6],
+  [6, 0],
+  [0, 6],
+  [-6, 0],
+] as const;
 
 let geometryPromise: Promise<WorldFeatureCollection> | null = null;
 let geometryFetchIdentity: typeof fetch | null = null;
@@ -198,16 +205,6 @@ function normalizeLongitude(longitude: number) {
   return ((((longitude + 180) % 360) + 360) % 360) - 180;
 }
 
-function coordinatesToPolygons(feature: WorldFeature): number[][][][] {
-  if (feature.geometry.type === "Polygon") {
-    return [feature.geometry.coordinates as number[][][]];
-  }
-  if (feature.geometry.type === "MultiPolygon") {
-    return feature.geometry.coordinates as number[][][][];
-  }
-  return [];
-}
-
 function traceRing(
   context: CanvasRenderingContext2D,
   ring: number[][],
@@ -241,17 +238,13 @@ function traceFeature(
   feature: WorldFeature,
 ) {
   context.beginPath();
-  for (const polygon of coordinatesToPolygons(feature)) {
+  for (const polygon of polygonsForFeature(feature)) {
     for (const ring of polygon) {
       traceRing(context, ring, -TEXTURE_WIDTH);
       traceRing(context, ring, 0);
       traceRing(context, ring, TEXTURE_WIDTH);
     }
   }
-}
-
-function hitColor(index: number) {
-  return `rgb(${index & 255}, ${(index >> 8) & 255}, ${(index >> 16) & 255})`;
 }
 
 function countryForFeature(
@@ -277,10 +270,7 @@ function drawWorldTexture({
   byName: Map<string, MapCountry>;
 }) {
   const context = scene.textureCanvas.getContext("2d");
-  const hitContext = scene.hitCanvas.getContext("2d", {
-    willReadFrequently: true,
-  });
-  if (!context || !hitContext) return;
+  if (!context) return;
 
   context.clearRect(0, 0, TEXTURE_WIDTH, TEXTURE_HEIGHT);
   context.imageSmoothingEnabled = true;
@@ -305,9 +295,6 @@ function drawWorldTexture({
   context.strokeStyle = "rgba(109, 156, 181, 0.1)";
   context.lineWidth = 1;
   context.stroke();
-  hitContext.clearRect(0, 0, TEXTURE_WIDTH, TEXTURE_HEIGHT);
-  scene.hitCountries = [undefined];
-
   geometry.features.forEach((feature) => {
     const country = countryForFeature(feature, byId, byName);
     traceFeature(context, feature);
@@ -316,16 +303,6 @@ function drawWorldTexture({
     context.strokeStyle = "rgba(147, 193, 216, 0.68)";
     context.lineWidth = 1.25;
     context.stroke();
-
-    if (country) {
-      const index = scene.hitCountries.push(country) - 1;
-      traceFeature(hitContext, feature);
-      hitContext.fillStyle = hitColor(index);
-      hitContext.fill("evenodd");
-      hitContext.strokeStyle = hitColor(index);
-      hitContext.lineWidth = 2;
-      hitContext.stroke();
-    }
   });
   scene.texture.needsUpdate = true;
 }
@@ -487,29 +464,15 @@ function updateArcs(
   globeScene.scene.add(globeScene.arcs);
 }
 
-function countryAtPoint(
-  globeScene: GlobeScene,
+function coordinatesAtPoint(
   point: Three.Vector3,
-): MapCountry | undefined {
+) {
   const normalized = point.clone().normalize();
   const latitude = (Math.asin(normalized.y) * 180) / Math.PI;
   const longitude = normalizeLongitude(
     (Math.atan2(normalized.x, normalized.z) * 180) / Math.PI,
   );
-  const x = Math.min(
-    TEXTURE_WIDTH - 1,
-    Math.max(0, Math.floor(((longitude + 180) / 360) * TEXTURE_WIDTH)),
-  );
-  const y = Math.min(
-    TEXTURE_HEIGHT - 1,
-    Math.max(0, Math.floor(((90 - latitude) / 180) * TEXTURE_HEIGHT)),
-  );
-  const context = globeScene.hitCanvas.getContext("2d", {
-    willReadFrequently: true,
-  });
-  if (!context) return undefined;
-  const [red, green, blue] = context.getImageData(x, y, 1, 1).data;
-  return globeScene.hitCountries[red | (green << 8) | (blue << 16)];
+  return { latitude, longitude };
 }
 
 export function WorldMap({
@@ -553,6 +516,10 @@ export function WorldMap({
       worldGeometry
         ? countryCentersFromGeoJson(worldGeometry)
         : ({} as Record<string, MapPosition>),
+    [worldGeometry],
+  );
+  const countryHitIndex = useMemo<CountryHitIndex | null>(
+    () => (worldGeometry ? buildCountryHitIndex(worldGeometry) : null),
     [worldGeometry],
   );
   const capitalIndex = useMemo(() => {
@@ -711,9 +678,6 @@ export function WorldMap({
         const textureCanvas = document.createElement("canvas");
         textureCanvas.width = TEXTURE_WIDTH;
         textureCanvas.height = TEXTURE_HEIGHT;
-        const hitCanvas = document.createElement("canvas");
-        hitCanvas.width = TEXTURE_WIDTH;
-        hitCanvas.height = TEXTURE_HEIGHT;
         const texture = new runtime.THREE.CanvasTexture(textureCanvas);
         texture.colorSpace = runtime.THREE.SRGBColorSpace;
         texture.minFilter = runtime.THREE.LinearMipmapLinearFilter;
@@ -771,8 +735,6 @@ export function WorldMap({
           arcs: new runtime.THREE.Group(),
           camera,
           controls,
-          hitCanvas,
-          hitCountries: [undefined],
           markerTexture: new runtime.THREE.CanvasTexture(
             createCapitalMarkerCanvas(),
           ),
@@ -879,12 +841,16 @@ export function WorldMap({
     updateArcs(runtime, globeScene, eventArcs);
   }, [eventArcs, worldGeometry]);
 
-  const locateCountry = (clientX: number, clientY: number) => {
+  const locateCountryExactly = (
+    clientX: number,
+    clientY: number,
+    canvasBounds?: DOMRect,
+  ) => {
     const globeScene = globeSceneRef.current;
     const runtime = runtimeRef.current;
     const canvas = globeScene?.renderer.domElement;
-    if (!globeScene || !runtime || !canvas) return undefined;
-    const bounds = canvas.getBoundingClientRect();
+    if (!globeScene || !runtime || !canvas || !countryHitIndex) return undefined;
+    const bounds = canvasBounds ?? canvas.getBoundingClientRect();
     const pointer = new runtime.THREE.Vector2(
       ((clientX - bounds.left) / bounds.width) * 2 - 1,
       -((clientY - bounds.top) / bounds.height) * 2 + 1,
@@ -894,8 +860,38 @@ export function WorldMap({
       globeScene.sphere,
       false,
     )[0];
-    return intersection
-      ? countryAtPoint(globeScene, intersection.point)
+    if (!intersection) return undefined;
+    const { latitude, longitude } = coordinatesAtPoint(intersection.point);
+    const feature = countryFeatureAtCoordinates(
+      countryHitIndex,
+      longitude,
+      latitude,
+    );
+    if (!feature) return undefined;
+    return (
+      (feature.id ? countryIndex.byId.get(feature.id) : undefined) ??
+      countryIndex.byName.get(feature.name)
+    );
+  };
+
+  const locateCountry = (clientX: number, clientY: number) => {
+    const canvasBounds =
+      globeSceneRef.current?.renderer.domElement.getBoundingClientRect();
+    if (!canvasBounds) return undefined;
+    const exactCountry = locateCountryExactly(clientX, clientY, canvasBounds);
+    if (exactCountry) return exactCountry;
+
+    const nearbyCountries = new Map<string, MapCountry>();
+    for (const [offsetX, offsetY] of SMALL_ISLAND_HIT_OFFSETS) {
+      const country = locateCountryExactly(
+        clientX + offsetX,
+        clientY + offsetY,
+        canvasBounds,
+      );
+      if (country) nearbyCountries.set(country.mapId, country);
+    }
+    return nearbyCountries.size === 1
+      ? nearbyCountries.values().next().value
       : undefined;
   };
 
