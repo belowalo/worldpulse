@@ -22,6 +22,7 @@ interface Env {
   ASSETS: Fetcher;
   DB?: D1Database;
   SNAPSHOTS?: R2Bucket;
+  WORLD_SNAPSHOT_REFRESH_TOKEN?: string;
   IMAGES: {
     input(stream: ReadableStream): {
       transform(options: Record<string, unknown>): {
@@ -221,13 +222,23 @@ async function handlePreparedWorld(
       { status: 503, headers: { "Cache-Control": "no-store" } },
     );
   }
-  const current = await env.SNAPSHOTS.get(PREPARED_WORLD_KEY);
+  let current = await env.SNAPSHOTS.get(PREPARED_WORLD_KEY);
   const generatedAt = Date.parse(current?.customMetadata?.generatedAt ?? "");
   const age = Number.isFinite(generatedAt)
     ? Date.now() - generatedAt
     : Number.POSITIVE_INFINITY;
   if (age >= PREPARED_WORLD_FRESH_MS) {
-    ctx.waitUntil(refreshPreparedWorldSafely(env));
+    const suppliedToken = request.headers.get("X-WorldPulse-Refresh-Token");
+    const canWaitForRefresh = Boolean(
+      env.WORLD_SNAPSHOT_REFRESH_TOKEN &&
+      suppliedToken === env.WORLD_SNAPSHOT_REFRESH_TOKEN,
+    );
+    if (canWaitForRefresh) {
+      await refreshPreparedWorldSafely(env);
+      current = await env.SNAPSHOTS.get(PREPARED_WORLD_KEY);
+    } else {
+      ctx.waitUntil(refreshPreparedWorldSafely(env));
+    }
   }
   if (!current) {
     return Response.json(
