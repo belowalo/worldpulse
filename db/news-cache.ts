@@ -65,7 +65,10 @@ export async function writeStoredNewsFeed(
     .run();
 }
 
-export async function readStoredMapFeeds(db: D1Database) {
+export async function readStoredMapFeeds(
+  db: D1Database,
+  limit = 160,
+) {
   await ensureNewsCache(db);
   const result = await db
     .prepare(
@@ -73,8 +76,9 @@ export async function readStoredMapFeeds(db: D1Database) {
        FROM news_feed_cache
        WHERE cache_key LIKE '%scope=map%'
        ORDER BY generated_at DESC
-       LIMIT 160`,
+       LIMIT ?1`,
     )
+    .bind(limit)
     .all<StoredNewsPayload>();
   return result.results ?? [];
 }

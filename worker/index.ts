@@ -45,6 +45,7 @@ const PREPARED_WORLD_FRESH_MS = 60_000;
 const PREPARED_WORLD_REFRESH_BATCH_SIZE = 12;
 
 let preparedWorldRefresh: Promise<void> | null = null;
+let preparedCountryRefresh: Promise<void> | null = null;
 
 interface StoredMapCountry {
   countryName: string;
@@ -88,7 +89,7 @@ function loadWorldDirectory() {
 }
 
 async function storedMapCountries(db: D1Database) {
-  const storedFeeds = await readStoredMapFeeds(db);
+  const storedFeeds = await readStoredMapFeeds(db, 20);
   const countries = new Map<string, StoredMapCountry>();
   for (const stored of storedFeeds) {
     try {
@@ -126,33 +127,11 @@ async function refreshPreparedWorld(env: Env) {
     throw new Error("Prepared world storage is unavailable.");
   }
   const directory = loadWorldDirectory();
-  const countryNames = directory.map((country) => country.name);
-  const batchCount = Math.ceil(
-    countryNames.length / PREPARED_WORLD_REFRESH_BATCH_SIZE,
-  );
-  const batchIndex = Math.floor(Date.now() / 60_000) % batchCount;
-  const refreshCountries = countryNames.slice(
-    batchIndex * PREPARED_WORLD_REFRESH_BATCH_SIZE,
-    (batchIndex + 1) * PREPARED_WORLD_REFRESH_BATCH_SIZE,
-  );
-  const mapUrl = new URL("https://worldpulse.internal/api/live-news");
-  mapUrl.searchParams.set("scope", "map");
-  mapUrl.searchParams.set("countries", refreshCountries.join("|"));
   const globalUrl = new URL("https://worldpulse.internal/api/live-news");
   globalUrl.searchParams.set("scope", "global");
-  const [mapResponse, globalResponse] = await Promise.all([
-    handleLiveNews(new Request(mapUrl)),
-    handleLiveNews(new Request(globalUrl)),
-  ]);
+  const globalResponse = await handleLiveNews(new Request(globalUrl));
   if (!globalResponse.ok) {
     throw new Error("Fresh global reporting is unavailable.");
-  }
-  if (mapResponse.ok) {
-    const cacheKey = normalizedLiveCacheKey(new Request(mapUrl)).url;
-    let mapPayload = await mapResponse.text();
-    const previous = await readStoredNewsFeed(env.DB, cacheKey);
-    if (previous) mapPayload = mergeCachedPayloads(mapPayload, previous.payload);
-    await writeStoredNewsFeed(env.DB, cacheKey, mapPayload, Date.now());
   }
   const countries = await storedMapCountries(env.DB);
   const generatedAt = new Date().toISOString();
@@ -166,6 +145,29 @@ async function refreshPreparedWorld(env: Env) {
     httpMetadata: { contentType: "application/json; charset=utf-8" },
     customMetadata: { generatedAt },
   });
+}
+
+async function refreshPreparedCountryBatch(env: Env) {
+  if (!env.DB) return;
+  const countryNames = loadWorldDirectory().map((country) => country.name);
+  const batchCount = Math.ceil(
+    countryNames.length / PREPARED_WORLD_REFRESH_BATCH_SIZE,
+  );
+  const batchIndex = Math.floor(Date.now() / 60_000) % batchCount;
+  const refreshCountries = countryNames.slice(
+    batchIndex * PREPARED_WORLD_REFRESH_BATCH_SIZE,
+    (batchIndex + 1) * PREPARED_WORLD_REFRESH_BATCH_SIZE,
+  );
+  const mapUrl = new URL("https://worldpulse.internal/api/live-news");
+  mapUrl.searchParams.set("scope", "map");
+  mapUrl.searchParams.set("countries", refreshCountries.join("|"));
+  const mapResponse = await handleLiveNews(new Request(mapUrl));
+  if (!mapResponse.ok) return;
+  const cacheKey = normalizedLiveCacheKey(new Request(mapUrl)).url;
+  let mapPayload = await mapResponse.text();
+  const previous = await readStoredNewsFeed(env.DB, cacheKey);
+  if (previous) mapPayload = mergeCachedPayloads(mapPayload, previous.payload);
+  await writeStoredNewsFeed(env.DB, cacheKey, mapPayload, Date.now());
 }
 
 function refreshPreparedWorldOnce(env: Env) {
@@ -188,6 +190,26 @@ async function refreshPreparedWorldSafely(env: Env) {
   }
 }
 
+function refreshPreparedCountryBatchOnce(env: Env) {
+  preparedCountryRefresh ??= refreshPreparedCountryBatch(env).finally(() => {
+    preparedCountryRefresh = null;
+  });
+  return preparedCountryRefresh;
+}
+
+async function refreshPreparedCountryBatchSafely(env: Env) {
+  try {
+    await refreshPreparedCountryBatchOnce(env);
+  } catch (error) {
+    console.warn(
+      JSON.stringify({
+        event: "prepared_country_refresh_failed",
+        error: error instanceof Error ? error.message : "unknown error",
+      }),
+    );
+  }
+}
+
 async function handlePreparedWorld(
   request: Request,
   env: Env,
@@ -199,7 +221,7 @@ async function handlePreparedWorld(
       { status: 503, headers: { "Cache-Control": "no-store" } },
     );
   }
-  let current = await env.SNAPSHOTS.get(PREPARED_WORLD_KEY);
+  const current = await env.SNAPSHOTS.get(PREPARED_WORLD_KEY);
   const generatedAt = Date.parse(current?.customMetadata?.generatedAt ?? "");
   const age = Number.isFinite(generatedAt)
     ? Date.now() - generatedAt
@@ -612,7 +634,11 @@ const worker = {
     env: Env,
     ctx: ExecutionContext,
   ) {
-    ctx.waitUntil(refreshPreparedWorldSafely(env));
+    ctx.waitUntil(
+      refreshPreparedWorldSafely(env).then(() =>
+        refreshPreparedCountryBatchSafely(env),
+      ),
+    );
   },
 };
 
