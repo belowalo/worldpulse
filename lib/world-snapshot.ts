@@ -10,11 +10,12 @@ import type {
   LiveNewsPayload,
   MapCountry,
   MapNewsPayload,
+  PreparedNewsFeed,
   PreparedWorldNewsPayload,
 } from "@/lib/types";
 
 export interface PreparedCountryFeed {
-  error: string | null;
+  error: null;
   events: Event[];
   loading: false;
   provider: string;
@@ -117,6 +118,20 @@ export function prepareCompleteWorldSnapshot(
     countryPayloads,
     countryDirectory,
   );
+  return prepareCompleteWorldSnapshotFromFeeds(
+    globalPayload,
+    localFeeds,
+    countryDirectory,
+    generatedAt,
+  );
+}
+
+export function prepareCompleteWorldSnapshotFromFeeds(
+  globalPayload: LiveNewsPayload,
+  localFeeds: Record<string, PreparedNewsFeed>,
+  countryDirectory: MapCountry[],
+  generatedAt = new Date().toISOString(),
+): PreparedWorldNewsPayload {
   const globalEvents = buildLiveEvents(globalPayload, null).map((event) =>
     applyDetectedGeography(event, countryDirectory),
   );

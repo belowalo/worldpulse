@@ -7,11 +7,15 @@ import {
   writeStoredNewsFeed,
 } from "../db/news-cache";
 import { countryCodeForName } from "../lib/country-locale";
-import { prepareCompleteWorldSnapshot } from "../lib/world-snapshot";
+import {
+  prepareCompleteWorldSnapshotFromFeeds,
+  prepareWorldSnapshotFeeds,
+} from "../lib/world-snapshot";
 import type {
   LiveNewsPayload,
   MapCountry,
   MapNewsPayload,
+  PreparedNewsFeed,
 } from "../lib/types";
 import { mergeCachedPayloads } from "./live-cache";
 import { handleLiveNews, isLikelyEnglishHeadline } from "./live-news";
@@ -89,38 +93,35 @@ function loadWorldDirectory() {
   return directory;
 }
 
-async function storedMapCountries(db: D1Database) {
-  const storedFeeds = await readStoredMapFeeds(db, 20);
-  const countries = new Map<string, StoredMapCountry>();
-  for (const stored of storedFeeds) {
+interface PreparedCountryChunk {
+  generatedAt: string;
+  countryFeeds: Record<string, PreparedNewsFeed>;
+}
+
+function preparedCountryChunkKey(batchIndex: number) {
+  return `world/countries/${batchIndex}.json`;
+}
+
+async function readPreparedCountryFeeds(
+  snapshots: R2Bucket,
+  batchCount: number,
+) {
+  const objects = await Promise.all(
+    Array.from({ length: batchCount }, (_, batchIndex) =>
+      snapshots.get(preparedCountryChunkKey(batchIndex)),
+    ),
+  );
+  const feeds: Record<string, PreparedNewsFeed> = {};
+  for (const object of objects) {
+    if (!object) continue;
     try {
-      const payload = JSON.parse(stored.payload) as {
-        scope?: string;
-        countries?: unknown[];
-      };
-      if (payload.scope !== "map" || !Array.isArray(payload.countries)) {
-        continue;
-      }
-      for (const candidate of payload.countries) {
-        if (!isStoredMapCountry(candidate) || countries.has(candidate.countryName)) {
-          continue;
-        }
-        const articles = candidate.articles.filter((article) => {
-          if (!article || typeof article !== "object") return false;
-          const title = (article as { title?: unknown }).title;
-          return typeof title === "string" && isLikelyEnglishHeadline(title);
-        });
-        countries.set(candidate.countryName, {
-          ...candidate,
-          articles,
-          available: articles.length > 0,
-        });
-      }
+      const chunk = JSON.parse(await object.text()) as PreparedCountryChunk;
+      Object.assign(feeds, chunk.countryFeeds);
     } catch {
-      // Ignore malformed historical rows while assembling the current world.
+      // A malformed or interrupted chunk is omitted from the next version.
     }
   }
-  return countries;
+  return feeds;
 }
 
 async function refreshPreparedWorld(env: Env) {
@@ -134,11 +135,17 @@ async function refreshPreparedWorld(env: Env) {
   if (!globalResponse.ok) {
     throw new Error("Fresh global reporting is unavailable.");
   }
-  const countries = await storedMapCountries(env.DB);
   const generatedAt = new Date().toISOString();
-  const snapshot = prepareCompleteWorldSnapshot(
+  const batchCount = Math.ceil(
+    directory.length / PREPARED_WORLD_REFRESH_BATCH_SIZE,
+  );
+  const localFeeds = await readPreparedCountryFeeds(
+    env.SNAPSHOTS,
+    batchCount,
+  );
+  const snapshot = prepareCompleteWorldSnapshotFromFeeds(
     (await globalResponse.json()) as LiveNewsPayload,
-    [...countries.values()] as MapNewsPayload["countries"],
+    localFeeds,
     directory,
     generatedAt,
   );
@@ -148,13 +155,19 @@ async function refreshPreparedWorld(env: Env) {
   });
 }
 
-async function refreshPreparedCountryBatch(env: Env) {
-  if (!env.DB) return;
-  const countryNames = loadWorldDirectory().map((country) => country.name);
+async function refreshPreparedCountryBatch(
+  env: Env,
+  requestedBatchIndex?: number,
+) {
+  if (!env.DB || !env.SNAPSHOTS) return;
+  const directory = loadWorldDirectory();
+  const countryNames = directory.map((country) => country.name);
   const batchCount = Math.ceil(
     countryNames.length / PREPARED_WORLD_REFRESH_BATCH_SIZE,
   );
-  const batchIndex = Math.floor(Date.now() / 60_000) % batchCount;
+  const batchIndex = Number.isInteger(requestedBatchIndex)
+    ? Math.max(0, Math.min(batchCount - 1, requestedBatchIndex as number))
+    : Math.floor(Date.now() / 60_000) % batchCount;
   const refreshCountries = countryNames.slice(
     batchIndex * PREPARED_WORLD_REFRESH_BATCH_SIZE,
     (batchIndex + 1) * PREPARED_WORLD_REFRESH_BATCH_SIZE,
@@ -169,6 +182,23 @@ async function refreshPreparedCountryBatch(env: Env) {
   const previous = await readStoredNewsFeed(env.DB, cacheKey);
   if (previous) mapPayload = mergeCachedPayloads(mapPayload, previous.payload);
   await writeStoredNewsFeed(env.DB, cacheKey, mapPayload, Date.now());
+  const parsedMap = JSON.parse(mapPayload) as MapNewsPayload;
+  const generatedAt = new Date().toISOString();
+  const chunk: PreparedCountryChunk = {
+    generatedAt,
+    countryFeeds: prepareWorldSnapshotFeeds(
+      parsedMap.countries ?? [],
+      directory,
+    ),
+  };
+  await env.SNAPSHOTS.put(
+    preparedCountryChunkKey(batchIndex),
+    JSON.stringify(chunk),
+    {
+      httpMetadata: { contentType: "application/json; charset=utf-8" },
+      customMetadata: { generatedAt },
+    },
+  );
 }
 
 function refreshPreparedWorldOnce(env: Env) {
@@ -226,13 +256,34 @@ async function handlePreparedWorld(
   const age = Number.isFinite(generatedAt)
     ? Date.now() - generatedAt
     : Number.POSITIVE_INFINITY;
-  if (age >= PREPARED_WORLD_FRESH_MS) {
-    const suppliedToken = request.headers.get("X-WorldPulse-Refresh-Token");
-    const canWaitForRefresh = Boolean(
-      env.WORLD_SNAPSHOT_REFRESH_TOKEN &&
-      suppliedToken === env.WORLD_SNAPSHOT_REFRESH_TOKEN,
-    );
-    if (canWaitForRefresh) {
+  const requestUrl = new URL(request.url);
+  const suppliedToken = request.headers.get("X-WorldPulse-Refresh-Token");
+  const canWaitForRefresh = Boolean(
+    env.WORLD_SNAPSHOT_REFRESH_TOKEN &&
+    suppliedToken === env.WORLD_SNAPSHOT_REFRESH_TOKEN,
+  );
+  if (canWaitForRefresh) {
+    const requestedBatch = requestUrl.searchParams.get("countryBatch");
+    if (requestedBatch !== null) {
+      const batchIndex = Number(requestedBatch);
+      if (!Number.isInteger(batchIndex) || batchIndex < 0) {
+        return Response.json(
+          { error: "A valid country batch is required." },
+          { status: 400, headers: { "Cache-Control": "no-store" } },
+        );
+      }
+      try {
+        await refreshPreparedCountryBatch(env, batchIndex);
+      } catch (error) {
+        console.warn(
+          JSON.stringify({
+            event: "prepared_country_seed_failed",
+            error: error instanceof Error ? error.message : "unknown error",
+          }),
+        );
+      }
+    }
+    if (age >= PREPARED_WORLD_FRESH_MS || requestedBatch !== null) {
       try {
         await refreshPreparedWorld(env);
       } catch (error) {
@@ -652,8 +703,8 @@ const worker = {
     ctx: ExecutionContext,
   ) {
     ctx.waitUntil(
-      refreshPreparedWorldSafely(env).then(() =>
-        refreshPreparedCountryBatchSafely(env),
+      refreshPreparedCountryBatchSafely(env).then(() =>
+        refreshPreparedWorldSafely(env),
       ),
     );
   },
