@@ -14,7 +14,6 @@ import {
 import type {
   LiveNewsPayload,
   MapCountry,
-  MapNewsPayload,
   PreparedNewsFeed,
 } from "../lib/types";
 import { mergeCachedPayloads } from "./live-cache";
@@ -146,6 +145,7 @@ async function refreshPreparedWorld(env: Env) {
 async function refreshPreparedCountryBatch(
   env: Env,
   requestedBatchIndex?: number,
+  cacheOnly = false,
 ) {
   if (!env.DB || !env.SNAPSHOTS) return;
   const directory = loadWorldDirectory();
@@ -160,22 +160,41 @@ async function refreshPreparedCountryBatch(
     batchIndex * PREPARED_WORLD_REFRESH_BATCH_SIZE,
     (batchIndex + 1) * PREPARED_WORLD_REFRESH_BATCH_SIZE,
   );
-  const mapUrl = new URL("https://worldpulse.internal/api/live-news");
-  mapUrl.searchParams.set("scope", "map");
-  mapUrl.searchParams.set("countries", refreshCountries.join("|"));
-  const mapResponse = await handleLiveNews(new Request(mapUrl));
-  if (!mapResponse.ok) return;
-  const cacheKey = normalizedLiveCacheKey(new Request(mapUrl)).url;
-  let mapPayload = await mapResponse.text();
-  const previous = await readStoredNewsFeed(env.DB, cacheKey);
-  if (previous) mapPayload = mergeCachedPayloads(mapPayload, previous.payload);
-  await writeStoredNewsFeed(env.DB, cacheKey, mapPayload, Date.now());
-  const parsedMap = JSON.parse(mapPayload) as MapNewsPayload;
+  if (!cacheOnly) {
+    const mapUrl = new URL("https://worldpulse.internal/api/live-news");
+    mapUrl.searchParams.set("scope", "map");
+    mapUrl.searchParams.set("countries", refreshCountries.join("|"));
+    const mapResponse = await handleLiveNews(new Request(mapUrl));
+    if (!mapResponse.ok) return;
+    const cacheKey = normalizedLiveCacheKey(new Request(mapUrl)).url;
+    let mapPayload = await mapResponse.text();
+    const previous = await readStoredNewsFeed(env.DB, cacheKey);
+    if (previous) {
+      mapPayload = mergeCachedPayloads(mapPayload, previous.payload);
+    }
+    await writeStoredNewsFeed(env.DB, cacheKey, mapPayload, Date.now());
+  }
+  const expectedCountryNames = new Set(refreshCountries);
+  const consolidated = collectStoredMapCountries(
+    await readStoredMapFeeds(env.DB),
+    expectedCountryNames,
+  );
+  const consolidatedNames = new Set(
+    consolidated.countries.map((country) => country.countryName),
+  );
+  const missingCountries = refreshCountries.filter(
+    (countryName) => !consolidatedNames.has(countryName),
+  );
+  if (missingCountries.length) {
+    throw new Error(
+      `Prepared country batch is missing ${missingCountries.length} feeds.`,
+    );
+  }
   const generatedAt = new Date().toISOString();
   const chunk: PreparedCountryChunk = {
     generatedAt,
     countryFeeds: prepareWorldSnapshotFeeds(
-      parsedMap.countries ?? [],
+      consolidated.countries,
       directory,
     ),
   };
@@ -262,7 +281,11 @@ async function handlePreparedWorld(
         );
       }
       try {
-        await refreshPreparedCountryBatch(env, batchIndex);
+        await refreshPreparedCountryBatch(
+          env,
+          batchIndex,
+          requestUrl.searchParams.get("countryBatchCacheOnly") === "1",
+        );
       } catch (error) {
         console.warn(
           JSON.stringify({
