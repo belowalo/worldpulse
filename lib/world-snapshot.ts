@@ -1,6 +1,7 @@
 import {
   articlesMentioningCountry,
   buildLiveEvents,
+  mergeEventFeeds,
 } from "@/lib/live-news";
 import { countriesMentionedByEvent } from "@/lib/map-links";
 import { calculateImportance } from "@/lib/scoring";
@@ -9,6 +10,7 @@ import type {
   LiveNewsPayload,
   MapCountry,
   MapNewsPayload,
+  PreparedWorldNewsPayload,
 } from "@/lib/types";
 
 export interface PreparedCountryFeed {
@@ -103,4 +105,66 @@ export function prepareWorldSnapshotFeeds(
     };
   }
   return feeds;
+}
+
+export function prepareCompleteWorldSnapshot(
+  globalPayload: LiveNewsPayload,
+  countryPayloads: MapNewsPayload["countries"],
+  countryDirectory: MapCountry[],
+  generatedAt = new Date().toISOString(),
+): PreparedWorldNewsPayload {
+  const localFeeds = prepareWorldSnapshotFeeds(
+    countryPayloads,
+    countryDirectory,
+  );
+  const globalEvents = buildLiveEvents(globalPayload, null).map((event) =>
+    applyDetectedGeography(event, countryDirectory),
+  );
+  const countriesByIdentifier = new Map<string, MapCountry>();
+  for (const country of countryDirectory) {
+    countriesByIdentifier.set(country.name, country);
+    if (country.iso2) countriesByIdentifier.set(country.iso2, country);
+  }
+  const currentGlobalEventsByCountry = new Map<string, Event[]>();
+  for (const event of globalEvents) {
+    for (const identifier of event.affectedCountries) {
+      const country = countriesByIdentifier.get(identifier);
+      if (!country) continue;
+      const events = currentGlobalEventsByCountry.get(country.name) ?? [];
+      events.push(event);
+      currentGlobalEventsByCountry.set(country.name, events);
+    }
+  }
+  const countryFeeds: PreparedWorldNewsPayload["countryFeeds"] = {};
+  for (const country of countryDirectory) {
+    const localFeed = localFeeds[country.name];
+    countryFeeds[country.name] = {
+      events: mergeEventFeeds(
+        localFeed?.events ?? [],
+        currentGlobalEventsByCountry.get(country.name) ?? [],
+      ).sort(
+        (left, right) =>
+          right.importanceScore - left.importanceScore ||
+          Date.parse(right.lastUpdatedAt) - Date.parse(left.lastUpdatedAt),
+      ),
+      updatedAt: localFeed?.updatedAt ?? generatedAt,
+      provider: "WorldPulse \u00b7 minute world state",
+      loading: false,
+      error: null,
+    };
+  }
+  return {
+    scope: "prepared-world",
+    version: generatedAt.slice(0, 16),
+    generatedAt,
+    refreshAfterSeconds: 60,
+    globalFeed: {
+      events: globalEvents,
+      updatedAt: globalPayload.generatedAt,
+      provider: globalPayload.provider,
+      loading: false,
+      error: null,
+    },
+    countryFeeds,
+  };
 }

@@ -6,13 +6,22 @@ import {
   readStoredNewsFeed,
   writeStoredNewsFeed,
 } from "../db/news-cache";
+import { countryCodeForName } from "../lib/country-locale";
+import { prepareCompleteWorldSnapshot } from "../lib/world-snapshot";
+import type {
+  LiveNewsPayload,
+  MapCountry,
+  MapNewsPayload,
+} from "../lib/types";
 import { mergeCachedPayloads } from "./live-cache";
 import { handleLiveNews, isLikelyEnglishHeadline } from "./live-news";
 import { handleLiveVideo } from "./live-video";
+import worldGeometrySource from "../public/countries.geojson?raw";
 
 interface Env {
   ASSETS: Fetcher;
   DB?: D1Database;
+  SNAPSHOTS?: R2Bucket;
   IMAGES: {
     input(stream: ReadableStream): {
       transform(options: Record<string, unknown>): {
@@ -31,6 +40,11 @@ const LIVE_CACHE_NAME = "worldpulse-live-v19";
 const LIVE_CACHE_FRESH_MS = 5 * 60_000;
 const LIVE_CACHE_RETENTION_SECONDS = 3 * 24 * 60 * 60;
 const LIVE_MAP_STALE_MS = LIVE_CACHE_RETENTION_SECONDS * 1_000;
+const PREPARED_WORLD_KEY = "world/latest.json";
+const PREPARED_WORLD_FRESH_MS = 60_000;
+const PREPARED_WORLD_REFRESH_BATCH_SIZE = 12;
+
+let preparedWorldRefresh: Promise<void> | null = null;
 
 interface StoredMapCountry {
   countryName: string;
@@ -47,6 +61,165 @@ function isStoredMapCountry(value: unknown): value is StoredMapCountry {
     typeof country.generatedAt === "string" &&
     Array.isArray(country.articles)
   );
+}
+
+interface WorldGeometry {
+  features?: Array<{
+    id?: string | number;
+    properties?: { name?: string };
+  }>;
+}
+
+function loadWorldDirectory() {
+  const geometry = JSON.parse(worldGeometrySource) as WorldGeometry;
+  const directory = (geometry.features ?? []).flatMap((feature) => {
+    const mapId = String(feature.id ?? "");
+    const name = feature.properties?.name?.trim();
+    if (!mapId || !name) return [];
+    return [{
+      mapId,
+      name,
+      iso2: countryCodeForName(name) ?? undefined,
+      events: [],
+    } satisfies MapCountry];
+  });
+  if (!directory.length) throw new Error("World geometry has no countries.");
+  return directory;
+}
+
+async function storedMapCountries(db: D1Database) {
+  const storedFeeds = await readStoredMapFeeds(db);
+  const countries = new Map<string, StoredMapCountry>();
+  for (const stored of storedFeeds) {
+    try {
+      const payload = JSON.parse(stored.payload) as {
+        scope?: string;
+        countries?: unknown[];
+      };
+      if (payload.scope !== "map" || !Array.isArray(payload.countries)) {
+        continue;
+      }
+      for (const candidate of payload.countries) {
+        if (!isStoredMapCountry(candidate) || countries.has(candidate.countryName)) {
+          continue;
+        }
+        const articles = candidate.articles.filter((article) => {
+          if (!article || typeof article !== "object") return false;
+          const title = (article as { title?: unknown }).title;
+          return typeof title === "string" && isLikelyEnglishHeadline(title);
+        });
+        countries.set(candidate.countryName, {
+          ...candidate,
+          articles,
+          available: articles.length > 0,
+        });
+      }
+    } catch {
+      // Ignore malformed historical rows while assembling the current world.
+    }
+  }
+  return countries;
+}
+
+async function refreshPreparedWorld(env: Env) {
+  if (!env.DB || !env.SNAPSHOTS) {
+    throw new Error("Prepared world storage is unavailable.");
+  }
+  const directory = loadWorldDirectory();
+  const countryNames = directory.map((country) => country.name);
+  const batchCount = Math.ceil(
+    countryNames.length / PREPARED_WORLD_REFRESH_BATCH_SIZE,
+  );
+  const batchIndex = Math.floor(Date.now() / 60_000) % batchCount;
+  const refreshCountries = countryNames.slice(
+    batchIndex * PREPARED_WORLD_REFRESH_BATCH_SIZE,
+    (batchIndex + 1) * PREPARED_WORLD_REFRESH_BATCH_SIZE,
+  );
+  const mapUrl = new URL("https://worldpulse.internal/api/live-news");
+  mapUrl.searchParams.set("scope", "map");
+  mapUrl.searchParams.set("countries", refreshCountries.join("|"));
+  const globalUrl = new URL("https://worldpulse.internal/api/live-news");
+  globalUrl.searchParams.set("scope", "global");
+  const [mapResponse, globalResponse] = await Promise.all([
+    handleLiveNews(new Request(mapUrl)),
+    handleLiveNews(new Request(globalUrl)),
+  ]);
+  if (!globalResponse.ok) {
+    throw new Error("Fresh global reporting is unavailable.");
+  }
+  if (mapResponse.ok) {
+    const cacheKey = normalizedLiveCacheKey(new Request(mapUrl)).url;
+    let mapPayload = await mapResponse.text();
+    const previous = await readStoredNewsFeed(env.DB, cacheKey);
+    if (previous) mapPayload = mergeCachedPayloads(mapPayload, previous.payload);
+    await writeStoredNewsFeed(env.DB, cacheKey, mapPayload, Date.now());
+  }
+  const countries = await storedMapCountries(env.DB);
+  const generatedAt = new Date().toISOString();
+  const snapshot = prepareCompleteWorldSnapshot(
+    (await globalResponse.json()) as LiveNewsPayload,
+    [...countries.values()] as MapNewsPayload["countries"],
+    directory,
+    generatedAt,
+  );
+  await env.SNAPSHOTS.put(PREPARED_WORLD_KEY, JSON.stringify(snapshot), {
+    httpMetadata: { contentType: "application/json; charset=utf-8" },
+    customMetadata: { generatedAt },
+  });
+}
+
+function refreshPreparedWorldOnce(env: Env) {
+  preparedWorldRefresh ??= refreshPreparedWorld(env).finally(() => {
+    preparedWorldRefresh = null;
+  });
+  return preparedWorldRefresh;
+}
+
+async function refreshPreparedWorldSafely(env: Env) {
+  try {
+    await refreshPreparedWorldOnce(env);
+  } catch (error) {
+    console.warn(
+      JSON.stringify({
+        event: "prepared_world_refresh_failed",
+        error: error instanceof Error ? error.message : "unknown error",
+      }),
+    );
+  }
+}
+
+async function handlePreparedWorld(
+  request: Request,
+  env: Env,
+  ctx: ExecutionContext,
+) {
+  if (!env.SNAPSHOTS) {
+    return Response.json(
+      { error: "The minute world state is unavailable." },
+      { status: 503, headers: { "Cache-Control": "no-store" } },
+    );
+  }
+  let current = await env.SNAPSHOTS.get(PREPARED_WORLD_KEY);
+  const generatedAt = Date.parse(current?.customMetadata?.generatedAt ?? "");
+  const age = Number.isFinite(generatedAt)
+    ? Date.now() - generatedAt
+    : Number.POSITIVE_INFINITY;
+  if (age >= PREPARED_WORLD_FRESH_MS) {
+    ctx.waitUntil(refreshPreparedWorldSafely(env));
+  }
+  if (!current) {
+    return Response.json(
+      { error: "The minute world state is still being prepared." },
+      { status: 503, headers: { "Cache-Control": "no-store" } },
+    );
+  }
+  const headers = new Headers({
+    "Cache-Control": "no-store",
+    "Content-Type": "application/json; charset=utf-8",
+    "X-WorldPulse-Snapshot-Generated-At":
+      current.customMetadata?.generatedAt ?? "unknown",
+  });
+  return new Response(current.body, { headers });
 }
 
 async function handleWorldSnapshot(
@@ -405,6 +578,9 @@ const worker = {
     const url = new URL(request.url);
 
     if (url.pathname === "/api/live-news") {
+      if (url.searchParams.get("scope") === "prepared-world") {
+        return handlePreparedWorld(request, env, ctx);
+      }
       if (
         url.searchParams.get("scope") === "snapshot" ||
         url.searchParams.get("snapshot") === "1"
@@ -430,6 +606,13 @@ const worker = {
     }
 
     return handler.fetch(request, env, ctx);
+  },
+  async scheduled(
+    _controller: ScheduledController,
+    env: Env,
+    ctx: ExecutionContext,
+  ) {
+    ctx.waitUntil(refreshPreparedWorldSafely(env));
   },
 };
 

@@ -154,3 +154,20 @@ export interface MapNewsPayload {
   provider: string;
   countries: MapNewsCountryPayload[];
 }
+
+export interface PreparedNewsFeed {
+  events: Event[];
+  updatedAt: string | null;
+  provider: string | null;
+  loading: false;
+  error: null;
+}
+
+export interface PreparedWorldNewsPayload {
+  scope: "prepared-world";
+  version: string;
+  generatedAt: string;
+  refreshAfterSeconds: number;
+  globalFeed: PreparedNewsFeed;
+  countryFeeds: Record<string, PreparedNewsFeed>;
+}

@@ -31,6 +31,7 @@ import {
   type LiveNewsPayload,
   type MapNewsPayload,
   type MapCountry,
+  type PreparedWorldNewsPayload,
 } from "@/lib/types";
 import {
   countryPulses,
@@ -99,6 +100,32 @@ const WORLD_BATCH_SIZE = 12;
 const WORLD_BATCH_CONCURRENCY = 6;
 let worldSnapshotPromise: Promise<MapNewsPayload> | null = null;
 let worldSnapshotFetchIdentity: typeof fetch | null = null;
+let preparedWorldPromise: Promise<PreparedWorldNewsPayload> | null = null;
+let preparedWorldFetchIdentity: typeof fetch | null = null;
+
+function loadPreparedWorld() {
+  if (preparedWorldFetchIdentity !== fetch) {
+    preparedWorldPromise = null;
+    preparedWorldFetchIdentity = fetch;
+  }
+  preparedWorldPromise ??= fetch("/api/live-news?scope=prepared-world", {
+    signal: AbortSignal.timeout(WORLD_BATCH_REQUEST_TIMEOUT_MS),
+  }).then(async (response) => {
+    if (!response.ok) {
+      throw new Error("The minute world state is unavailable.");
+    }
+    const payload = (await response.json()) as PreparedWorldNewsPayload;
+    if (
+      payload.scope !== "prepared-world" ||
+      !payload.globalFeed ||
+      !payload.countryFeeds
+    ) {
+      throw new Error("The minute world state is invalid.");
+    }
+    return payload;
+  });
+  return preparedWorldPromise;
+}
 
 function loadWorldSnapshot() {
   if (worldSnapshotFetchIdentity !== fetch) {
@@ -1581,11 +1608,10 @@ export function WorldPulseApp({
     } else {
       setGlobeReady(true);
     }
-    void loadWorldSnapshot().catch(() => {
-      // The country scan effect retains its bounded live fallback.
+    void loadPreparedWorld().catch(() => {
+      // The country scan effect retains the raw snapshot and live fallbacks.
     });
-    void fetchGlobalNews();
-  }, [MapComponent, fetchGlobalNews, liveUpdates]);
+  }, [MapComponent, liveUpdates]);
 
   useEffect(() => {
     if (!liveUpdates) return;
@@ -1640,7 +1666,7 @@ export function WorldPulseApp({
     setPreparedCountryCount(0);
     setWorldScanSettled(false);
 
-    const loadPreparedWorld = async () => {
+    const initializePreparedWorld = async () => {
       const checkedAt = new Date().toISOString();
       const neutralFeed = (): FeedState => ({
         events: [],
@@ -1718,18 +1744,19 @@ export function WorldPulseApp({
       const allCountryNames = countryDirectory.map((country) => country.name);
       let missingCountryNames = allCountryNames;
       try {
-        const snapshot = await loadWorldSnapshot();
-        const requestedNames = new Set(allCountryNames);
-        const snapshotPayloads = (snapshot.countries ?? []).filter(
-          (country) => requestedNames.has(country.countryName),
+        const prepared = await loadPreparedWorld();
+        if (cancelled) return;
+        setGlobalFeed(prepared.globalFeed);
+        setGlobalFeedReady(true);
+        const receivedNames = allCountryNames.filter(
+          (countryName) => prepared.countryFeeds[countryName],
         );
-        const receivedNames = [
-          ...new Set(snapshotPayloads.map((country) => country.countryName)),
-        ];
         if (receivedNames.length) {
-          const snapshotFeeds = await prepareWorldSnapshotOffThread(
-            snapshotPayloads,
-            countryDirectory,
+          const snapshotFeeds = Object.fromEntries(
+            receivedNames.map((countryName) => [
+              countryName,
+              prepared.countryFeeds[countryName],
+            ]),
           );
           commitFeeds(
             snapshotFeeds,
@@ -1740,17 +1767,31 @@ export function WorldPulseApp({
         missingCountryNames = allCountryNames.filter(
           (countryName) => !received.has(countryName),
         );
-        const warmParameters = new URLSearchParams({
-          scope: "snapshot",
-          warm: "1",
-          countries: allCountryNames.join("|"),
-        });
-        void fetch(`/api/live-news?${warmParameters.toString()}`).then(
-          (warmResponse) => warmResponse.body?.cancel(),
-          () => undefined,
-        );
       } catch {
-        // A cold or unavailable snapshot falls back to the bounded live scan.
+        void fetchGlobalNews();
+        try {
+          const snapshot = await loadWorldSnapshot();
+          const requestedNames = new Set(allCountryNames);
+          const snapshotPayloads = (snapshot.countries ?? []).filter(
+            (country) => requestedNames.has(country.countryName),
+          );
+          const receivedNames = [
+            ...new Set(snapshotPayloads.map((country) => country.countryName)),
+          ];
+          if (receivedNames.length) {
+            const snapshotFeeds = await prepareWorldSnapshotOffThread(
+              snapshotPayloads,
+              countryDirectory,
+            );
+            commitFeeds(snapshotFeeds, receivedNames.length);
+          }
+          const received = new Set(receivedNames);
+          missingCountryNames = allCountryNames.filter(
+            (countryName) => !received.has(countryName),
+          );
+        } catch {
+          // A cold or unavailable snapshot falls back to the bounded live scan.
+        }
       }
       const batches = chunkItems(missingCountryNames, WORLD_BATCH_SIZE);
       let nextBatchIndex = 0;
@@ -1778,13 +1819,14 @@ export function WorldPulseApp({
       }
     };
 
-    void loadPreparedWorld();
+    void initializePreparedWorld();
     return () => {
       cancelled = true;
     };
   }, [
     countryDirectory,
     countryDirectoryReady,
+    fetchGlobalNews,
     liveUpdates,
   ]);
 
