@@ -14,6 +14,8 @@ import {
 import type {
   LiveNewsPayload,
   MapCountry,
+  MapNewsPayload,
+  PreparedNewsFeed,
 } from "../lib/types";
 import { mergeCachedPayloads } from "./live-cache";
 import { collectStoredMapCountries } from "./map-cache";
@@ -75,6 +77,48 @@ function loadWorldDirectory() {
   return directory;
 }
 
+interface PreparedCountryChunk {
+  generatedAt: string;
+  countryFeeds: Record<string, PreparedNewsFeed>;
+}
+
+function preparedCountryChunkKey(batchIndex: number) {
+  return `world/countries/${batchIndex}.json`;
+}
+
+async function readCompletePreparedCountryFeeds(
+  snapshots: R2Bucket,
+  directory: MapCountry[],
+) {
+  const batchCount = Math.ceil(
+    directory.length / PREPARED_WORLD_REFRESH_BATCH_SIZE,
+  );
+  const objects = await Promise.all(
+    Array.from({ length: batchCount }, (_, batchIndex) =>
+      snapshots.get(preparedCountryChunkKey(batchIndex)),
+    ),
+  );
+  const feeds: Record<string, PreparedNewsFeed> = {};
+  for (const object of objects) {
+    if (!object) continue;
+    try {
+      const chunk = JSON.parse(await object.text()) as PreparedCountryChunk;
+      Object.assign(feeds, chunk.countryFeeds);
+    } catch {
+      // The completeness check below prevents a malformed chunk from release.
+    }
+  }
+  const missingCountries = directory.filter(
+    (country) => !feeds[country.name],
+  );
+  if (missingCountries.length) {
+    throw new Error(
+      `Prepared world is missing ${missingCountries.length} country feeds.`,
+    );
+  }
+  return feeds;
+}
+
 async function refreshPreparedWorld(env: Env) {
   if (!env.DB || !env.SNAPSHOTS) {
     throw new Error("Prepared world storage is unavailable.");
@@ -87,27 +131,8 @@ async function refreshPreparedWorld(env: Env) {
     throw new Error("Fresh global reporting is unavailable.");
   }
   const generatedAt = new Date().toISOString();
-  const expectedCountryNames = new Set(
-    directory.map((country) => country.name),
-  );
-  const storedFeeds = await readStoredMapFeeds(env.DB);
-  const consolidated = collectStoredMapCountries(
-    storedFeeds,
-    expectedCountryNames,
-  );
-  const storedCountryNames = new Set(
-    consolidated.countries.map((country) => country.countryName),
-  );
-  const missingCountries = directory.filter(
-    (country) => !storedCountryNames.has(country.name),
-  );
-  if (missingCountries.length) {
-    throw new Error(
-      `Prepared world is missing ${missingCountries.length} country feeds.`,
-    );
-  }
-  const localFeeds = prepareWorldSnapshotFeeds(
-    consolidated.countries,
+  const localFeeds = await readCompletePreparedCountryFeeds(
+    env.SNAPSHOTS,
     directory,
   );
   const snapshot = prepareCompleteWorldSnapshotFromFeeds(
@@ -126,7 +151,7 @@ async function refreshPreparedCountryBatch(
   env: Env,
   requestedBatchIndex?: number,
 ) {
-  if (!env.DB) return;
+  if (!env.DB || !env.SNAPSHOTS) return;
   const directory = loadWorldDirectory();
   const countryNames = directory.map((country) => country.name);
   const batchCount = Math.ceil(
@@ -149,6 +174,23 @@ async function refreshPreparedCountryBatch(
   const previous = await readStoredNewsFeed(env.DB, cacheKey);
   if (previous) mapPayload = mergeCachedPayloads(mapPayload, previous.payload);
   await writeStoredNewsFeed(env.DB, cacheKey, mapPayload, Date.now());
+  const parsedMap = JSON.parse(mapPayload) as MapNewsPayload;
+  const generatedAt = new Date().toISOString();
+  const chunk: PreparedCountryChunk = {
+    generatedAt,
+    countryFeeds: prepareWorldSnapshotFeeds(
+      parsedMap.countries ?? [],
+      directory,
+    ),
+  };
+  await env.SNAPSHOTS.put(
+    preparedCountryChunkKey(batchIndex),
+    JSON.stringify(chunk),
+    {
+      httpMetadata: { contentType: "application/json; charset=utf-8" },
+      customMetadata: { generatedAt },
+    },
+  );
 }
 
 function refreshPreparedWorldOnce(env: Env) {
@@ -231,6 +273,12 @@ async function handlePreparedWorld(
             event: "prepared_country_seed_failed",
             error: error instanceof Error ? error.message : "unknown error",
           }),
+        );
+      }
+      if (requestUrl.searchParams.get("countryBatchOnly") === "1") {
+        return Response.json(
+          { status: "country batch refreshed", batchIndex },
+          { status: 202, headers: { "Cache-Control": "no-store" } },
         );
       }
     }
