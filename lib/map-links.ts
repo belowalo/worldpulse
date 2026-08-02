@@ -183,8 +183,18 @@ export function countriesMentionedByEvent(
     ...event.articles.map((article) => article.headline),
   ].join(" ");
   return countries.filter((country) =>
-    textMatchesCountry(searchableText, countrySearchTerms(country.name)),
+    textMatchesCountry(searchableText, termsForCountry(country.name)),
   );
+}
+
+const countryTermsCache = new Map<string, string[]>();
+
+function termsForCountry(countryName: string) {
+  const cached = countryTermsCache.get(countryName);
+  if (cached) return cached;
+  const terms = countrySearchTerms(countryName);
+  countryTermsCache.set(countryName, terms);
+  return terms;
 }
 
 export function buildEventLinkCollection({

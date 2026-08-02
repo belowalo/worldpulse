@@ -206,12 +206,20 @@ function escapeRegExp(value: string) {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
+const countryTermPatternCache = new Map<string, RegExp>();
+
+function countryTermPattern(term: string) {
+  const cached = countryTermPatternCache.get(term);
+  if (cached) return cached;
+  const caseSensitiveAcronym = /^[A-Z]{2,3}$/.test(term);
+  const pattern = new RegExp(
+    `(^|[^\\p{L}\\p{N}])${escapeRegExp(term)}([^\\p{L}\\p{N}]|$)`,
+    caseSensitiveAcronym ? "u" : "iu",
+  );
+  countryTermPatternCache.set(term, pattern);
+  return pattern;
+}
+
 export function textMatchesCountry(text: string, terms: string[]) {
-  return terms.some((term) => {
-    const caseSensitiveAcronym = /^[A-Z]{2,3}$/.test(term);
-    return new RegExp(
-      `(^|[^\\p{L}\\p{N}])${escapeRegExp(term)}([^\\p{L}\\p{N}]|$)`,
-      caseSensitiveAcronym ? "u" : "iu",
-    ).test(text);
-  });
+  return terms.some((term) => countryTermPattern(term).test(text));
 }

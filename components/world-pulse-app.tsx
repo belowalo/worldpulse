@@ -36,7 +36,11 @@ import {
   countryPulses,
   defaultCountry,
 } from "@/lib/seed-data";
-import { calculateImportance, categoryColor } from "@/lib/scoring";
+import { categoryColor } from "@/lib/scoring";
+import {
+  applyDetectedGeography,
+  prepareWorldSnapshotFeeds,
+} from "@/lib/world-snapshot";
 import {
   loadWorldGeometry,
   preloadWorldGlobe,
@@ -112,6 +116,38 @@ function loadWorldSnapshot() {
   return worldSnapshotPromise;
 }
 
+function prepareWorldSnapshotOffThread(
+  payloads: MapNewsPayload["countries"],
+  countries: MapCountry[],
+): Promise<Record<string, FeedState>> {
+  if (typeof Worker === "undefined") {
+    return Promise.resolve(prepareWorldSnapshotFeeds(payloads, countries));
+  }
+  return new Promise((resolve, reject) => {
+    const snapshotWorker = new Worker(
+      new URL("../lib/world-snapshot.worker.ts", import.meta.url),
+      { type: "module" },
+    );
+    const timeout = window.setTimeout(() => {
+      snapshotWorker.terminate();
+      reject(new Error("Prepared world processing timed out."));
+    }, WORLD_BATCH_REQUEST_TIMEOUT_MS);
+    snapshotWorker.onmessage = (
+      event: MessageEvent<Record<string, FeedState>>,
+    ) => {
+      window.clearTimeout(timeout);
+      snapshotWorker.terminate();
+      resolve(event.data);
+    };
+    snapshotWorker.onerror = () => {
+      window.clearTimeout(timeout);
+      snapshotWorker.terminate();
+      reject(new Error("Prepared world processing failed."));
+    };
+    snapshotWorker.postMessage({ payloads, countries });
+  });
+}
+
 function chunkItems<T>(items: T[], size: number) {
   const chunks: T[][] = [];
   for (let index = 0; index < items.length; index += size) {
@@ -173,53 +209,6 @@ const formatTime = (value: string) =>
     hour: "numeric",
     minute: "2-digit",
   }).format(new Date(value));
-
-function applyDetectedGeography(
-  event: Event,
-  countries: MapCountry[],
-  anchorCountry?: MapCountry,
-) {
-  const mentionedCountries = countriesMentionedByEvent(
-    event,
-    countries,
-    anchorCountry,
-  );
-  const detectedCountries = mentionedCountries.map(
-    (country) => country.iso2 ?? country.name,
-  );
-  const affectedCountries = [
-    ...new Set(
-      detectedCountries.length
-        ? detectedCountries
-        : event.affectedCountries.length
-          ? event.affectedCountries
-          : event.primaryCountry !== "GLOBAL"
-            ? [event.primaryCountry]
-            : [],
-    ),
-  ];
-  const scoringInput = {
-    ...event.scoringInput,
-    affectedCountryCount: Math.max(1, affectedCountries.length),
-  };
-  const scoring = calculateImportance(scoringInput);
-  return {
-    ...event,
-    geographicScope:
-      affectedCountries.length > 1
-        ? ("International" as const)
-        : event.geographicScope,
-    primaryCountry:
-      event.primaryCountry === "GLOBAL" && affectedCountries[0]
-        ? affectedCountries[0]
-        : event.primaryCountry,
-    affectedCountries,
-    importanceScore: scoring.score,
-    importanceLabel: scoring.label,
-    scoringComponents: scoring.components,
-    scoringInput,
-  };
-}
 
 function ImportancePill({ event }: { event: Event }) {
   return (
@@ -1647,10 +1636,6 @@ export function WorldPulseApp({
     }
 
     let cancelled = false;
-    const countriesByName = new Map(
-      countryDirectory.map((country) => [country.name, country]),
-    );
-
     setLiveCountryFeeds({});
     setPreparedCountryCount(0);
     setWorldScanSettled(false);
@@ -1683,36 +1668,9 @@ export function WorldPulseApp({
         payloads: MapNewsPayload["countries"],
         countryNames: string[],
       ) => {
-        const batchFeeds: Record<string, FeedState> = {};
-        for (const countryPayload of payloads) {
-          const country = countriesByName.get(countryPayload.countryName);
-          if (!country) continue;
-          const livePayload: LiveNewsPayload = {
-            countryName: country.name,
-            scope: "country",
-            generatedAt: countryPayload.generatedAt,
-            refreshAfterSeconds: 300,
-            provider: "WorldPulse",
-            articles: countryPayload.articles,
-          };
-          const countryArticles = articlesMentioningCountry(
-            livePayload,
-            country.name,
-          );
-          const events = buildLiveEvents(
-            { ...livePayload, articles: countryArticles },
-            country,
-          ).map((event) =>
-              applyDetectedGeography(event, countryDirectory, country),
-          );
-          batchFeeds[country.name] = {
-            events,
-            updatedAt: countryPayload.generatedAt,
-            provider: "WorldPulse",
-            loading: false,
-            error: null,
-          };
-        }
+        const batchFeeds: Record<string, FeedState> = {
+          ...prepareWorldSnapshotFeeds(payloads, countryDirectory),
+        };
         for (const countryName of countryNames) {
           batchFeeds[countryName] ??= neutralFeed();
         }
@@ -1769,8 +1727,12 @@ export function WorldPulseApp({
           ...new Set(snapshotPayloads.map((country) => country.countryName)),
         ];
         if (receivedNames.length) {
+          const snapshotFeeds = await prepareWorldSnapshotOffThread(
+            snapshotPayloads,
+            countryDirectory,
+          );
           commitFeeds(
-            compileFeeds(snapshotPayloads, receivedNames),
+            snapshotFeeds,
             receivedNames.length,
           );
         }
