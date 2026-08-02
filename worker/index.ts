@@ -93,13 +93,9 @@ async function readCompletePreparedCountryFeeds(
   const batchCount = Math.ceil(
     directory.length / PREPARED_WORLD_REFRESH_BATCH_SIZE,
   );
-  const objects = await Promise.all(
-    Array.from({ length: batchCount }, (_, batchIndex) =>
-      snapshots.get(preparedCountryChunkKey(batchIndex)),
-    ),
-  );
   const feeds: Record<string, PreparedNewsFeed> = {};
-  for (const object of objects) {
+  for (let batchIndex = 0; batchIndex < batchCount; batchIndex += 1) {
+    const object = await snapshots.get(preparedCountryChunkKey(batchIndex));
     if (!object) continue;
     try {
       const chunk = JSON.parse(await object.text()) as PreparedCountryChunk;
