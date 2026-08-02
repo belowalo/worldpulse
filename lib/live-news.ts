@@ -934,17 +934,42 @@ function hasSharedTitlePhrase(left: string[], right: string[]) {
 }
 
 function articleSimilarity(left: LiveArticle, right: LiveArticle) {
-  const leftTitle = occurrenceIdentityTokens(left.title);
-  const rightTitle = occurrenceIdentityTokens(right.title);
-  const title = tokenMetrics(leftTitle, rightTitle);
-  const leftContext = occurrenceIdentityTokens(
-    `${left.title} ${left.description ?? ""}`,
+  return analyzedArticleSimilarity(
+    analyzeArticleSimilarity(left),
+    analyzeArticleSimilarity(right),
   );
-  const rightContext = occurrenceIdentityTokens(
-    `${right.title} ${right.description ?? ""}`,
+}
+
+interface ArticleSimilarityAnalysis {
+  category: Category;
+  contextTokens: string[];
+  publishedAt: number;
+  titleTokens: string[];
+}
+
+function analyzeArticleSimilarity(
+  article: Pick<LiveArticle, "description" | "publishedAt" | "title">,
+): ArticleSimilarityAnalysis {
+  return {
+    category: classifyLiveHeadline(article.title),
+    contextTokens: occurrenceIdentityTokens(
+      `${article.title} ${article.description ?? ""}`,
+    ),
+    publishedAt: Date.parse(article.publishedAt),
+    titleTokens: occurrenceIdentityTokens(article.title),
+  };
+}
+
+function analyzedArticleSimilarity(
+  left: ArticleSimilarityAnalysis,
+  right: ArticleSimilarityAnalysis,
+) {
+  const title = tokenMetrics(left.titleTokens, right.titleTokens);
+  const context = tokenMetrics(left.contextTokens, right.contextTokens);
+  const sharedPhrase = hasSharedTitlePhrase(
+    left.titleTokens,
+    right.titleTokens,
   );
-  const context = tokenMetrics(leftContext, rightContext);
-  const sharedPhrase = hasSharedTitlePhrase(leftTitle, rightTitle);
 
   // A two-word place name such as "South Africa" is not enough to prove that
   // two reports describe the same occurrence. Require another shared signal.
@@ -1300,23 +1325,31 @@ function createSource(article: LiveArticle): NewsSource {
 
 function clusterArticles(articles: LiveArticle[]) {
   const clusters: LiveArticle[][] = [];
+  const analyses = new Map(
+    articles.map((article) => [article, analyzeArticleSimilarity(article)]),
+  );
   const chronological = [...articles].sort(
     (left, right) =>
-      Date.parse(right.publishedAt) - Date.parse(left.publishedAt),
+      (analyses.get(right)?.publishedAt ?? 0) -
+      (analyses.get(left)?.publishedAt ?? 0),
   );
   for (const article of chronological) {
+    const articleAnalysis = analyses.get(article)!;
     const cluster = clusters.find((candidate) =>
       candidate.some(
         (member) => {
-          const similarity = articleSimilarity(member, article);
+          const memberAnalysis = analyses.get(member)!;
+          const similarity = analyzedArticleSimilarity(
+            memberAnalysis,
+            articleAnalysis,
+          );
           return (
             Math.abs(
-            Date.parse(member.publishedAt) - Date.parse(article.publishedAt),
+              memberAnalysis.publishedAt - articleAnalysis.publishedAt,
             ) <=
               72 * 3_600_000 &&
             similarity > 0 &&
-            (classifyLiveHeadline(member.title) ===
-              classifyLiveHeadline(article.title) ||
+            (memberAnalysis.category === articleAnalysis.category ||
               similarity >= 0.6)
           );
         },
@@ -1325,7 +1358,7 @@ function clusterArticles(articles: LiveArticle[]) {
     if (cluster) cluster.push(article);
     else clusters.push([article]);
   }
-  return clusters;
+  return { analyses, clusters };
 }
 
 function distinctPublisherArticles(cluster: LiveArticle[]) {
@@ -1340,16 +1373,36 @@ function distinctPublisherArticles(cluster: LiveArticle[]) {
   return [...publishers.values()];
 }
 
-function representativeArticle(cluster: LiveArticle[]) {
+function representativeArticle(
+  cluster: LiveArticle[],
+  analyses: Map<LiveArticle, ArticleSimilarityAnalysis>,
+) {
+  const connectionCounts = new Map(
+    cluster.map((article) => [article, 0]),
+  );
+  for (let leftIndex = 0; leftIndex < cluster.length; leftIndex += 1) {
+    for (
+      let rightIndex = leftIndex + 1;
+      rightIndex < cluster.length;
+      rightIndex += 1
+    ) {
+      const left = cluster[leftIndex];
+      const right = cluster[rightIndex];
+      if (
+        analyzedArticleSimilarity(
+          analyses.get(left)!,
+          analyses.get(right)!,
+        ) > 0
+      ) {
+        connectionCounts.set(left, (connectionCounts.get(left) ?? 0) + 1);
+        connectionCounts.set(right, (connectionCounts.get(right) ?? 0) + 1);
+      }
+    }
+  }
   return [...cluster].sort((left, right) => {
-    const leftConnections = cluster.filter(
-      (article) => article !== left && articleSimilarity(left, article) > 0,
-    ).length;
-    const rightConnections = cluster.filter(
-      (article) => article !== right && articleSimilarity(right, article) > 0,
-    ).length;
     return (
-      rightConnections - leftConnections ||
+      (connectionCounts.get(right) ?? 0) -
+        (connectionCounts.get(left) ?? 0) ||
       publisherProminence(right.publisherName) -
         publisherProminence(left.publisherName) ||
       Date.parse(right.publishedAt) - Date.parse(left.publishedAt)
@@ -1365,7 +1418,8 @@ export function buildLiveEvents(
   const primaryCountry = country?.iso2 ?? country?.name ?? "GLOBAL";
   const scope: GeographicScope = country ? "National" : "International";
 
-  return clusterArticles(payload.articles)
+  const { analyses, clusters } = clusterArticles(payload.articles);
+  return clusters
     .map((cluster): Event => {
       const sourceArticles = distinctPublisherArticles(cluster);
       const visibleSourceArticles = selectBalancedSources(
@@ -1373,7 +1427,7 @@ export function buildLiveEvents(
         (article) => article.publisherName,
         (article) => article.publishedAt,
       );
-      const representative = representativeArticle(cluster);
+      const representative = representativeArticle(cluster, analyses);
       const headline = representative?.title ?? "Current report";
       const classificationText = [
         headline,

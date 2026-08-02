@@ -45,11 +45,15 @@ function liveArticleFor(countryName: string): TestLiveArticle {
 function liveMapResponse(
   requestUrl: string,
   articlesByCountry: Record<string, TestLiveArticle[]> = {},
+  snapshotCountries: string[] = [],
 ) {
   const parameters = new URL(requestUrl, "https://worldpulse.test").searchParams;
-  const countries = (parameters.get("countries") ?? "")
+  const requestedCountries = (parameters.get("countries") ?? "")
     .split("|")
     .filter(Boolean);
+  const countries = requestedCountries.length
+    ? requestedCountries
+    : snapshotCountries;
   return Response.json({
     scope: "map",
     generatedAt: "2026-07-25T00:00:00.000Z",
@@ -893,6 +897,9 @@ describe("WorldPulse interactions", () => {
           features: [{ id: "124", properties: { name: "Canada" } }],
         });
       }
+      if (url.includes("scope=snapshot")) {
+        return liveMapResponse(url, { Canada: [] }, ["Canada"]);
+      }
       if (url.includes("scope=map")) {
         return liveMapResponse(url, { Canada: [] });
       }
@@ -921,7 +928,10 @@ describe("WorldPulse interactions", () => {
 
     await screen.findByText("Live country index complete");
     const requestedUrls = fetchMock.mock.calls.map(([input]) => String(input));
-    expect(requestedUrls.some((url) => url.includes("scope=map"))).toBe(true);
+    expect(requestedUrls.some((url) => url.includes("scope=snapshot"))).toBe(
+      true,
+    );
+    expect(requestedUrls.some((url) => url.includes("scope=map"))).toBe(false);
     expect(
       requestedUrls.some((url) =>
         url.includes("/api/live-news?country="),
@@ -1372,14 +1382,14 @@ describe("WorldPulse interactions", () => {
     ).toBeInTheDocument();
   });
 
-  it("loads every mapped country live without a static snapshot", async () => {
+  it("loads every mapped country from one prepared snapshot", async () => {
     const mapArticle = {
       id: "senegal-music",
       title: "MUSIC AWARDS SENEGAL 2026 announced",
       url: "https://local.example/senegal-music",
       publisherName: "Local Culture Desk",
       publisherUrl: "https://local.example/",
-      publishedAt: "2026-07-24T21:00:00.000Z",
+      publishedAt: "2026-08-01T21:00:00.000Z",
     };
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input);
@@ -1396,6 +1406,22 @@ describe("WorldPulse interactions", () => {
             },
           ],
         });
+      }
+      if (url.includes("scope=snapshot")) {
+        return liveMapResponse(
+          url,
+          {
+            Canada: [
+              {
+                ...mapArticle,
+                id: "canada",
+                title: "Canada music festival opens",
+              },
+            ],
+            Senegal: [mapArticle],
+          },
+          ["Canada", "Senegal"],
+        );
       }
       if (url.includes("scope=map")) {
         return liveMapResponse(url, {
@@ -1444,12 +1470,15 @@ describe("WorldPulse interactions", () => {
     );
     expect(screen.getByTestId("countries-with-news")).toHaveTextContent("2");
     expect(screen.getByTestId("countries-syncing")).toHaveTextContent("0");
-    const mapRequestUrls = fetchMock.mock.calls
+    const snapshotRequestUrls = fetchMock.mock.calls
       .map(([input]) => String(input))
-      .filter((url) => url.includes("scope=map"));
-    expect(mapRequestUrls.length).toBeGreaterThan(0);
+      .filter(
+        (url) =>
+          url.includes("scope=snapshot") && !url.includes("warm=1"),
+      );
+    expect(snapshotRequestUrls).toHaveLength(1);
     expect(
-      mapRequestUrls.every(
+      snapshotRequestUrls.every(
         (url) =>
           new URL(url, "https://worldpulse.test").searchParams.has("fresh") ===
           false,
@@ -1472,15 +1501,11 @@ describe("WorldPulse interactions", () => {
     expect(
       screen.getAllByText("Culture and entertainment").length,
     ).toBeGreaterThan(0);
-    await waitFor(
-      () =>
-        expect(
-          fetchMock.mock.calls.some(([input]) =>
-            String(input).includes("scope=map"),
-          ),
-        ).toBe(true),
-      { timeout: 3_000 },
-    );
+    expect(
+      fetchMock.mock.calls.some(([input]) =>
+        String(input).includes("scope=map"),
+      ),
+    ).toBe(false);
   });
 
   it("gives every real map country a live categorized top event before a click", async () => {
@@ -1490,6 +1515,16 @@ describe("WorldPulse interactions", () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input);
       if (url === "/countries.geojson") return Response.json(geojson);
+      if (url.includes("scope=snapshot")) {
+        return liveMapResponse(
+          url,
+          {},
+          geojson.features.map(
+            (feature: { properties: { name: string } }) =>
+              feature.properties.name,
+          ),
+        );
+      }
       if (url.includes("scope=map")) {
         return liveMapResponse(url);
       }
@@ -1523,24 +1558,28 @@ describe("WorldPulse interactions", () => {
     expect(
       screen.getByTestId("countries-with-valid-color-contract"),
     ).toHaveTextContent("215");
-    const worldRequests = fetchMock.mock.calls
+    const snapshotRequests = fetchMock.mock.calls
       .map(([input]) => String(input))
-      .filter((url) => url.includes("scope=map"));
-    expect(worldRequests.length).toBeGreaterThan(1);
+      .filter(
+        (url) =>
+          url.includes("scope=snapshot") && !url.includes("warm=1"),
+      );
+    expect(snapshotRequests).toHaveLength(1);
     expect(
-      worldRequests.every((url) => {
-        const countries =
-          new URL(url, "https://worldpulse.test").searchParams
-            .get("countries")
-            ?.split("|")
-            .filter(Boolean) ?? [];
-        return (
-          countries.length > 0 &&
-          countries.length <= 12 &&
-          !new URL(url, "https://worldpulse.test").searchParams.has("snapshot")
-        );
-      }),
+      new URL(snapshotRequests[0], "https://worldpulse.test").searchParams.has(
+        "countries",
+      ),
+    ).toBe(false);
+    expect(
+      fetchMock.mock.calls
+        .map(([input]) => String(input))
+        .some((url) => url.includes("scope=snapshot") && url.includes("warm=1")),
     ).toBe(true);
+    expect(
+      fetchMock.mock.calls
+        .map(([input]) => String(input))
+        .some((url) => url.includes("scope=map")),
+    ).toBe(false);
   }, 20_000);
 
   it("keeps the map signal aligned when a selected country is refreshed", async () => {

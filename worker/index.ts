@@ -60,6 +60,43 @@ async function handleWorldSnapshot(
       { status: 503, headers: { "Cache-Control": "no-store" } },
     );
   }
+  const requestUrl = new URL(request.url);
+  const requestedCountries = [
+    ...new Set(
+      (requestUrl.searchParams.get("countries") ?? "")
+        .split("|")
+        .map((country) => country.trim())
+        .filter(Boolean),
+    ),
+  ];
+  if (requestedCountries.length) {
+    const batchSize = 12;
+    const batchCount = Math.ceil(requestedCountries.length / batchSize);
+    const batchIndex = Math.floor(Date.now() / 60_000) % batchCount;
+    const refreshCountries = requestedCountries.slice(
+      batchIndex * batchSize,
+      (batchIndex + 1) * batchSize,
+    );
+    const refreshUrl = new URL(request.url);
+    refreshUrl.searchParams.delete("snapshot");
+    refreshUrl.searchParams.delete("warm");
+    refreshUrl.searchParams.set("scope", "map");
+    refreshUrl.searchParams.set("countries", refreshCountries.join("|"));
+    refreshUrl.searchParams.set("fresh", "1");
+    ctx.waitUntil(
+      handleCachedLiveNews(
+        new Request(refreshUrl.toString(), { method: "GET" }),
+        env,
+        ctx,
+      ).then((response) => response.body?.cancel()),
+    );
+  }
+  if (requestUrl.searchParams.get("warm") === "1") {
+    return new Response(null, {
+      status: 202,
+      headers: { "Cache-Control": "no-store" },
+    });
+  }
   const storedFeeds = await readStoredMapFeeds(env.DB);
   const countries = new Map<string, StoredMapCountry>();
   let latestGeneratedAt = 0;
@@ -94,36 +131,6 @@ async function handleWorldSnapshot(
     } catch {
       // Ignore a malformed historical cache row and continue with the others.
     }
-  }
-  const requestUrl = new URL(request.url);
-  const requestedCountries = [
-    ...new Set(
-      (requestUrl.searchParams.get("countries") ?? "")
-        .split("|")
-        .map((country) => country.trim())
-        .filter(Boolean),
-    ),
-  ];
-  if (requestedCountries.length) {
-    const batchSize = 12;
-    const batchCount = Math.ceil(requestedCountries.length / batchSize);
-    const batchIndex = Math.floor(Date.now() / 60_000) % batchCount;
-    const refreshCountries = requestedCountries.slice(
-      batchIndex * batchSize,
-      (batchIndex + 1) * batchSize,
-    );
-    const refreshUrl = new URL(request.url);
-    refreshUrl.searchParams.delete("snapshot");
-    refreshUrl.searchParams.set("scope", "map");
-    refreshUrl.searchParams.set("countries", refreshCountries.join("|"));
-    refreshUrl.searchParams.set("fresh", "1");
-    ctx.waitUntil(
-      handleCachedLiveNews(
-        new Request(refreshUrl.toString(), { method: "GET" }),
-        env,
-        ctx,
-      ).then((response) => response.body?.cancel()),
-    );
   }
   return Response.json(
     {
