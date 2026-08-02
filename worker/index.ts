@@ -244,6 +244,7 @@ async function refreshPreparedCountryBatchSafely(env: Env) {
 async function handlePreparedWorld(
   request: Request,
   env: Env,
+  ctx: ExecutionContext,
 ) {
   if (!env.SNAPSHOTS) {
     return Response.json(
@@ -296,6 +297,8 @@ async function handlePreparedWorld(
       }
       current = await env.SNAPSHOTS.get(PREPARED_WORLD_KEY);
     }
+  } else if (age >= PREPARED_WORLD_FRESH_MS) {
+    ctx.waitUntil(refreshPreparedWorldSafely(env));
   }
   if (!current) {
     return Response.json(
@@ -669,7 +672,7 @@ const worker = {
 
     if (url.pathname === "/api/live-news") {
       if (url.searchParams.get("scope") === "prepared-world") {
-        return handlePreparedWorld(request, env);
+        return handlePreparedWorld(request, env, ctx);
       }
       if (
         url.searchParams.get("scope") === "snapshot" ||
