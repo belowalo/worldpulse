@@ -214,7 +214,6 @@ async function refreshPreparedCountryBatchSafely(env: Env) {
 async function handlePreparedWorld(
   request: Request,
   env: Env,
-  ctx: ExecutionContext,
 ) {
   if (!env.SNAPSHOTS) {
     return Response.json(
@@ -234,10 +233,17 @@ async function handlePreparedWorld(
       suppliedToken === env.WORLD_SNAPSHOT_REFRESH_TOKEN,
     );
     if (canWaitForRefresh) {
-      await refreshPreparedWorldSafely(env);
+      try {
+        await refreshPreparedWorld(env);
+      } catch (error) {
+        console.warn(
+          JSON.stringify({
+            event: "prepared_world_seed_failed",
+            error: error instanceof Error ? error.message : "unknown error",
+          }),
+        );
+      }
       current = await env.SNAPSHOTS.get(PREPARED_WORLD_KEY);
-    } else {
-      ctx.waitUntil(refreshPreparedWorldSafely(env));
     }
   }
   if (!current) {
@@ -612,7 +618,7 @@ const worker = {
 
     if (url.pathname === "/api/live-news") {
       if (url.searchParams.get("scope") === "prepared-world") {
-        return handlePreparedWorld(request, env, ctx);
+        return handlePreparedWorld(request, env);
       }
       if (
         url.searchParams.get("scope") === "snapshot" ||
