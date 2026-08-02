@@ -497,6 +497,7 @@ export function WorldMap({
   const [mapError, setMapError] = useState<string | null>(null);
   const [worldGeometry, setWorldGeometry] =
     useState<WorldFeatureCollection | null>(null);
+  const [globeSceneReady, setGlobeSceneReady] = useState(false);
   const [capitalCoordinates, setCapitalCoordinates] = useState<
     CapitalCoordinate[]
   >([]);
@@ -776,6 +777,7 @@ export function WorldMap({
           animationFrame = window.requestAnimationFrame(render);
         };
         render();
+        setGlobeSceneReady(true);
         setMapError(null);
       })
       .catch(() => {
@@ -811,7 +813,9 @@ export function WorldMap({
   useEffect(() => {
     const globeScene = globeSceneRef.current;
     const geometry = geometryRef.current;
-    if (!globeScene || !geometry || !readyForDisplay) return;
+    if (!globeScene || !geometry || !readyForDisplay || !globeSceneReady) {
+      return;
+    }
     const timeout = window.setTimeout(() => {
       drawWorldTexture({
         scene: globeScene,
@@ -825,7 +829,7 @@ export function WorldMap({
       }
     }, 120);
     return () => window.clearTimeout(timeout);
-  }, [countryIndex, readyForDisplay, worldGeometry]);
+  }, [countryIndex, globeSceneReady, readyForDisplay, worldGeometry]);
 
   useEffect(() => {
     const runtime = runtimeRef.current;
