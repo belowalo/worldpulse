@@ -6,7 +6,7 @@ import {
   waitFor,
   within,
 } from "@testing-library/react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 
@@ -96,7 +96,12 @@ function preparedWorldResponse(
   );
 }
 
+beforeEach(() => {
+  vi.setSystemTime(new Date("2026-07-27T00:00:00.000Z"));
+});
+
 afterEach(() => {
+  vi.useRealTimers();
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
 });
@@ -1425,7 +1430,7 @@ describe("WorldPulse interactions", () => {
       url: "https://local.example/senegal-music",
       publisherName: "Local Culture Desk",
       publisherUrl: "https://local.example/",
-      publishedAt: "2026-08-01T21:00:00.000Z",
+      publishedAt: "2026-07-26T21:00:00.000Z",
     };
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input);
@@ -1634,6 +1639,21 @@ describe("WorldPulse interactions", () => {
         return Response.json({
           features: [{ id: "124", properties: { name: "Canada" } }],
         });
+      }
+      if (url.includes("scope=prepared-world")) {
+        return preparedWorldResponse(
+          [{ mapId: "124", name: "Canada", iso2: "CA" }],
+          {
+            Canada: [
+              {
+                ...liveArticleFor("Canada"),
+                id: "canada-map-economy",
+                title: mapHeadline,
+                publishedAt: "2026-07-25T00:00:00.000Z",
+              },
+            ],
+          },
+        );
       }
       if (url.includes("scope=map")) {
         return liveMapResponse(url, {

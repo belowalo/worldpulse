@@ -638,11 +638,15 @@ const GDELT_PROVIDER: NewsProvider = {
   parse: parseGdeltJson,
 };
 
-function bingNewsProvider(name: string, query: string): NewsProvider {
+function bingNewsProvider(
+  name: string,
+  query: string,
+  timeoutMs = 4_500,
+): NewsProvider {
   return {
     name,
     publisherUrl: "https://www.bing.com/news",
-    timeoutMs: 4_500,
+    timeoutMs,
     filterByCountry: false,
     url: () => {
       const url = new URL("https://www.bing.com/news/search");
@@ -655,17 +659,27 @@ function bingNewsProvider(name: string, query: string): NewsProvider {
   };
 }
 
-function googleCountryProvider(countryName: string): NewsProvider {
+function googleCountryProvider(
+  countryName: string,
+  broaderSearch = false,
+): NewsProvider {
   const queryTerm = COUNTRY_NEWS_QUERY_OVERRIDES[countryName] ?? countryName;
   const locale = googleNewsLocaleForCountry(countryName);
   return {
-    name: "Google News · Current country search",
+    name: broaderSearch
+      ? "Google News · Broader country search"
+      : "Google News · Current country search",
     publisherUrl: "https://news.google.com/",
-    timeoutMs: 4_500,
+    timeoutMs: 7_000,
     filterByCountry: false,
     url: () => {
       const url = new URL("https://news.google.com/rss/search");
-      url.searchParams.set("q", `"${queryTerm}" when:7d`);
+      url.searchParams.set(
+        "q",
+        broaderSearch
+          ? `${queryTerm} when:7d`
+          : `"${queryTerm}" when:7d`,
+      );
       url.searchParams.set("hl", "en");
       url.searchParams.set("gl", locale.region);
       url.searchParams.set("ceid", `${locale.region}:en`);
@@ -691,14 +705,17 @@ function countryBingProviders(countryName: string) {
     bingNewsProvider(
       "Bing News · Current country search",
       `${countryName} news`,
+      6_500,
     ),
     bingNewsProvider(
       "Bing News · Latest country search",
       `${countryName} latest`,
+      6_500,
     ),
     bingNewsProvider(
       "Bing News · Alternate country search",
       `${alternateTerm} news`,
+      6_500,
     ),
   ];
 }
@@ -804,6 +821,7 @@ async function fetchMapCountry(
   const countryName = canonicalCountryName(requestedCountry);
   const terms = newsSearchTerms(requestedCountry);
   const googleProvider = googleCountryProvider(countryName);
+  const broaderGoogleProvider = googleCountryProvider(countryName, true);
   const countryProviders = countryBingProviders(countryName);
   const results = [
     await fetchProvider(
@@ -816,25 +834,34 @@ async function fetchMapCountry(
   ];
   let relevantResults = countryRelevantResults(results, terms);
   if (!hasProviderArticles(relevantResults)) {
-    const [currentCountryResult, gdeltResult] = await Promise.all([
-      fetchProvider(
-        countryProviders[0],
-        "country",
-        countryName,
-        terms,
-        fetchImpl,
-      ),
-      fetchProvider(
-        GDELT_PROVIDER,
-        "country",
-        countryName,
-        terms,
-        fetchImpl,
-      ),
-    ]);
-    results.push(currentCountryResult, gdeltResult);
+    const [broaderGoogleResult, currentCountryResult, gdeltResult] =
+      await Promise.all([
+        fetchProvider(
+          broaderGoogleProvider,
+          "country",
+          countryName,
+          terms,
+          fetchImpl,
+        ),
+        fetchProvider(
+          countryProviders[0],
+          "country",
+          countryName,
+          terms,
+          fetchImpl,
+        ),
+        fetchProvider(
+          GDELT_PROVIDER,
+          "country",
+          countryName,
+          terms,
+          fetchImpl,
+        ),
+      ]);
+    results.push(broaderGoogleResult, currentCountryResult, gdeltResult);
     relevantResults = [
       ...relevantResults,
+      ...countryRelevantResults([broaderGoogleResult], terms),
       ...countryRelevantResults([currentCountryResult], terms),
       ...countryRelevantResults([gdeltResult], terms),
     ];
@@ -898,7 +925,7 @@ function countryRelevantResults(
   return results.map((result) => ({
     ...result,
     articles: result.articles.filter((article) =>
-      articleHeadlineMatchesCountry(article, terms),
+      articleMatchesCountry(article, terms),
     ),
   }));
 }

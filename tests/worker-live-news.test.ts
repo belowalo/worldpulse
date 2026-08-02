@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { existsSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 
@@ -29,7 +29,12 @@ const rssItem = `
   </item></channel></rss>
 `;
 
+beforeEach(() => {
+  vi.setSystemTime(new Date("2026-07-27T00:00:00.000Z"));
+});
+
 afterEach(() => {
+  vi.useRealTimers();
   vi.restoreAllMocks();
 });
 
@@ -580,6 +585,59 @@ describe("worker live-news providers", () => {
         url.startsWith("https://news.google.com/rss/search"),
       ),
     ).toBe(true);
+  });
+
+  it("uses a broader Google query and verifies the country in article text", async () => {
+    vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const requestedQueries: string[] = [];
+    const publishedAt = new Date(Date.now() - 60_000).toUTCString();
+    const fetchMock = vi.fn(async (input: URL | RequestInfo) => {
+      const url = String(input);
+      if (!url.startsWith("https://news.google.com/rss/search")) {
+        return new Response("Unavailable", { status: 503 });
+      }
+      const query = new URL(url).searchParams.get("q") ?? "";
+      requestedQueries.push(query);
+      if (query.startsWith('"Canada"')) {
+        return new Response("<rss><channel></channel></rss>");
+      }
+      return new Response(`
+        <rss><channel><item>
+          <title>Government announces a new national housing package - Example News</title>
+          <description>Officials in Canada approved the measure on Friday.</description>
+          <link>https://publisher.example/canada-housing</link>
+          <guid>canada-housing</guid>
+          <pubDate>${publishedAt}</pubDate>
+          <source url="https://publisher.example">Example News</source>
+        </item></channel></rss>
+      `);
+    });
+
+    const response = await handleLiveNews(
+      new Request(
+        "https://worldpulse.test/api/live-news?scope=map&countries=Canada",
+      ),
+      fetchMock as typeof fetch,
+    );
+    const payload = (await response.json()) as {
+      countries: Array<{
+        available: boolean;
+        articles: Array<{ title: string }>;
+      }>;
+    };
+
+    expect(payload.countries[0]).toMatchObject({
+      available: true,
+      articles: [
+        expect.objectContaining({
+          title: "Government announces a new national housing package",
+        }),
+      ],
+    });
+    expect(requestedQueries).toEqual([
+      '"Canada" when:7d',
+      "Canada when:7d",
+    ]);
   });
 
   it("falls back to a latest-country search when the first has no results", async () => {

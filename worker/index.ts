@@ -14,11 +14,10 @@ import {
 import type {
   LiveNewsPayload,
   MapCountry,
-  MapNewsPayload,
-  PreparedNewsFeed,
 } from "../lib/types";
 import { mergeCachedPayloads } from "./live-cache";
-import { handleLiveNews, isLikelyEnglishHeadline } from "./live-news";
+import { collectStoredMapCountries } from "./map-cache";
+import { handleLiveNews } from "./live-news";
 import { handleLiveVideo } from "./live-video";
 import worldGeometrySource from "../public/countries.geojson?raw";
 
@@ -52,23 +51,6 @@ const PREPARED_WORLD_REFRESH_BATCH_SIZE = 12;
 let preparedWorldRefresh: Promise<void> | null = null;
 let preparedCountryRefresh: Promise<void> | null = null;
 
-interface StoredMapCountry {
-  countryName: string;
-  generatedAt: string;
-  available: boolean;
-  articles: unknown[];
-}
-
-function isStoredMapCountry(value: unknown): value is StoredMapCountry {
-  if (!value || typeof value !== "object") return false;
-  const country = value as Partial<StoredMapCountry>;
-  return (
-    typeof country.countryName === "string" &&
-    typeof country.generatedAt === "string" &&
-    Array.isArray(country.articles)
-  );
-}
-
 interface WorldGeometry {
   features?: Array<{
     id?: string | number;
@@ -93,37 +75,6 @@ function loadWorldDirectory() {
   return directory;
 }
 
-interface PreparedCountryChunk {
-  generatedAt: string;
-  countryFeeds: Record<string, PreparedNewsFeed>;
-}
-
-function preparedCountryChunkKey(batchIndex: number) {
-  return `world/countries/${batchIndex}.json`;
-}
-
-async function readPreparedCountryFeeds(
-  snapshots: R2Bucket,
-  batchCount: number,
-) {
-  const objects = await Promise.all(
-    Array.from({ length: batchCount }, (_, batchIndex) =>
-      snapshots.get(preparedCountryChunkKey(batchIndex)),
-    ),
-  );
-  const feeds: Record<string, PreparedNewsFeed> = {};
-  for (const object of objects) {
-    if (!object) continue;
-    try {
-      const chunk = JSON.parse(await object.text()) as PreparedCountryChunk;
-      Object.assign(feeds, chunk.countryFeeds);
-    } catch {
-      // A malformed or interrupted chunk is omitted from the next version.
-    }
-  }
-  return feeds;
-}
-
 async function refreshPreparedWorld(env: Env) {
   if (!env.DB || !env.SNAPSHOTS) {
     throw new Error("Prepared world storage is unavailable.");
@@ -136,12 +87,28 @@ async function refreshPreparedWorld(env: Env) {
     throw new Error("Fresh global reporting is unavailable.");
   }
   const generatedAt = new Date().toISOString();
-  const batchCount = Math.ceil(
-    directory.length / PREPARED_WORLD_REFRESH_BATCH_SIZE,
+  const expectedCountryNames = new Set(
+    directory.map((country) => country.name),
   );
-  const localFeeds = await readPreparedCountryFeeds(
-    env.SNAPSHOTS,
-    batchCount,
+  const storedFeeds = await readStoredMapFeeds(env.DB);
+  const consolidated = collectStoredMapCountries(
+    storedFeeds,
+    expectedCountryNames,
+  );
+  const storedCountryNames = new Set(
+    consolidated.countries.map((country) => country.countryName),
+  );
+  const missingCountries = directory.filter(
+    (country) => !storedCountryNames.has(country.name),
+  );
+  if (missingCountries.length) {
+    throw new Error(
+      `Prepared world is missing ${missingCountries.length} country feeds.`,
+    );
+  }
+  const localFeeds = prepareWorldSnapshotFeeds(
+    consolidated.countries,
+    directory,
   );
   const snapshot = prepareCompleteWorldSnapshotFromFeeds(
     (await globalResponse.json()) as LiveNewsPayload,
@@ -159,7 +126,7 @@ async function refreshPreparedCountryBatch(
   env: Env,
   requestedBatchIndex?: number,
 ) {
-  if (!env.DB || !env.SNAPSHOTS) return;
+  if (!env.DB) return;
   const directory = loadWorldDirectory();
   const countryNames = directory.map((country) => country.name);
   const batchCount = Math.ceil(
@@ -182,23 +149,6 @@ async function refreshPreparedCountryBatch(
   const previous = await readStoredNewsFeed(env.DB, cacheKey);
   if (previous) mapPayload = mergeCachedPayloads(mapPayload, previous.payload);
   await writeStoredNewsFeed(env.DB, cacheKey, mapPayload, Date.now());
-  const parsedMap = JSON.parse(mapPayload) as MapNewsPayload;
-  const generatedAt = new Date().toISOString();
-  const chunk: PreparedCountryChunk = {
-    generatedAt,
-    countryFeeds: prepareWorldSnapshotFeeds(
-      parsedMap.countries ?? [],
-      directory,
-    ),
-  };
-  await env.SNAPSHOTS.put(
-    preparedCountryChunkKey(batchIndex),
-    JSON.stringify(chunk),
-    {
-      httpMetadata: { contentType: "application/json; charset=utf-8" },
-      customMetadata: { generatedAt },
-    },
-  );
 }
 
 function refreshPreparedWorldOnce(env: Env) {
@@ -299,6 +249,7 @@ async function handlePreparedWorld(
     }
   } else if (age >= PREPARED_WORLD_FRESH_MS) {
     ctx.waitUntil(refreshPreparedWorldSafely(env));
+    ctx.waitUntil(refreshPreparedCountryBatchSafely(env));
   }
   if (!current) {
     return Response.json(
@@ -364,47 +315,14 @@ async function handleWorldSnapshot(
     });
   }
   const storedFeeds = await readStoredMapFeeds(env.DB);
-  const countries = new Map<string, StoredMapCountry>();
-  let latestGeneratedAt = 0;
-  for (const stored of storedFeeds) {
-    try {
-      const payload = JSON.parse(stored.payload) as {
-        scope?: string;
-        countries?: unknown[];
-      };
-      if (payload.scope !== "map" || !Array.isArray(payload.countries)) {
-        continue;
-      }
-      latestGeneratedAt = Math.max(latestGeneratedAt, stored.generated_at);
-      for (const candidate of payload.countries) {
-        if (!isStoredMapCountry(candidate) || countries.has(candidate.countryName)) {
-          continue;
-        }
-        const articles = candidate.articles.filter((article) => {
-          if (!article || typeof article !== "object") return false;
-          const title = (article as { title?: unknown }).title;
-          return (
-            typeof title === "string" &&
-            isLikelyEnglishHeadline(title)
-          );
-        });
-        countries.set(candidate.countryName, {
-          ...candidate,
-          articles,
-          available: articles.length > 0,
-        });
-      }
-    } catch {
-      // Ignore a malformed historical cache row and continue with the others.
-    }
-  }
+  const snapshot = collectStoredMapCountries(storedFeeds);
   return Response.json(
     {
       scope: "map",
-      generatedAt: new Date(latestGeneratedAt || Date.now()).toISOString(),
+      generatedAt: snapshot.generatedAt,
       refreshAfterSeconds: LIVE_CACHE_FRESH_MS / 1_000,
       provider: "WorldPulse",
-      countries: [...countries.values()],
+      countries: snapshot.countries,
     },
     {
       headers: {
