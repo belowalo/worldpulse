@@ -82,8 +82,8 @@ interface HoveredCountry {
   y: number;
 }
 
-const TEXTURE_WIDTH = 4096;
-const TEXTURE_HEIGHT = 2048;
+const TEXTURE_WIDTH = 2048;
+const TEXTURE_HEIGHT = 1024;
 const SPHERE_RADIUS = 1;
 const ARC_LIMIT = 20;
 const SMALL_ISLAND_HIT_OFFSETS = [
@@ -674,7 +674,7 @@ export function WorldMap({
         renderer.outputColorSpace = runtime.THREE.SRGBColorSpace;
         renderer.toneMapping = runtime.THREE.ACESFilmicToneMapping;
         renderer.toneMappingExposure = 1.08;
-        renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2.5));
+        renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.75));
         containerRef.current.replaceChildren(renderer.domElement);
 
         const textureCanvas = document.createElement("canvas");
@@ -691,7 +691,7 @@ export function WorldMap({
         );
 
         const sphere = new runtime.THREE.Mesh(
-          new runtime.THREE.SphereGeometry(SPHERE_RADIUS, 256, 160),
+          new runtime.THREE.SphereGeometry(SPHERE_RADIUS, 128, 80),
           new runtime.THREE.MeshStandardMaterial({
             map: texture,
             color: 0xffffff,
@@ -705,7 +705,7 @@ export function WorldMap({
         scene.add(sphere);
 
         const atmosphere = new runtime.THREE.Mesh(
-          new runtime.THREE.SphereGeometry(1.075, 192, 128),
+          new runtime.THREE.SphereGeometry(1.075, 96, 64),
           new runtime.THREE.MeshBasicMaterial({
             color: 0x5b9dbe,
             transparent: true,
