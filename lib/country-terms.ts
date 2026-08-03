@@ -70,6 +70,7 @@ const COUNTRY_RELATED_TERMS: Record<string, string[]> = {
   Ethiopia: ["Ethiopian"],
   Finland: ["Finnish"],
   France: ["French"],
+  "French Polynesia": ["Tahiti", "Tahitian"],
   "French Southern Territories": [
     "Kerguelen",
     "Crozet Islands",
@@ -98,6 +99,7 @@ const COUNTRY_RELATED_TERMS: Record<string, string[]> = {
   Jordan: ["Jordanian", "Amman"],
   Kazakhstan: ["Kazakh"],
   Kenya: ["Kenyan"],
+  Kiribati: ["Tarawa", "I-Kiribati"],
   Kuwait: ["Kuwaiti"],
   Latvia: ["Latvian"],
   Lebanon: ["Lebanese"],

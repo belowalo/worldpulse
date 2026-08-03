@@ -22,6 +22,12 @@ export interface PreparedCountryFeed {
   updatedAt: string;
 }
 
+// The UI renders only a ranked portion of the world feed. A generous bound
+// avoids repeating hundreds of global stories through country feeds and keeps
+// the minute snapshot within the production Worker's CPU allowance. Local
+// country feeds remain independently complete.
+export const MAX_PREPARED_GLOBAL_ARTICLES = 180;
+
 export function applyDetectedGeography(
   event: Event,
   countries: MapCountry[],
@@ -132,9 +138,13 @@ export function prepareCompleteWorldSnapshotFromFeeds(
   countryDirectory: MapCountry[],
   generatedAt = new Date().toISOString(),
 ): PreparedWorldNewsPayload {
-  const globalEvents = buildLiveEvents(globalPayload, null).map((event) =>
-    applyDetectedGeography(event, countryDirectory),
-  );
+  const globalEvents = buildLiveEvents(
+    {
+      ...globalPayload,
+      articles: globalPayload.articles.slice(0, MAX_PREPARED_GLOBAL_ARTICLES),
+    },
+    null,
+  ).map((event) => applyDetectedGeography(event, countryDirectory));
   const countriesByIdentifier = new Map<string, MapCountry>();
   for (const country of countryDirectory) {
     countriesByIdentifier.set(country.name, country);

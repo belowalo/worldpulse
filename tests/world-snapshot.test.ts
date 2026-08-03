@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 
-import { prepareCompleteWorldSnapshot } from "@/lib/world-snapshot";
+import {
+  MAX_PREPARED_GLOBAL_ARTICLES,
+  prepareCompleteWorldSnapshot,
+} from "@/lib/world-snapshot";
 import type {
   LiveArticle,
   LiveNewsPayload,
@@ -68,5 +71,43 @@ describe("prepared minute world state", () => {
     expect(result.countryFeeds.Canada.events[0]?.headline).toContain("Canada");
     expect(result.countryFeeds.Spain.events[0]?.headline).toContain("Spain");
     expect(result.countryFeeds.Canada.loading).toBe(false);
+  });
+
+  it("bounds global processing while preserving complete country feeds", () => {
+    const generatedAt = new Date().toISOString();
+    const directory: MapCountry[] = [
+      { mapId: "124", name: "Canada", iso2: "CA", events: [] },
+    ];
+    const globalPayload: LiveNewsPayload = {
+      scope: "global",
+      countryName: null,
+      generatedAt,
+      refreshAfterSeconds: 60,
+      provider: "Live providers",
+      articles: Array.from(
+        { length: MAX_PREPARED_GLOBAL_ARTICLES + 20 },
+        (_, index) => liveArticle(`global-${index}`, `World update ${index}`),
+      ),
+    };
+    const countryPayloads: MapNewsCountryPayload[] = [
+      {
+        countryName: "Canada",
+        generatedAt,
+        available: true,
+        articles: [liveArticle("local", "Canada local reporting")],
+      },
+    ];
+
+    const result = prepareCompleteWorldSnapshot(
+      globalPayload,
+      countryPayloads,
+      directory,
+      generatedAt,
+    );
+
+    expect(result.globalFeed.events.length).toBeLessThanOrEqual(
+      MAX_PREPARED_GLOBAL_ARTICLES,
+    );
+    expect(result.countryFeeds.Canada.events).toHaveLength(1);
   });
 });

@@ -103,6 +103,7 @@ const GENERIC_OCCURRENCE_TOKENS = new Set([
 ]);
 const COUNTRY_NEWS_QUERY_OVERRIDES: Record<string, string> = {
   "British Indian Ocean Territory": "Diego Garcia",
+  Kiribati: "Tarawa",
   "Saint Helena, Ascension and Tristan da Cunha": "St Helena",
   "Saint Pierre and Miquelon": "Saint-Pierre-et-Miquelon",
   "South Georgia and the South Sandwich Islands": "South Georgia island",

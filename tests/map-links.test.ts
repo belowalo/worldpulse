@@ -79,6 +79,18 @@ describe("multi-country map links", () => {
         countrySearchTerms("St. Pierre and Miquelon"),
       ),
     ).toBe(true);
+    expect(
+      textMatchesCountry(
+        "Tahiti updates its coastal resilience plan",
+        countrySearchTerms("Fr. Polynesia"),
+      ),
+    ).toBe(true);
+    expect(
+      textMatchesCountry(
+        "Tarawa opens a new public health centre",
+        countrySearchTerms("Kiribati"),
+      ),
+    ).toBe(true);
   });
 
   it("recognizes the countries named in an international event", () => {
