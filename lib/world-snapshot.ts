@@ -26,7 +26,8 @@ export interface PreparedCountryFeed {
 // avoids repeating hundreds of global stories through country feeds and keeps
 // the minute snapshot within the production Worker's CPU allowance. Local
 // country feeds remain independently complete.
-export const MAX_PREPARED_GLOBAL_ARTICLES = 180;
+export const MAX_PREPARED_GLOBAL_ARTICLES = 60;
+export const MAX_PREPARED_COUNTRY_EVENTS = 12;
 
 export function applyDetectedGeography(
   event: Event,
@@ -165,7 +166,7 @@ export function prepareCompleteWorldSnapshotFromFeeds(
     const localFeed = localFeeds[country.name];
     countryFeeds[country.name] = {
       events: mergeEventFeeds(
-        localFeed?.events ?? [],
+        localFeed?.events.slice(0, MAX_PREPARED_COUNTRY_EVENTS) ?? [],
         currentGlobalEventsByCountry.get(country.name) ?? [],
       ).sort(
         (left, right) =>
