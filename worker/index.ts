@@ -48,6 +48,7 @@ const LIVE_MAP_STALE_MS = LIVE_CACHE_RETENTION_SECONDS * 1_000;
 const PREPARED_WORLD_KEY = "world/latest.json";
 const PREPARED_WORLD_FRESH_MS = 60_000;
 const PREPARED_WORLD_REFRESH_BATCH_SIZE = 12;
+const PREPARED_GLOBAL_REFRESH_INTERVAL_MINUTES = 5;
 
 let preparedWorldRefresh: Promise<void> | null = null;
 let preparedCountryRefresh: Promise<void> | null = null;
@@ -121,9 +122,30 @@ async function refreshPreparedWorld(env: Env) {
   const directory = loadWorldDirectory();
   const globalUrl = new URL("https://worldpulse.internal/api/live-news");
   globalUrl.searchParams.set("scope", "global");
-  const globalResponse = await handleLiveNews(new Request(globalUrl));
-  if (!globalResponse.ok) {
-    throw new Error("Fresh global reporting is unavailable.");
+  const globalCacheKey = normalizedLiveCacheKey(new Request(globalUrl)).url;
+  const storedGlobal = await readStoredNewsFeed(env.DB, globalCacheKey);
+  let globalPayload: LiveNewsPayload | null = null;
+  if (
+    storedGlobal &&
+    Date.now() - storedGlobal.generated_at < LIVE_CACHE_RETENTION_SECONDS * 1_000
+  ) {
+    try {
+      const candidate = JSON.parse(storedGlobal.payload) as LiveNewsPayload;
+      if (candidate.scope === "global" && Array.isArray(candidate.articles)) {
+        globalPayload = candidate;
+      }
+    } catch {
+      // Fall through to a direct provider refresh for an invalid cache row.
+    }
+  }
+  if (!globalPayload) {
+    const globalResponse = await handleLiveNews(new Request(globalUrl));
+    if (!globalResponse.ok) {
+      throw new Error("Fresh global reporting is unavailable.");
+    }
+    const payload = await globalResponse.text();
+    globalPayload = JSON.parse(payload) as LiveNewsPayload;
+    await writeStoredNewsFeed(env.DB, globalCacheKey, payload, Date.now());
   }
   const generatedAt = new Date().toISOString();
   const localFeeds = await readCompletePreparedCountryFeeds(
@@ -131,7 +153,7 @@ async function refreshPreparedWorld(env: Env) {
     directory,
   );
   const snapshot = prepareCompleteWorldSnapshotFromFeeds(
-    (await globalResponse.json()) as LiveNewsPayload,
+    globalPayload,
     localFeeds,
     directory,
     generatedAt,
@@ -140,6 +162,32 @@ async function refreshPreparedWorld(env: Env) {
     httpMetadata: { contentType: "application/json; charset=utf-8" },
     customMetadata: { generatedAt },
   });
+}
+
+async function refreshStoredGlobalFeed(env: Env) {
+  if (!env.DB) return;
+  const globalUrl = new URL("https://worldpulse.internal/api/live-news");
+  globalUrl.searchParams.set("scope", "global");
+  const cacheKey = normalizedLiveCacheKey(new Request(globalUrl)).url;
+  const response = await handleLiveNews(new Request(globalUrl));
+  if (!response.ok) return;
+  let payload = await response.text();
+  const previous = await readStoredNewsFeed(env.DB, cacheKey);
+  if (previous) payload = mergeCachedPayloads(payload, previous.payload);
+  await writeStoredNewsFeed(env.DB, cacheKey, payload, Date.now());
+}
+
+async function refreshStoredGlobalFeedSafely(env: Env) {
+  try {
+    await refreshStoredGlobalFeed(env);
+  } catch (error) {
+    console.warn(
+      JSON.stringify({
+        event: "prepared_global_refresh_failed",
+        error: error instanceof Error ? error.message : "unknown error",
+      }),
+    );
+  }
 }
 
 async function refreshPreparedCountryBatch(
@@ -690,6 +738,11 @@ const worker = {
     env: Env,
     ctx: ExecutionContext,
   ) {
+    const minute = Math.floor(Date.now() / 60_000);
+    if (minute % PREPARED_GLOBAL_REFRESH_INTERVAL_MINUTES === 0) {
+      ctx.waitUntil(refreshStoredGlobalFeedSafely(env));
+      return;
+    }
     ctx.waitUntil(
       refreshPreparedCountryBatchSafely(env).then(() =>
         refreshPreparedWorldSafely(env),
