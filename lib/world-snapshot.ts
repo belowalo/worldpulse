@@ -26,8 +26,8 @@ export interface PreparedCountryFeed {
 // avoids repeating hundreds of global stories through country feeds and keeps
 // the minute snapshot within the production Worker's CPU allowance. Local
 // country feeds remain independently complete.
-export const MAX_PREPARED_GLOBAL_ARTICLES = 60;
-export const MAX_PREPARED_COUNTRY_EVENTS = 12;
+export const MAX_PREPARED_GLOBAL_ARTICLES = 30;
+export const MAX_PREPARED_COUNTRY_EVENTS = 6;
 
 export function applyDetectedGeography(
   event: Event,
