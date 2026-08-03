@@ -682,16 +682,13 @@ export function WorldMap({
         textureCanvas.height = TEXTURE_HEIGHT;
         const texture = new runtime.THREE.CanvasTexture(textureCanvas);
         texture.colorSpace = runtime.THREE.SRGBColorSpace;
-        texture.minFilter = runtime.THREE.LinearMipmapLinearFilter;
+        texture.minFilter = runtime.THREE.LinearFilter;
         texture.magFilter = runtime.THREE.LinearFilter;
-        texture.generateMipmaps = true;
-        texture.anisotropy = Math.min(
-          8,
-          renderer.capabilities.getMaxAnisotropy(),
-        );
+        texture.generateMipmaps = false;
+        texture.anisotropy = 1;
 
         const sphere = new runtime.THREE.Mesh(
-          new runtime.THREE.SphereGeometry(SPHERE_RADIUS, 128, 80),
+          new runtime.THREE.SphereGeometry(SPHERE_RADIUS, 96, 64),
           new runtime.THREE.MeshStandardMaterial({
             map: texture,
             color: 0xffffff,
@@ -705,7 +702,7 @@ export function WorldMap({
         scene.add(sphere);
 
         const atmosphere = new runtime.THREE.Mesh(
-          new runtime.THREE.SphereGeometry(1.075, 96, 64),
+          new runtime.THREE.SphereGeometry(1.075, 64, 48),
           new runtime.THREE.MeshBasicMaterial({
             color: 0x5b9dbe,
             transparent: true,
@@ -820,7 +817,8 @@ export function WorldMap({
       });
       if (readyForDisplay && !readyNotifiedRef.current) {
         readyNotifiedRef.current = true;
-        window.requestAnimationFrame(() => onReadyRef.current?.());
+        globeScene.renderer.render(globeScene.scene, globeScene.camera);
+        onReadyRef.current?.();
       }
     }, 120);
     return () => window.clearTimeout(timeout);
