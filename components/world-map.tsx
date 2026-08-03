@@ -82,8 +82,8 @@ interface HoveredCountry {
   y: number;
 }
 
-const TEXTURE_WIDTH = 1024;
-const TEXTURE_HEIGHT = 512;
+const TEXTURE_WIDTH = 4096;
+const TEXTURE_HEIGHT = 2048;
 const SPHERE_RADIUS = 1;
 const ARC_LIMIT = 20;
 const SMALL_ISLAND_HIT_OFFSETS = [
@@ -684,7 +684,7 @@ export function WorldMap({
         renderer.outputColorSpace = runtime.THREE.SRGBColorSpace;
         renderer.toneMapping = runtime.THREE.ACESFilmicToneMapping;
         renderer.toneMappingExposure = 1.08;
-        renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.75));
+        renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2.5));
         containerRef.current.replaceChildren(renderer.domElement);
 
         const textureCanvas = document.createElement("canvas");
@@ -692,13 +692,16 @@ export function WorldMap({
         textureCanvas.height = TEXTURE_HEIGHT;
         const texture = new runtime.THREE.CanvasTexture(textureCanvas);
         texture.colorSpace = runtime.THREE.SRGBColorSpace;
-        texture.minFilter = runtime.THREE.LinearFilter;
+        texture.minFilter = runtime.THREE.LinearMipmapLinearFilter;
         texture.magFilter = runtime.THREE.LinearFilter;
-        texture.generateMipmaps = false;
-        texture.anisotropy = 1;
+        texture.generateMipmaps = true;
+        texture.anisotropy = Math.min(
+          8,
+          renderer.capabilities.getMaxAnisotropy(),
+        );
 
         const sphere = new runtime.THREE.Mesh(
-          new runtime.THREE.SphereGeometry(SPHERE_RADIUS, 96, 64),
+          new runtime.THREE.SphereGeometry(SPHERE_RADIUS, 256, 160),
           new runtime.THREE.MeshStandardMaterial({
             map: texture,
             color: 0xffffff,
@@ -712,7 +715,7 @@ export function WorldMap({
         scene.add(sphere);
 
         const atmosphere = new runtime.THREE.Mesh(
-          new runtime.THREE.SphereGeometry(1.075, 64, 48),
+          new runtime.THREE.SphereGeometry(1.075, 192, 128),
           new runtime.THREE.MeshBasicMaterial({
             color: 0x5b9dbe,
             transparent: true,
