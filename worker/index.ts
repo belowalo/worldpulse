@@ -2,6 +2,7 @@
 import { handleImageOptimization, DEFAULT_DEVICE_SIZES, DEFAULT_IMAGE_SIZES } from "vinext/server/image-optimization";
 import handler from "vinext/server/app-router-entry";
 import {
+  readLatestStoredGlobalFeed,
   readStoredMapFeeds,
   readStoredNewsFeed,
   writeStoredNewsFeed,
@@ -123,7 +124,9 @@ async function refreshPreparedWorld(env: Env) {
   const globalUrl = new URL("https://worldpulse.internal/api/live-news");
   globalUrl.searchParams.set("scope", "global");
   const globalCacheKey = normalizedLiveCacheKey(new Request(globalUrl)).url;
-  const storedGlobal = await readStoredNewsFeed(env.DB, globalCacheKey);
+  // Browser requests use the public host while scheduled jobs use the internal
+  // host, so select the newest global row independently of its URL origin.
+  const storedGlobal = await readLatestStoredGlobalFeed(env.DB);
   let globalPayload: LiveNewsPayload | null = null;
   if (
     storedGlobal &&

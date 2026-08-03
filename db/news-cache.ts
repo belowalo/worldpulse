@@ -41,6 +41,19 @@ export async function readStoredNewsFeed(
     .first<StoredNewsFeed>();
 }
 
+export async function readLatestStoredGlobalFeed(db: D1Database) {
+  await ensureNewsCache(db);
+  return db
+    .prepare(
+      `SELECT cache_key, payload, generated_at, refreshed_at
+       FROM news_feed_cache
+       WHERE cache_key LIKE '%scope=global%'
+       ORDER BY generated_at DESC
+       LIMIT 1`,
+    )
+    .first<StoredNewsFeed>();
+}
+
 export async function writeStoredNewsFeed(
   db: D1Database,
   cacheKey: string,
