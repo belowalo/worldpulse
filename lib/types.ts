@@ -171,3 +171,40 @@ export interface PreparedWorldNewsPayload {
   globalFeed: PreparedNewsFeed;
   countryFeeds: Record<string, PreparedNewsFeed>;
 }
+
+/** Compact, normalized wire representation used only across the network. */
+export interface PreparedWorldNewsWirePayload {
+  s: "pw2";
+  v: string;
+  g: string;
+  r: number;
+  n: unknown[][];
+  a: unknown[][];
+  e: unknown[][];
+  f: {
+    g: unknown[];
+    c: unknown[][];
+  };
+}
+
+export interface WorldPulseProviderHealth {
+  name: string;
+  status: "ok" | "failed";
+  articleCount: number;
+}
+
+export interface WorldPulseDiagnostics {
+  status: "healthy" | "degraded";
+  fresh: boolean;
+  generatedAt: string;
+  snapshotGeneratedAt: string;
+  snapshotBytes: number;
+  totalCountries: number;
+  countriesWithNews: number;
+  inhabitedCountries: number;
+  inhabitedCountriesWithNews: number;
+  missingInhabitedCountries: string[];
+  expectedEmptyCountries: string[];
+  globalEventCount: number;
+  providerHealth: WorldPulseProviderHealth[];
+}

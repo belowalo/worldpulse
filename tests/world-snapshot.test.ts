@@ -2,8 +2,14 @@ import { describe, expect, it } from "vitest";
 
 import {
   MAX_PREPARED_GLOBAL_ARTICLES,
+  MAX_PREPARED_COUNTRY_EVENTS,
   prepareCompleteWorldSnapshot,
 } from "@/lib/world-snapshot";
+import {
+  decodePreparedWorldNews,
+  encodePreparedWorldNews,
+} from "@/lib/snapshot-transport";
+import { buildWorldDiagnostics } from "@/lib/world-health";
 import type {
   LiveArticle,
   LiveNewsPayload,
@@ -109,5 +115,68 @@ describe("prepared minute world state", () => {
       MAX_PREPARED_GLOBAL_ARTICLES,
     );
     expect(result.countryFeeds.Canada.events).toHaveLength(1);
+  });
+
+  it("normalizes repeated events and round-trips the prepared payload", () => {
+    const generatedAt = new Date().toISOString();
+    const directory: MapCountry[] = [
+      { mapId: "124", name: "Canada", iso2: "CA", events: [] },
+    ];
+    const globalPayload: LiveNewsPayload = {
+      scope: "global",
+      countryName: null,
+      generatedAt,
+      refreshAfterSeconds: 60,
+      provider: "Live providers",
+      articles: [liveArticle("shared", "Canada announces a national rail agreement")],
+    };
+    const prepared = prepareCompleteWorldSnapshot(
+      globalPayload,
+      [],
+      directory,
+      generatedAt,
+    );
+    const wire = encodePreparedWorldNews(prepared);
+    const decoded = decodePreparedWorldNews(wire);
+
+    expect(wire.s).toBe("pw2");
+    expect(wire.e).toHaveLength(1);
+    expect(decoded).toEqual(prepared);
+    expect(decoded.countryFeeds.Canada.events[0]).toBe(decoded.globalFeed.events[0]);
+    expect(JSON.stringify(wire).length).toBeLessThan(JSON.stringify(prepared).length);
+  });
+
+  it("allows up to eight local events per country", () => {
+    expect(MAX_PREPARED_COUNTRY_EVENTS).toBeGreaterThan(6);
+  });
+
+  it("alerts only for inhabited countries without news", () => {
+    const generatedAt = new Date().toISOString();
+    const directory: MapCountry[] = [
+      { mapId: "124", name: "Canada", iso2: "CA", events: [] },
+      { mapId: "724", name: "Spain", iso2: "ES", events: [] },
+      { mapId: "334", name: "Heard I. and McDonald Is.", events: [] },
+    ];
+    const globalPayload: LiveNewsPayload = {
+      scope: "global",
+      countryName: null,
+      generatedAt,
+      refreshAfterSeconds: 60,
+      provider: "Live providers",
+      providers: [{ name: "Test feed", status: "ok", articleCount: 1 }],
+      articles: [liveArticle("canada", "Canada announces a national rail agreement")],
+    };
+    const prepared = prepareCompleteWorldSnapshot(
+      globalPayload,
+      [],
+      directory,
+      generatedAt,
+    );
+    const health = buildWorldDiagnostics(prepared, directory, globalPayload, 900_000);
+
+    expect(health.status).toBe("degraded");
+    expect(health.missingInhabitedCountries).toEqual(["Spain"]);
+    expect(health.expectedEmptyCountries).toEqual(["Heard I. and McDonald Is."]);
+    expect(health.providerHealth[0]?.status).toBe("ok");
   });
 });

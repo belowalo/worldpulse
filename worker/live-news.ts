@@ -102,11 +102,30 @@ const GENERIC_OCCURRENCE_TOKENS = new Set([
   "victim",
 ]);
 const COUNTRY_NEWS_QUERY_OVERRIDES: Record<string, string> = {
+  "Antigua and Barbuda": "Antigua Barbuda St John's",
+  Barbados: "Barbados Bridgetown",
   "British Indian Ocean Territory": "Diego Garcia",
+  "Cook Islands": "Cook Islands Rarotonga",
+  Dominica: "Dominica Roseau Caribbean",
+  "French Polynesia": "Tahiti French Polynesia",
+  Grenada: "Grenada St George's Caribbean",
   Kiribati: "Tarawa",
+  "Marshall Islands": "Marshall Islands Majuro",
+  Micronesia: "Micronesia Pohnpei",
+  Nauru: "Nauru Yaren",
+  Niue: "Niue Alofi",
+  Palau: "Palau Koror",
+  Samoa: "Samoa Apia",
   "Saint Helena, Ascension and Tristan da Cunha": "St Helena",
+  "Saint Kitts and Nevis": "Saint Kitts Nevis Basseterre",
+  "Saint Lucia": "Saint Lucia Castries",
   "Saint Pierre and Miquelon": "Saint-Pierre-et-Miquelon",
+  "Saint Vincent and the Grenadines": "Saint Vincent Grenadines Kingstown",
+  "Solomon Islands": "Solomon Islands Honiara",
   "South Georgia and the South Sandwich Islands": "South Georgia island",
+  Tonga: "Tonga Nuku'alofa",
+  Tuvalu: "Tuvalu Funafuti",
+  Vanuatu: "Vanuatu Port Vila",
 };
 const ENGLISH_SIGNAL_WORDS = new Set([
   "after", "and", "are", "as", "at", "for", "from", "has", "in",
@@ -508,6 +527,72 @@ function fixedRssProvider(
   };
 }
 
+function regionalRssProvider(
+  name: string,
+  publisherUrl: string,
+  feedUrl: string,
+): NewsProvider {
+  return {
+    name,
+    publisherUrl,
+    timeoutMs: 5_500,
+    filterByCountry: false,
+    url: () => new URL(feedUrl),
+    parse: (body) => parsePublisherRss(body, name, publisherUrl),
+  };
+}
+
+const PACIFIC_COUNTRIES = new Set([
+  "American Samoa", "Australia", "Cook Islands", "Fiji", "French Polynesia",
+  "Guam", "Kiribati", "Marshall Islands", "Micronesia", "Nauru",
+  "New Caledonia", "New Zealand", "Niue", "Northern Mariana Islands",
+  "Palau", "Papua New Guinea", "Samoa", "Solomon Islands", "Tokelau",
+  "Tonga", "Tuvalu", "Vanuatu", "Wallis and Futuna",
+]);
+const CARIBBEAN_COUNTRIES = new Set([
+  "Anguilla", "Antigua and Barbuda", "Aruba", "Bahamas", "Barbados",
+  "British Virgin Islands", "Cayman Islands", "Cuba", "Curaçao", "Dominica",
+  "Dominican Republic", "Grenada", "Guadeloupe", "Haiti", "Jamaica",
+  "Martinique", "Montserrat", "Puerto Rico", "Saint Barthélemy",
+  "Saint Kitts and Nevis", "Saint Lucia", "Saint Martin", "Saint Vincent and the Grenadines",
+  "Sint Maarten", "Trinidad and Tobago", "Turks and Caicos Islands", "U.S. Virgin Is.",
+]);
+const AFRICAN_COUNTRIES = new Set([
+  "Algeria", "Angola", "Benin", "Botswana", "Burkina Faso", "Burundi",
+  "Cameroon", "Cape Verde", "Central African Republic", "Chad", "Comoros",
+  "Congo", "Dem. Rep. Congo", "Djibouti", "Egypt", "Eq. Guinea", "Eritrea",
+  "Eswatini", "Ethiopia", "Gabon", "Gambia", "Ghana", "Guinea", "Guinea-Bissau",
+  "Ivory Coast", "Kenya", "Lesotho", "Liberia", "Libya", "Madagascar", "Malawi",
+  "Mali", "Mauritania", "Mauritius", "Morocco", "Mozambique", "Namibia", "Niger",
+  "Nigeria", "Rwanda", "São Tomé and Principe", "Senegal", "Seychelles", "Sierra Leone",
+  "Somalia", "Somaliland", "South Africa", "South Sudan", "Sudan", "Tanzania",
+  "Togo", "Tunisia", "Uganda", "Western Sahara", "Zambia", "Zimbabwe",
+]);
+
+const PINA_PROVIDER = regionalRssProvider(
+  "Pacific Islands News Association",
+  "https://pina.com.fj/",
+  "https://pina.com.fj/feed/",
+);
+const CARIBBEAN_NEWS_GLOBAL_PROVIDER = regionalRssProvider(
+  "Caribbean News Global",
+  "https://caribbeannewsglobal.com/",
+  "https://caribbeannewsglobal.com/feed/",
+);
+const AFRICANEWS_PROVIDER = regionalRssProvider(
+  "Africanews",
+  "https://www.africanews.com/",
+  "https://www.africanews.com/feed/rss",
+);
+
+function regionalProvidersForCountry(countryName: string) {
+  return [
+    ...(PACIFIC_COUNTRIES.has(countryName) ? [PINA_PROVIDER] : []),
+    ...(CARIBBEAN_COUNTRIES.has(countryName) ? [CARIBBEAN_NEWS_GLOBAL_PROVIDER] : []),
+    ...(AFRICAN_COUNTRIES.has(countryName) ? [AFRICANEWS_PROVIDER] : []),
+  ];
+}
+
 const CORE_PROVIDERS: NewsProvider[] = [
   fixedRssProvider(
     "The Guardian",
@@ -614,6 +699,9 @@ const CORE_PROVIDERS: NewsProvider[] = [
     "https://www.rnz.co.nz/international/pacific-news",
     "https://www.rnz.co.nz/rss/pacific.xml",
   ),
+  PINA_PROVIDER,
+  CARIBBEAN_NEWS_GLOBAL_PROVIDER,
+  AFRICANEWS_PROVIDER,
 ];
 
 const GDELT_PROVIDER: NewsProvider = {
@@ -835,8 +923,7 @@ async function fetchMapCountry(
   ];
   let relevantResults = countryRelevantResults(results, terms);
   if (!hasProviderArticles(relevantResults)) {
-    const [broaderGoogleResult, currentCountryResult, gdeltResult] =
-      await Promise.all([
+    const fallbackResults = await Promise.all([
         fetchProvider(
           broaderGoogleProvider,
           "country",
@@ -858,13 +945,18 @@ async function fetchMapCountry(
           terms,
           fetchImpl,
         ),
+        ...regionalProvidersForCountry(countryName).map((provider) =>
+          fetchProvider(provider, "country", countryName, terms, fetchImpl),
+        ),
       ]);
-    results.push(broaderGoogleResult, currentCountryResult, gdeltResult);
+    const [broaderGoogleResult, currentCountryResult, gdeltResult, ...regionalResults] = fallbackResults;
+    results.push(...fallbackResults);
     relevantResults = [
       ...relevantResults,
       ...countryRelevantResults([broaderGoogleResult], terms),
       ...countryRelevantResults([currentCountryResult], terms),
       ...countryRelevantResults([gdeltResult], terms),
+      ...countryRelevantResults(regionalResults, terms),
     ];
   }
   if (!hasProviderArticles(relevantResults)) {

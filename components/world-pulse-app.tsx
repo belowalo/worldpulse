@@ -39,6 +39,10 @@ import {
 } from "@/lib/seed-data";
 import { categoryColor } from "@/lib/scoring";
 import {
+  decodePreparedWorldNews,
+  isPreparedWorldNewsWire,
+} from "@/lib/snapshot-transport";
+import {
   applyDetectedGeography,
   prepareWorldSnapshotFeeds,
 } from "@/lib/world-snapshot";
@@ -114,7 +118,10 @@ function loadPreparedWorld() {
     if (!response.ok) {
       throw new Error("The minute world state is unavailable.");
     }
-    const payload = (await response.json()) as PreparedWorldNewsPayload;
+    const responsePayload = (await response.json()) as unknown;
+    const payload = isPreparedWorldNewsWire(responsePayload)
+      ? decodePreparedWorldNews(responsePayload)
+      : (responsePayload as PreparedWorldNewsPayload);
     if (
       payload.scope !== "prepared-world" ||
       !payload.globalFeed ||

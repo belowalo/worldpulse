@@ -12,10 +12,13 @@ import {
   prepareCompleteWorldSnapshotFromFeeds,
   prepareWorldSnapshotFeeds,
 } from "../lib/world-snapshot";
+import { encodePreparedWorldNews } from "../lib/snapshot-transport";
+import { buildWorldDiagnostics } from "../lib/world-health";
 import type {
   LiveNewsPayload,
   MapCountry,
   PreparedNewsFeed,
+  WorldPulseDiagnostics,
 } from "../lib/types";
 import { mergeCachedPayloads } from "./live-cache";
 import { collectStoredMapCountries } from "./map-cache";
@@ -47,6 +50,7 @@ const LIVE_CACHE_FRESH_MS = 5 * 60_000;
 const LIVE_CACHE_RETENTION_SECONDS = 3 * 24 * 60 * 60;
 const LIVE_MAP_STALE_MS = LIVE_CACHE_RETENTION_SECONDS * 1_000;
 const PREPARED_WORLD_KEY = "world/latest.json";
+const PREPARED_WORLD_HEALTH_KEY = "world/health.json";
 const PREPARED_WORLD_FRESH_MS = 60_000;
 const PREPARED_WORLD_REFRESH_BATCH_SIZE = 12;
 const PREPARED_GLOBAL_REFRESH_INTERVAL_MINUTES = 5;
@@ -161,9 +165,65 @@ async function refreshPreparedWorld(env: Env) {
     directory,
     generatedAt,
   );
-  await env.SNAPSHOTS.put(PREPARED_WORLD_KEY, JSON.stringify(snapshot), {
-    httpMetadata: { contentType: "application/json; charset=utf-8" },
-    customMetadata: { generatedAt },
+  const wirePayload = JSON.stringify(encodePreparedWorldNews(snapshot));
+  const compressedPayload = await new Response(
+    new Response(wirePayload).body?.pipeThrough(new CompressionStream("gzip")),
+  ).arrayBuffer();
+  const diagnostics = buildWorldDiagnostics(
+    snapshot,
+    directory,
+    globalPayload,
+    compressedPayload.byteLength,
+  );
+  if (diagnostics.status === "degraded") {
+    console.error(
+      JSON.stringify({
+        event: "world_coverage_alert",
+        missingInhabitedCountries: diagnostics.missingInhabitedCountries,
+      }),
+    );
+  }
+  await Promise.all([
+    env.SNAPSHOTS.put(PREPARED_WORLD_KEY, compressedPayload, {
+      httpMetadata: {
+        contentEncoding: "gzip",
+        contentType: "application/json; charset=utf-8",
+      },
+      customMetadata: { generatedAt, encoding: "gzip" },
+    }),
+    env.SNAPSHOTS.put(
+      PREPARED_WORLD_HEALTH_KEY,
+      JSON.stringify(diagnostics),
+      {
+        httpMetadata: { contentType: "application/json; charset=utf-8" },
+        customMetadata: { generatedAt },
+      },
+    ),
+  ]);
+}
+
+async function handleWorldDiagnostics(env: Env) {
+  if (!env.SNAPSHOTS) {
+    return Response.json(
+      { error: "World health reporting is unavailable." },
+      { status: 503, headers: { "Cache-Control": "no-store" } },
+    );
+  }
+  const health = await env.SNAPSHOTS.get(PREPARED_WORLD_HEALTH_KEY);
+  if (!health) {
+    return Response.json(
+      { error: "World health reporting is still being prepared." },
+      { status: 503, headers: { "Cache-Control": "no-store" } },
+    );
+  }
+  const diagnostics = JSON.parse(await health.text()) as WorldPulseDiagnostics;
+  diagnostics.fresh =
+    Date.now() - Date.parse(diagnostics.snapshotGeneratedAt) < 5 * 60_000;
+  if (!diagnostics.fresh) diagnostics.status = "degraded";
+  return Response.json(diagnostics, {
+    headers: {
+      "Cache-Control": "no-store",
+    },
   });
 }
 
@@ -184,7 +244,7 @@ async function refreshStoredGlobalFeedSafely(env: Env) {
   try {
     await refreshStoredGlobalFeed(env);
   } catch (error) {
-    console.warn(
+    console.error(
       JSON.stringify({
         event: "prepared_global_refresh_failed",
         error: error instanceof Error ? error.message : "unknown error",
@@ -270,7 +330,7 @@ async function refreshPreparedWorldSafely(env: Env) {
   try {
     await refreshPreparedWorldOnce(env);
   } catch (error) {
-    console.warn(
+    console.error(
       JSON.stringify({
         event: "prepared_world_refresh_failed",
         error: error instanceof Error ? error.message : "unknown error",
@@ -290,7 +350,7 @@ async function refreshPreparedCountryBatchSafely(env: Env) {
   try {
     await refreshPreparedCountryBatchOnce(env);
   } catch (error) {
-    console.warn(
+    console.error(
       JSON.stringify({
         event: "prepared_country_refresh_failed",
         error: error instanceof Error ? error.message : "unknown error",
@@ -381,6 +441,9 @@ async function handlePreparedWorld(
     "X-WorldPulse-Snapshot-Generated-At":
       current.customMetadata?.generatedAt ?? "unknown",
   });
+  if (current.customMetadata?.encoding === "gzip") {
+    headers.set("Content-Encoding", "gzip");
+  }
   return new Response(current.body, { headers });
 }
 
@@ -717,6 +780,10 @@ const worker = {
         return handleWorldSnapshot(request, env, ctx);
       }
       return handleCachedLiveNews(request, env, ctx);
+    }
+
+    if (url.pathname === "/api/diagnostics/world") {
+      return handleWorldDiagnostics(env);
     }
 
     if (url.pathname === "/api/live-video") {

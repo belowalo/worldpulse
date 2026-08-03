@@ -741,6 +741,7 @@ describe("worker live-news providers", () => {
         url.startsWith("https://api.gdeltproject.org/api/v2/doc/doc"),
       ),
     ).toBe(true);
+    expect(requestedUrls).toContain("https://pina.com.fj/feed/");
   });
 
   it("runs focused local and international searches for one event", async () => {

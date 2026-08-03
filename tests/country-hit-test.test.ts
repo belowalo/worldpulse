@@ -29,6 +29,13 @@ describe("country geometry hit testing", () => {
     ["Saint Lucia", -60.98, 13.9, "Saint Lucia"],
     ["Puerto Rico", -66.3, 18.25, "Puerto Rico"],
     ["U.S. Virgin Islands", -64.75, 17.74, "U.S. Virgin Is."],
+    ["Jamaica", -77.3, 18.1, "Jamaica"],
+    ["Trinidad", -61.28, 10.48, "Trinidad and Tobago"],
+    ["Grenada", -61.68, 12.12, "Grenada"],
+    ["Antigua", -61.8, 17.08, "Antigua and Barb."],
+    ["Saint Vincent", -61.2, 13.2, "St. Vin. and Gren."],
+    ["Canary Islands", -15.5, 28.1, "Spain"],
+    ["Cape Verde", -23.6, 15.1, "Cape Verde"],
   ])("selects %s correctly", (_place, longitude, latitude, expected) => {
     expect(countryAt(longitude, latitude)).toBe(expected);
   });

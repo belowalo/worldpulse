@@ -61,6 +61,48 @@ select:focus-visible {
   image-rendering: auto;
 }
 
+.world-globe-controls button {
+  display: grid;
+  min-width: 2.75rem;
+  min-height: 2.75rem;
+  place-items: center;
+  border: 1px solid #46566d;
+  border-radius: 0.65rem;
+  background: rgba(8, 17, 28, 0.94);
+  color: white;
+  box-shadow: 0 8px 25px rgba(0, 0, 0, 0.32);
+  font-size: 1.25rem;
+  line-height: 1;
+  touch-action: manipulation;
+}
+
+.world-globe-controls button:hover {
+  border-color: #73e2cc;
+  background: rgba(18, 40, 51, 0.98);
+}
+
+.world-globe-controls .world-globe-controls__reset {
+  padding-inline: 0.8rem;
+  font-family: var(--font-geist-mono), monospace;
+  font-size: 0.625rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+@media (max-width: 640px) {
+  .world-globe {
+    min-height: 31rem;
+  }
+
+  .world-globe-controls {
+    bottom: max(1rem, env(safe-area-inset-bottom));
+  }
+
+  .world-globe-tooltip {
+    display: none;
+  }
+}
+
 .world-globe-tooltip {
   width: min(17rem, calc(100vw - 2rem));
   border: 1px solid #39475d;

@@ -498,6 +498,7 @@ export function WorldMap({
   const [worldGeometry, setWorldGeometry] =
     useState<WorldFeatureCollection | null>(null);
   const [globeSceneReady, setGlobeSceneReady] = useState(false);
+  const [viewAnnouncement, setViewAnnouncement] = useState("");
   const [capitalCoordinates, setCapitalCoordinates] = useState<
     CapitalCoordinate[]
   >([]);
@@ -934,6 +935,44 @@ export function WorldMap({
     if (country) onSelectRef.current(country);
   };
 
+  const changeZoom = (amount: number) => {
+    const globeScene = globeSceneRef.current;
+    if (!globeScene) return;
+    const offset = globeScene.camera.position
+      .clone()
+      .sub(globeScene.controls.target);
+    const distance = Math.min(
+      globeScene.controls.maxDistance,
+      Math.max(globeScene.controls.minDistance, offset.length() + amount),
+    );
+    offset.setLength(distance);
+    globeScene.camera.position.copy(globeScene.controls.target).add(offset);
+    globeScene.controls.update();
+    setViewAnnouncement(amount < 0 ? "Globe zoomed in" : "Globe zoomed out");
+  };
+
+  const resetView = () => {
+    const globeScene = globeSceneRef.current;
+    if (!globeScene) return;
+    globeScene.camera.position.set(0, 0.2, 2.55);
+    globeScene.controls.target.set(0, 0, 0);
+    globeScene.controls.update();
+    setViewAnnouncement("Globe view reset");
+  };
+
+  const handleGlobeKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
+    if (event.key === "+" || event.key === "=") {
+      event.preventDefault();
+      changeZoom(-0.3);
+    } else if (event.key === "-") {
+      event.preventDefault();
+      changeZoom(0.3);
+    } else if (event.key === "0" || event.key === "Home") {
+      event.preventDefault();
+      resetView();
+    }
+  };
+
   return (
     <div
       className="world-globe relative h-full min-h-[420px] w-full overflow-hidden bg-[#050a11]"
@@ -944,7 +983,10 @@ export function WorldMap({
       data-globe-auto-rotate="false"
       data-globe-texture={`${TEXTURE_WIDTH}x${TEXTURE_HEIGHT}`}
       aria-label="Interactive 3D world news globe. Drag to rotate, scroll to zoom, and click or tap a country to open its news panel."
+      aria-describedby="world-globe-instructions"
       role="region"
+      tabIndex={0}
+      onKeyDown={handleGlobeKeyDown}
       onPointerDown={(event) => {
         pointerStartRef.current = { x: event.clientX, y: event.clientY };
       }}
@@ -963,9 +1005,47 @@ export function WorldMap({
           The world, in context.
         </h1>
         <p className="mt-2 text-xs leading-relaxed text-[#aab5c5]">
-          Drag to rotate. Scroll to zoom. Select any country.
+          Drag to rotate. Pinch, scroll, or use the controls to zoom.
         </p>
       </div>
+      <p id="world-globe-instructions" className="sr-only">
+        Drag or swipe to rotate the globe. Use plus and minus to zoom, or press
+        zero to reset the view. Tap or click a country to open its news.
+      </p>
+      <div className="world-globe-controls absolute bottom-4 left-4 z-20 flex gap-2" aria-label="Globe view controls">
+        <button
+          type="button"
+          aria-label="Zoom in"
+          title="Zoom in"
+          onPointerDown={(event) => event.stopPropagation()}
+          onPointerUp={(event) => event.stopPropagation()}
+          onClick={() => changeZoom(-0.3)}
+        >
+          <span aria-hidden="true">+</span>
+        </button>
+        <button
+          type="button"
+          aria-label="Zoom out"
+          title="Zoom out"
+          onPointerDown={(event) => event.stopPropagation()}
+          onPointerUp={(event) => event.stopPropagation()}
+          onClick={() => changeZoom(0.3)}
+        >
+          <span aria-hidden="true">−</span>
+        </button>
+        <button
+          type="button"
+          aria-label="Reset globe view"
+          title="Reset globe view"
+          onPointerDown={(event) => event.stopPropagation()}
+          onPointerUp={(event) => event.stopPropagation()}
+          onClick={resetView}
+          className="world-globe-controls__reset"
+        >
+          Reset
+        </button>
+      </div>
+      <span className="sr-only" role="status" aria-live="polite">{viewAnnouncement}</span>
       <div
         className={`pointer-events-none absolute left-5 top-28 z-10 max-w-[calc(100%-2.5rem)] truncate rounded-full border px-3 py-1.5 font-mono text-[10px] uppercase tracking-[0.16em] sm:left-auto sm:right-4 sm:top-4 sm:max-w-[420px] ${
           statusLabel === "Live"
