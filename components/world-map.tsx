@@ -103,7 +103,8 @@ const SMALL_ISLAND_HIT_OFFSETS = [
 
 let geometryPromise: Promise<WorldFeatureCollection> | null = null;
 let geometryFetchIdentity: typeof fetch | null = null;
-let globeRuntimePromise: Promise<GlobeRuntime> | null = null;
+let globeRuntimePromise: Promise<GlobeRuntime> | null =
+  typeof window === "undefined" ? null : importGlobeRuntime();
 let capitalsPromise: Promise<CapitalCoordinate[]> | null = null;
 
 export function loadWorldGeometry({
@@ -137,15 +138,17 @@ export function loadWorldGeometry({
   return geometryPromise;
 }
 
+function importGlobeRuntime() {
+  return import("@/lib/globe-runtime")
+    .then(({ globeRuntime: runtime }) => runtime)
+    .catch((error) => {
+      globeRuntimePromise = null;
+      throw error;
+    });
+}
+
 function loadGlobeRuntime() {
-  if (!globeRuntimePromise) {
-    globeRuntimePromise = import("@/lib/globe-runtime")
-      .then(({ globeRuntime: runtime }) => runtime)
-      .catch((error) => {
-        globeRuntimePromise = null;
-        throw error;
-      });
-  }
+  if (!globeRuntimePromise) globeRuntimePromise = importGlobeRuntime();
   return globeRuntimePromise;
 }
 
