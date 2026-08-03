@@ -749,12 +749,6 @@ export function WorldMap({
           textureCanvas,
         };
         globeSceneRef.current = globeScene;
-        drawWorldTexture({
-          scene: globeScene,
-          geometry,
-          byId: new Map(),
-          byName: new Map(),
-        });
 
         const resize = () => {
           const current = containerRef.current;
