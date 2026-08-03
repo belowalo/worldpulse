@@ -437,14 +437,22 @@ async function handlePreparedWorld(
   }
   const headers = new Headers({
     "Cache-Control": "no-store",
-    "Content-Type": "application/json; charset=utf-8",
+    "Content-Type":
+      current.customMetadata?.encoding === "gzip"
+        ? "application/vnd.worldpulse.snapshot+gzip"
+        : "application/json; charset=utf-8",
     "X-WorldPulse-Snapshot-Generated-At":
       current.customMetadata?.generatedAt ?? "unknown",
   });
-  if (current.customMetadata?.encoding === "gzip") {
-    headers.set("Content-Encoding", "gzip");
+  let body: ReadableStream | null = current.body;
+  if (
+    current.customMetadata?.encoding === "gzip" &&
+    requestUrl.searchParams.get("plain") === "1"
+  ) {
+    body = current.body.pipeThrough(new DecompressionStream("gzip"));
+    headers.set("Content-Type", "application/json; charset=utf-8");
   }
-  return new Response(current.body, { headers });
+  return new Response(body, { headers });
 }
 
 async function handleWorldSnapshot(

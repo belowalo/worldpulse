@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { gzipSync } from "node:zlib";
-import { encodePreparedWorldNews } from "@/lib/snapshot-transport";
+import { gunzipSync, gzipSync } from "node:zlib";
+import {
+  decodePreparedWorldNews,
+  encodePreparedWorldNews,
+  isPreparedWorldNewsWire,
+} from "@/lib/snapshot-transport";
 import type { PreparedWorldNewsPayload } from "@/lib/types";
 
 const liveTest = process.env.WORLD_PULSE_LIVE_QA === "1" ? it : it.skip;
@@ -13,11 +17,25 @@ describe("production prepared snapshot transport", () => {
       signal: AbortSignal.timeout(30_000),
     });
     expect(response.ok).toBe(true);
-    const payload = (await response.json()) as PreparedWorldNewsPayload;
+    const responseBytes = Buffer.from(await response.arrayBuffer());
+    const responseText =
+      responseBytes[0] === 0x1f && responseBytes[1] === 0x8b
+        ? gunzipSync(responseBytes).toString("utf8")
+        : responseBytes.toString("utf8");
+    const responsePayload = JSON.parse(responseText) as unknown;
+    const payload = isPreparedWorldNewsWire(responsePayload)
+      ? decodePreparedWorldNews(responsePayload)
+      : (responsePayload as PreparedWorldNewsPayload);
     expect(payload.scope).toBe("prepared-world");
     expect(Object.keys(payload.countryFeeds)).toHaveLength(215);
 
-    const bytes = gzipSync(JSON.stringify(encodePreparedWorldNews(payload))).byteLength;
+    const bytes = gzipSync(
+      JSON.stringify(
+        isPreparedWorldNewsWire(responsePayload)
+          ? responsePayload
+          : encodePreparedWorldNews(payload),
+      ),
+    ).byteLength;
     expect(bytes).toBeLessThan(1_000_000);
   });
 });

@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { gzipSync } from "node:zlib";
 
 import {
   MAX_PREPARED_GLOBAL_ARTICLES,
@@ -8,6 +9,7 @@ import {
 import {
   decodePreparedWorldNews,
   encodePreparedWorldNews,
+  parsePreparedWorldResponseBytes,
 } from "@/lib/snapshot-transport";
 import { buildWorldDiagnostics } from "@/lib/world-health";
 import type {
@@ -148,6 +150,14 @@ describe("prepared minute world state", () => {
 
   it("allows up to eight local events per country", () => {
     expect(MAX_PREPARED_COUNTRY_EVENTS).toBeGreaterThan(6);
+  });
+
+  it("decodes an explicitly compressed snapshot response", async () => {
+    const wire = { s: "pw2", v: "test", g: new Date().toISOString(), r: 60, n: [], a: [], e: [], f: { g: [[], null, null], c: [] } };
+    const compressed = gzipSync(JSON.stringify(wire));
+    await expect(
+      parsePreparedWorldResponseBytes(new Uint8Array(compressed)),
+    ).resolves.toEqual(wire);
   });
 
   it("alerts only for inhabited countries without news", () => {

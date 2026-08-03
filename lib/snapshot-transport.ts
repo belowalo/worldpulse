@@ -139,6 +139,21 @@ export function isPreparedWorldNewsWire(
   );
 }
 
+export async function parsePreparedWorldResponseBytes(
+  responseBytes: Uint8Array,
+): Promise<unknown> {
+  const isGzip = responseBytes[0] === 0x1f && responseBytes[1] === 0x8b;
+  const responseBuffer = Uint8Array.from(responseBytes).buffer;
+  const responseText = isGzip
+    ? await new Response(
+        new Response(responseBuffer).body?.pipeThrough(
+          new DecompressionStream("gzip"),
+        ),
+      ).text()
+    : new TextDecoder().decode(responseBytes);
+  return JSON.parse(responseText) as unknown;
+}
+
 export function decodePreparedWorldNews(
   wire: PreparedWorldNewsWirePayload,
 ): PreparedWorldNewsPayload {

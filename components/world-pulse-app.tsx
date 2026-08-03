@@ -41,6 +41,7 @@ import { categoryColor } from "@/lib/scoring";
 import {
   decodePreparedWorldNews,
   isPreparedWorldNewsWire,
+  parsePreparedWorldResponseBytes,
 } from "@/lib/snapshot-transport";
 import {
   applyDetectedGeography,
@@ -112,13 +113,19 @@ function loadPreparedWorld() {
     preparedWorldPromise = null;
     preparedWorldFetchIdentity = fetch;
   }
-  preparedWorldPromise ??= fetch("/api/live-news?scope=prepared-world", {
+  const supportsCompressedSnapshots =
+    typeof globalThis.DecompressionStream !== "undefined";
+  const preparedWorldUrl = supportsCompressedSnapshots
+    ? "/api/live-news?scope=prepared-world"
+    : "/api/live-news?scope=prepared-world&plain=1";
+  preparedWorldPromise ??= fetch(preparedWorldUrl, {
     signal: AbortSignal.timeout(WORLD_BATCH_REQUEST_TIMEOUT_MS),
   }).then(async (response) => {
     if (!response.ok) {
       throw new Error("The minute world state is unavailable.");
     }
-    const responsePayload = (await response.json()) as unknown;
+    const responseBytes = new Uint8Array(await response.arrayBuffer());
+    const responsePayload = await parsePreparedWorldResponseBytes(responseBytes);
     const payload = isPreparedWorldNewsWire(responsePayload)
       ? decodePreparedWorldNews(responsePayload)
       : (responsePayload as PreparedWorldNewsPayload);
