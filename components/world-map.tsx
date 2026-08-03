@@ -497,6 +497,7 @@ export function WorldMap({
   const onSelectRef = useRef(onSelect);
   const onReadyRef = useRef(onReady);
   const readyNotifiedRef = useRef(false);
+  const readyForRenderRef = useRef(false);
   const hoverFrameRef = useRef<number | null>(null);
   const pointerStartRef = useRef({ x: 0, y: 0 });
   const [hovered, setHovered] = useState<HoveredCountry | null>(null);
@@ -768,7 +769,7 @@ export function WorldMap({
 
         const render = () => {
           if (cancelled) return;
-          if (!document.hidden) {
+          if (!document.hidden && readyForRenderRef.current) {
             controls.update();
             renderer.render(scene, camera);
           }
@@ -804,6 +805,7 @@ export function WorldMap({
       globeSceneRef.current = null;
       geometryRef.current = null;
       runtimeRef.current = null;
+      readyForRenderRef.current = false;
       container.replaceChildren();
     };
   }, []);
@@ -823,6 +825,7 @@ export function WorldMap({
       });
       if (readyForDisplay && !readyNotifiedRef.current) {
         readyNotifiedRef.current = true;
+        readyForRenderRef.current = true;
         globeScene.renderer.render(globeScene.scene, globeScene.camera);
         onReadyRef.current?.();
       }
