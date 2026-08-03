@@ -82,8 +82,8 @@ interface HoveredCountry {
   y: number;
 }
 
-const TEXTURE_WIDTH = 2048;
-const TEXTURE_HEIGHT = 1024;
+const TEXTURE_WIDTH = 1024;
+const TEXTURE_HEIGHT = 512;
 const SPHERE_RADIUS = 1;
 const ARC_LIMIT = 20;
 const SMALL_ISLAND_HIT_OFFSETS = [
@@ -240,9 +240,15 @@ function traceFeature(
   context.beginPath();
   for (const polygon of polygonsForFeature(feature)) {
     for (const ring of polygon) {
-      traceRing(context, ring, -TEXTURE_WIDTH);
       traceRing(context, ring, 0);
-      traceRing(context, ring, TEXTURE_WIDTH);
+      const crossesAntimeridian = ring.some((position, index) => {
+        const previous = ring[index - 1];
+        return previous ? Math.abs(position[0] - previous[0]) > 180 : false;
+      });
+      if (crossesAntimeridian) {
+        traceRing(context, ring, -TEXTURE_WIDTH);
+        traceRing(context, ring, TEXTURE_WIDTH);
+      }
     }
   }
 }
