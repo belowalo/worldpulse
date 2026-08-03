@@ -14,6 +14,27 @@ function article(id: string, publishedAt: string) {
 }
 
 describe("live response cache merging", () => {
+  it("removes cached provider error pages", () => {
+    const merged = JSON.parse(
+      mergeCachedPayloads(
+        JSON.stringify({ scope: "global", articles: [] }),
+        JSON.stringify({
+          scope: "global",
+          articles: [
+            {
+              id: "blocked-feed",
+              title: "No Feed Access",
+              url: "https://blocked.example/",
+              publishedAt: new Date().toISOString(),
+            },
+          ],
+        }),
+      ),
+    ) as { articles: unknown[] };
+
+    expect(merged.articles).toEqual([]);
+  });
+
   it("keeps a recent country signal when a fresh provider response is empty", () => {
     const publishedAt = new Date(Date.now() - 60 * 60_000).toISOString();
     const stored = JSON.stringify({

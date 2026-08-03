@@ -1,3 +1,5 @@
+import { isProviderErrorArticleTitle } from "../lib/news-quality";
+
 const ARTICLE_RETENTION_MS = 8 * 24 * 60 * 60_000;
 
 type JsonRecord = Record<string, unknown>;
@@ -25,6 +27,12 @@ function mergeCachedArticles(
     ...(Array.isArray(storedArticles) ? storedArticles : []),
   ]) {
     if (!isJsonRecord(candidate)) continue;
+    if (
+      typeof candidate.title === "string" &&
+      isProviderErrorArticleTitle(candidate.title)
+    ) {
+      continue;
+    }
     const publishedAt = candidate.publishedAt;
     if (
       typeof publishedAt === "string" &&

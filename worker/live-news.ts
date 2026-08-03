@@ -5,6 +5,9 @@ import {
 } from "../lib/country-terms";
 import { googleNewsLocaleForCountry } from "../lib/country-locale";
 import { newsTextTokens } from "../lib/live-news";
+import { isProviderErrorArticleTitle } from "../lib/news-quality";
+
+export { isProviderErrorArticleTitle } from "../lib/news-quality";
 
 export interface FeedArticle {
   id: string;
@@ -165,12 +168,6 @@ export function isLikelyEnglishHeadline(value: string) {
         nonEnglishSignals >= 1 &&
         englishSignals === 0)) &&
     englishSignals < nonEnglishSignals
-  );
-}
-
-export function isProviderErrorArticleTitle(value: string) {
-  return /^(?:access denied|attention required|error|feed unavailable|no feed access|service unavailable)(?:\b|\s*[|:-])/i.test(
-    value.trim(),
   );
 }
 
