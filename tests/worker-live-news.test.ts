@@ -8,6 +8,7 @@ import {
   articleHeadlineMatchesCountry,
   handleLiveNews,
   isLikelyEnglishHeadline,
+  isProviderErrorArticleTitle,
   parseBingNewsFeed,
   parseGdeltJson,
   parseGoogleNewsFeed,
@@ -49,6 +50,12 @@ describe("worker live-news providers", () => {
       ),
     ).toBe(false);
     expect(isLikelyEnglishHeadline("مصر تعلن خطة جديدة للنقل العام")).toBe(false);
+  });
+
+  it("rejects provider access pages masquerading as news items", () => {
+    expect(isProviderErrorArticleTitle("No Feed Access")).toBe(true);
+    expect(isProviderErrorArticleTitle("Service unavailable: try again")).toBe(true);
+    expect(isProviderErrorArticleTitle("Kiribati signs a new regional agreement")).toBe(false);
   });
 
   it("parses publisher RSS and retains text for country matching", () => {

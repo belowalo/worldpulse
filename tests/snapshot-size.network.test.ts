@@ -37,5 +37,5 @@ describe("production prepared snapshot transport", () => {
       ),
     ).byteLength;
     expect(bytes).toBeLessThan(1_000_000);
-  });
+  }, 30_000);
 });

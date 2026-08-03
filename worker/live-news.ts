@@ -168,6 +168,12 @@ export function isLikelyEnglishHeadline(value: string) {
   );
 }
 
+export function isProviderErrorArticleTitle(value: string) {
+  return /^(?:access denied|attention required|error|feed unavailable|no feed access|service unavailable)(?:\b|\s*[|:-])/i.test(
+    value.trim(),
+  );
+}
+
 function newsSearchTerms(countryName: string, requestedRegion = "") {
   const terms = countrySearchTerms(countryName);
   const locale = googleNewsLocaleForCountry(countryName, requestedRegion);
@@ -579,6 +585,11 @@ const CARIBBEAN_NEWS_GLOBAL_PROVIDER = regionalRssProvider(
   "https://caribbeannewsglobal.com/",
   "https://caribbeannewsglobal.com/feed/",
 );
+const CARIBBEAN_NATIONAL_WEEKLY_PROVIDER = regionalRssProvider(
+  "Caribbean National Weekly",
+  "https://www.caribbeannationalweekly.com/",
+  "https://www.caribbeannationalweekly.com/feed/",
+);
 const AFRICANEWS_PROVIDER = regionalRssProvider(
   "Africanews",
   "https://www.africanews.com/",
@@ -589,6 +600,7 @@ function regionalProvidersForCountry(countryName: string) {
   return [
     ...(PACIFIC_COUNTRIES.has(countryName) ? [PINA_PROVIDER] : []),
     ...(CARIBBEAN_COUNTRIES.has(countryName) ? [CARIBBEAN_NEWS_GLOBAL_PROVIDER] : []),
+    ...(CARIBBEAN_COUNTRIES.has(countryName) ? [CARIBBEAN_NATIONAL_WEEKLY_PROVIDER] : []),
     ...(AFRICAN_COUNTRIES.has(countryName) ? [AFRICANEWS_PROVIDER] : []),
   ];
 }
@@ -701,6 +713,7 @@ const CORE_PROVIDERS: NewsProvider[] = [
   ),
   PINA_PROVIDER,
   CARIBBEAN_NEWS_GLOBAL_PROVIDER,
+  CARIBBEAN_NATIONAL_WEEKLY_PROVIDER,
   AFRICANEWS_PROVIDER,
 ];
 
@@ -1028,6 +1041,7 @@ function hasProviderArticles(results: ProviderResult[]) {
 }
 
 function articleIsCurrent(article: CandidateArticle) {
+  if (isProviderErrorArticleTitle(article.title)) return false;
   const publishedAt = Date.parse(article.publishedAt);
   if (!Number.isFinite(publishedAt)) return false;
   const age = Date.now() - publishedAt;
