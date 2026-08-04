@@ -731,7 +731,7 @@ function LiveSituationModal({
               id="live-situation-title"
               className="mt-2 text-3xl font-semibold tracking-[-0.045em] text-white"
             >
-              Live Situation
+              Top Stories
             </h2>
             <p className="mt-2 max-w-2xl text-sm leading-6 text-[#92a0b3]">
               The twelve strongest current global stories, with one primary source
@@ -2366,19 +2366,22 @@ export function WorldPulseApp({
             type="button"
             onClick={() => setShowLiveNews(true)}
             aria-label="Live News"
-            className="live-news-button-pulse whitespace-nowrap rounded-full border border-[#df5b67] bg-[#701822] px-2.5 py-2 text-[10px] text-white transition hover:border-[#ff8b94] sm:px-4"
+            className="live-news-button-pulse inline-flex items-center gap-2 whitespace-nowrap rounded-full border border-[#df5b67] bg-[#701822] px-2.5 py-2 text-[10px] text-white transition hover:border-[#ff8b94] sm:px-4"
           >
-            <span className="sm:hidden">Live</span>
-            <span className="hidden sm:inline">Live News</span>
+            <span
+              className="world-live-status__dot h-1.5 w-1.5 rounded-full bg-white"
+              aria-hidden="true"
+            />
+            <span>Live</span>
           </button>
           <button
             type="button"
             onClick={() => setShowLiveSituation(true)}
-            aria-label="Live Situation"
+            aria-label="Top Stories"
             className="whitespace-nowrap rounded-full border border-[#3978b7] bg-[#122a44] px-2.5 py-2 text-[10px] text-[#d5ebff] transition hover:border-[#65a9e8] hover:bg-[#193a5d] sm:px-4"
           >
-            <span className="sm:hidden">Situation</span>
-            <span className="hidden sm:inline">Live Situation</span>
+            <span className="sm:hidden">Stories</span>
+            <span className="hidden sm:inline">Top Stories</span>
           </button>
           <button
             type="button"

@@ -206,16 +206,16 @@ describe("WorldPulse interactions", () => {
     expect(screen.getByRole("heading", { name: "Japan" })).toBeInTheDocument();
   });
 
-  it("opens Live Situation without changing the selected country", () => {
+  it("opens Top Stories without changing the selected country", () => {
     render(<WorldPulseApp MapComponent={TestMap} liveUpdates={false} />);
     fireEvent.click(
       screen.getByRole("button", { name: "Select Japan on map" }),
     );
     expect(screen.getByTestId("selected-map-id")).toHaveTextContent("392");
 
-    fireEvent.click(screen.getByRole("button", { name: "Live Situation" }));
+    fireEvent.click(screen.getByRole("button", { name: "Top Stories" }));
     expect(
-      screen.getByRole("heading", { name: "Live Situation" }),
+      screen.getByRole("heading", { name: "Top Stories" }),
     ).toBeInTheDocument();
     expect(screen.getByTestId("selected-map-id")).toHaveTextContent("392");
     expect(
@@ -288,7 +288,7 @@ describe("WorldPulse interactions", () => {
     expect(screen.getByTestId("link-event-ids")).toBeEmptyDOMElement();
   });
 
-  it("shows the global top stories in Live Situation with one source each", async () => {
+  it("shows the global top stories in Top Stories with one source each", async () => {
     const headline = "Canada and Mexico agree a cross-border trade accord";
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input);
@@ -350,8 +350,8 @@ describe("WorldPulse interactions", () => {
     vi.stubGlobal("fetch", fetchMock);
 
     render(<WorldPulseApp MapComponent={TestMap} />);
-    fireEvent.click(await screen.findByRole("button", { name: "Live Situation" }));
-    const dialog = screen.getByRole("dialog", { name: "Live Situation" });
+    fireEvent.click(await screen.findByRole("button", { name: "Top Stories" }));
+    const dialog = screen.getByRole("dialog", { name: "Top Stories" });
     expect(within(dialog).getByRole("heading", { name: headline })).toBeInTheDocument();
     expect(within(dialog).getAllByRole("link")).toHaveLength(1);
     expect(
@@ -519,7 +519,7 @@ describe("WorldPulse interactions", () => {
     ).toBeInTheDocument();
   });
 
-  it("limits Live Situation to the twelve strongest global stories", async () => {
+  it("limits Top Stories to the twelve strongest global stories", async () => {
     const globalArticles = Array.from({ length: 45 }, (_, index) => ({
       id: `global-${index}`,
       title: `Distinct event marker${index} topic${index} dispatch${index}`,
@@ -548,8 +548,8 @@ describe("WorldPulse interactions", () => {
     vi.stubGlobal("fetch", fetchMock);
 
     render(<WorldPulseApp MapComponent={TestMap} />);
-    fireEvent.click(await screen.findByRole("button", { name: "Live Situation" }));
-    const dialog = screen.getByRole("dialog", { name: "Live Situation" });
+    fireEvent.click(await screen.findByRole("button", { name: "Top Stories" }));
+    const dialog = screen.getByRole("dialog", { name: "Top Stories" });
     expect(within(dialog).getByText("Situation 12")).toBeInTheDocument();
     expect(within(dialog).getAllByRole("link")).toHaveLength(12);
   });
@@ -685,7 +685,7 @@ describe("WorldPulse interactions", () => {
     ).toHaveAttribute("data-bias", "unrated");
   });
 
-  it("shows the canonical global occurrence once in Live Situation", async () => {
+  it("shows the canonical global occurrence once in Top Stories", async () => {
     const globalHeadline =
       "Heat dome expands across central Canada, creating dangerous conditions for millions";
     const localHeadline =
@@ -796,8 +796,8 @@ describe("WorldPulse interactions", () => {
     expect(
       await within(countryCard!).findByText("5 shown · 7 matched"),
     ).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Live Situation" }));
-    const dialog = screen.getByRole("dialog", { name: "Live Situation" });
+    fireEvent.click(screen.getByRole("button", { name: "Top Stories" }));
+    const dialog = screen.getByRole("dialog", { name: "Top Stories" });
     expect(
       within(dialog).getByRole("heading", { name: globalHeadline }),
     ).toBeInTheDocument();
@@ -980,7 +980,7 @@ describe("WorldPulse interactions", () => {
     ).toBe(false);
     expect(requestedUrls).not.toContain("/api/live-news?scope=global");
     expect(
-      await screen.findByRole("button", { name: "Live Situation" }),
+      await screen.findByRole("button", { name: "Top Stories" }),
     ).toBeInTheDocument();
     expect(
       screen.queryByRole("button", { name: "Global feed" }),
@@ -1299,7 +1299,7 @@ describe("WorldPulse interactions", () => {
       screen.getByText("Preparing 12 of 13 countries"),
     ).toBeInTheDocument();
     expect(
-      screen.queryByRole("button", { name: "Live Situation" }),
+      screen.queryByRole("button", { name: "Top Stories" }),
     ).not.toBeInTheDocument();
     expect(screen.getByTestId("countries-with-news")).not.toBeVisible();
 
@@ -1725,9 +1725,9 @@ describe("WorldPulse interactions", () => {
     ).toBeInTheDocument();
     expect(screen.getByTestId("countries-syncing")).toHaveTextContent("0");
 
-    fireEvent.click(screen.getByRole("button", { name: "Live Situation" }));
+    fireEvent.click(screen.getByRole("button", { name: "Top Stories" }));
     fireEvent.click(
-      within(screen.getByRole("dialog", { name: "Live Situation" })).getByRole(
+      within(screen.getByRole("dialog", { name: "Top Stories" })).getByRole(
         "button",
         { name: "Close" },
       ),

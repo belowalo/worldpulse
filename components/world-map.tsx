@@ -1053,23 +1053,15 @@ export function WorldMap({
         </button>
       </div>
       <span className="sr-only" role="status" aria-live="polite">{viewAnnouncement}</span>
-      <div
-        className={`pointer-events-none absolute left-5 top-28 z-10 max-w-[calc(100%-2.5rem)] truncate rounded-full border px-3 py-1.5 font-mono text-[10px] uppercase tracking-[0.16em] sm:left-auto sm:right-4 sm:top-4 sm:max-w-[420px] ${
-          statusLabel === "Live"
-            ? "world-live-status border-[#ff5964]/70 bg-[#701822]/95 text-white"
-            : "border-[#354258] bg-[#0a121d]/90 text-[#aab5c5]"
-        }`}
-        role="status"
-        aria-live="polite"
-      >
-        {statusLabel === "Live" ? (
-          <span
-            className="world-live-status__dot mr-2 inline-block h-1.5 w-1.5 rounded-full bg-white"
-            aria-hidden="true"
-          />
-        ) : null}
-        {statusLabel}
-      </div>
+      {statusLabel !== "Live" ? (
+        <div
+          className="pointer-events-none absolute left-5 top-28 z-10 max-w-[calc(100%-2.5rem)] truncate rounded-full border border-[#354258] bg-[#0a121d]/90 px-3 py-1.5 font-mono text-[10px] uppercase tracking-[0.16em] text-[#aab5c5] sm:left-auto sm:right-4 sm:top-4 sm:max-w-[420px]"
+          role="status"
+          aria-live="polite"
+        >
+          {statusLabel}
+        </div>
+      ) : null}
       {hovered ? (
         <div
           className="world-globe-tooltip pointer-events-none absolute z-30"
