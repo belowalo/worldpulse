@@ -18,6 +18,11 @@ html {
   background: var(--background);
   color: var(--ink);
   color-scheme: dark;
+  scrollbar-width: none;
+}
+
+html::-webkit-scrollbar {
+  display: none;
 }
 
 body {
