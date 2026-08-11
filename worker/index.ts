@@ -52,7 +52,8 @@ const LIVE_MAP_STALE_MS = LIVE_CACHE_RETENTION_SECONDS * 1_000;
 const PREPARED_WORLD_KEY = "world/latest.json";
 const PREPARED_WORLD_HEALTH_KEY = "world/health.json";
 const PREPARED_WORLD_FRESH_MS = 60_000;
-const PREPARED_WORLD_REFRESH_BATCH_SIZE = 12;
+const PREPARED_WORLD_CHUNK_SIZE = 12;
+const PREPARED_COUNTRY_REFRESH_BATCH_SIZE = 4;
 const PREPARED_GLOBAL_REFRESH_INTERVAL_MINUTES = 5;
 
 let preparedWorldRefresh: Promise<void> | null = null;
@@ -96,7 +97,7 @@ async function readCompletePreparedCountryFeeds(
   directory: MapCountry[],
 ) {
   const batchCount = Math.ceil(
-    directory.length / PREPARED_WORLD_REFRESH_BATCH_SIZE,
+    directory.length / PREPARED_WORLD_CHUNK_SIZE,
   );
   const feeds: Record<string, PreparedNewsFeed> = {};
   for (let batchIndex = 0; batchIndex < batchCount; batchIndex += 1) {
@@ -200,6 +201,13 @@ async function refreshPreparedWorld(env: Env) {
       },
     ),
   ]);
+  console.info(
+    JSON.stringify({
+      event: "prepared_world_refresh_completed",
+      generatedAt,
+      countryCount: directory.length,
+    }),
+  );
 }
 
 async function handleWorldDiagnostics(env: Env) {
@@ -262,14 +270,14 @@ async function refreshPreparedCountryBatch(
   const directory = loadWorldDirectory();
   const countryNames = directory.map((country) => country.name);
   const batchCount = Math.ceil(
-    countryNames.length / PREPARED_WORLD_REFRESH_BATCH_SIZE,
+    countryNames.length / PREPARED_COUNTRY_REFRESH_BATCH_SIZE,
   );
   const batchIndex = Number.isInteger(requestedBatchIndex)
     ? Math.max(0, Math.min(batchCount - 1, requestedBatchIndex as number))
     : Math.floor(Date.now() / 60_000) % batchCount;
   const refreshCountries = countryNames.slice(
-    batchIndex * PREPARED_WORLD_REFRESH_BATCH_SIZE,
-    (batchIndex + 1) * PREPARED_WORLD_REFRESH_BATCH_SIZE,
+    batchIndex * PREPARED_COUNTRY_REFRESH_BATCH_SIZE,
+    (batchIndex + 1) * PREPARED_COUNTRY_REFRESH_BATCH_SIZE,
   );
   if (!cacheOnly) {
     const mapUrl = new URL("https://worldpulse.internal/api/live-news");
@@ -285,7 +293,13 @@ async function refreshPreparedCountryBatch(
     }
     await writeStoredNewsFeed(env.DB, cacheKey, mapPayload, Date.now());
   }
-  const expectedCountryNames = new Set(refreshCountries);
+  const firstCountryIndex = batchIndex * PREPARED_COUNTRY_REFRESH_BATCH_SIZE;
+  const chunkIndex = Math.floor(firstCountryIndex / PREPARED_WORLD_CHUNK_SIZE);
+  const chunkCountries = countryNames.slice(
+    chunkIndex * PREPARED_WORLD_CHUNK_SIZE,
+    (chunkIndex + 1) * PREPARED_WORLD_CHUNK_SIZE,
+  );
+  const expectedCountryNames = new Set(chunkCountries);
   const consolidated = collectStoredMapCountries(
     await readStoredMapFeeds(env.DB),
     expectedCountryNames,
@@ -293,7 +307,7 @@ async function refreshPreparedCountryBatch(
   const consolidatedNames = new Set(
     consolidated.countries.map((country) => country.countryName),
   );
-  const missingCountries = refreshCountries.filter(
+  const missingCountries = chunkCountries.filter(
     (countryName) => !consolidatedNames.has(countryName),
   );
   if (missingCountries.length) {
@@ -310,12 +324,20 @@ async function refreshPreparedCountryBatch(
     ),
   };
   await env.SNAPSHOTS.put(
-    preparedCountryChunkKey(batchIndex),
+    preparedCountryChunkKey(chunkIndex),
     JSON.stringify(chunk),
     {
       httpMetadata: { contentType: "application/json; charset=utf-8" },
       customMetadata: { generatedAt },
     },
+  );
+  console.info(
+    JSON.stringify({
+      event: "prepared_country_refresh_completed",
+      refreshBatchIndex: batchIndex,
+      chunkIndex,
+      countries: refreshCountries,
+    }),
   );
 }
 
@@ -426,8 +448,11 @@ async function handlePreparedWorld(
       current = await env.SNAPSHOTS.get(PREPARED_WORLD_KEY);
     }
   } else if (age >= PREPARED_WORLD_FRESH_MS) {
-    ctx.waitUntil(refreshPreparedWorldSafely(env));
-    ctx.waitUntil(refreshPreparedCountryBatchSafely(env));
+    ctx.waitUntil(
+      refreshPreparedCountryBatchSafely(env).then(() =>
+        refreshPreparedWorldSafely(env),
+      ),
+    );
   }
   if (!current) {
     return Response.json(

@@ -788,14 +788,7 @@ describe("WorldPulse interactions", () => {
 
     render(<WorldPulseApp MapComponent={TestMap} />);
 
-    const countryHeading = await screen.findByRole("heading", {
-      name: globalHeadline,
-    });
-    const countryCard = countryHeading.closest("article");
-    expect(countryCard).not.toBeNull();
-    expect(
-      await within(countryCard!).findByText("5 shown · 7 matched"),
-    ).toBeInTheDocument();
+    await screen.findByRole("heading", { name: localHeadline });
     fireEvent.click(screen.getByRole("button", { name: "Top Stories" }));
     const dialog = screen.getByRole("dialog", { name: "Top Stories" });
     expect(
@@ -914,15 +907,13 @@ describe("WorldPulse interactions", () => {
       screen.getByRole("button", { name: "Select Spain on map" }),
     );
     expect(screen.getByRole("heading", { name: "Spain" })).toBeInTheDocument();
-    expect(
-      screen.getByText("No recent news for Spain"),
-    ).toBeInTheDocument();
+    expect(screen.getByText("No recent news for Spain")).toBeInTheDocument();
     expect(
       screen.queryByRole("button", { name: "Japan" }),
     ).not.toBeInTheDocument();
   });
 
-  it("uses one complete minute world state before opening", async () => {
+  it("uses the prepared world and immediately refreshes the selected country", async () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input);
       if (url === "/countries.geojson") {
@@ -974,10 +965,10 @@ describe("WorldPulse interactions", () => {
     );
     expect(requestedUrls.some((url) => url.includes("scope=map"))).toBe(false);
     expect(
-      requestedUrls.some((url) =>
-        url.includes("/api/live-news?country="),
+      requestedUrls.some(
+        (url) => url.includes("country=Canada") && url.includes("fresh=1"),
       ),
-    ).toBe(false);
+    ).toBe(true);
     expect(requestedUrls).not.toContain("/api/live-news?scope=global");
     expect(
       await screen.findByRole("button", { name: "Top Stories" }),
@@ -1021,11 +1012,6 @@ describe("WorldPulse interactions", () => {
     expect(screen.getByTestId("countries-with-news")).toHaveTextContent("0");
     expect(
       fetchMock.mock.calls.some(([input]) =>
-        String(input).includes("/api/live-news?country="),
-      ),
-    ).toBe(false);
-    expect(
-      fetchMock.mock.calls.some(([input]) =>
         String(input).includes("scope=global"),
       ),
     ).toBe(true);
@@ -1038,9 +1024,9 @@ describe("WorldPulse interactions", () => {
         const url = String(input);
         return url.includes("country=Spain") && url.includes("fresh=1");
       }),
-    ).toBe(false);
+    ).toBe(true);
     expect(
-      screen.getByText("No recent news for Spain"),
+      await screen.findByText("No recent news for Spain"),
     ).toBeInTheDocument();
   });
 
@@ -1103,7 +1089,7 @@ describe("WorldPulse interactions", () => {
     ).toBeInTheDocument();
   });
 
-  it("uses map-loaded country reporting without fetching on map click", async () => {
+  it("refreshes map-loaded country reporting on map click", async () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input);
       if (url === "/countries.geojson") {
@@ -1152,11 +1138,14 @@ describe("WorldPulse interactions", () => {
         name: liveArticleFor("Senegal").title,
       }),
     ).toBeInTheDocument();
-    expect(
-      fetchMock.mock.calls.filter(([input]) =>
-        String(input).includes("country=Senegal"),
-      ),
-    ).toHaveLength(requestsBeforeClick);
+    await waitFor(() =>
+      expect(
+        fetchMock.mock.calls.filter(([input]) => {
+          const url = String(input);
+          return url.includes("country=Senegal") && url.includes("fresh=1");
+        }).length,
+      ).toBeGreaterThan(requestsBeforeClick),
+    );
   });
 
   it("opens Egypt by its numeric map id and renders Arabic reporting correctly", async () => {
@@ -1236,7 +1225,14 @@ describe("WorldPulse interactions", () => {
     const egyptRequestsAfterClick = fetchMock.mock.calls.filter(([input]) =>
       String(input).includes("country=Egypt"),
     );
-    expect(egyptRequestsAfterClick).toHaveLength(egyptRequestsBeforeClick);
+    expect(egyptRequestsAfterClick.length).toBeGreaterThan(
+      egyptRequestsBeforeClick,
+    );
+    expect(
+      egyptRequestsAfterClick.some(([input]) =>
+        String(input).includes("fresh=1"),
+      ),
+    ).toBe(true);
   });
 
   it("keeps the loading screen up until the complete country index is ready", async () => {

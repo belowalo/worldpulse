@@ -1846,6 +1846,24 @@ export function WorldPulseApp({
 
   useEffect(() => {
     if (!liveUpdates) return;
+    if (!countryDirectoryReady) return;
+    const currentCountry = countryDirectory.find(
+      (country) =>
+        country.mapId === selectedCountry.mapId ||
+        country.name === selectedCountry.name,
+    );
+    if (!currentCountry) return;
+    void fetchCountryNews(currentCountry, { forceFresh: true });
+  }, [
+    countryDirectory,
+    countryDirectoryReady,
+    fetchCountryNews,
+    liveUpdates,
+    selectedCountry,
+  ]);
+
+  useEffect(() => {
+    if (!liveUpdates) return;
     const refreshTimer = window.setInterval(() => {
       invalidateCoverage();
       if (globalView || globalFeed.updatedAt) void fetchGlobalNews();

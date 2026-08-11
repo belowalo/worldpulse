@@ -993,6 +993,24 @@ async function fetchMapCountry(
       ...countryRelevantResults([alternateCountryResult], terms),
     ];
   }
+  if (!hasProviderArticles(relevantResults)) {
+    const retryResults = await Promise.all(
+      countryProviders.slice(1).map((provider) =>
+        fetchProvider(
+          provider,
+          "country",
+          countryName,
+          terms,
+          fetchImpl,
+        ),
+      ),
+    );
+    results.push(...retryResults);
+    relevantResults = [
+      ...relevantResults,
+      ...countryRelevantResults(retryResults, terms),
+    ];
+  }
   const successful = relevantResults.filter(
     (result) => result.ok && result.articles.length,
   );
@@ -1309,7 +1327,25 @@ export async function handleLiveNews(
       fetchProvider(provider, scope, countryName, terms, fetchImpl),
   );
   if (scope === "country") {
-    const relevantResults = countryRelevantResults(results, terms);
+    let relevantResults = countryRelevantResults(results, terms);
+    if (!hasProviderArticles(relevantResults)) {
+      const retryIndexes = results.flatMap((result, index) =>
+        result.articles.length ? [] : [index],
+      );
+      const retryProviders = retryIndexes.map((index) => providers[index]);
+      const retryResults = await mapWithConcurrency(
+        retryProviders,
+        3,
+        (provider) =>
+          fetchProvider(provider, scope, countryName, terms, fetchImpl),
+      );
+      retryResults.forEach((retry, retryIndex) => {
+        if (retry.articles.length) {
+          results[retryIndexes[retryIndex]] = retry;
+        }
+      });
+      relevantResults = countryRelevantResults(results, terms);
+    }
     results = relevantResults;
   }
   if (scope === "event") {
