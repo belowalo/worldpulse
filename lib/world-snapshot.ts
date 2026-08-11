@@ -194,9 +194,12 @@ export function prepareCompleteWorldSnapshotFromFeeds(
   const countryFeeds: PreparedWorldNewsPayload["countryFeeds"] = {};
   for (const country of countryDirectory) {
     const localFeed = localFeeds[country.name];
+    const normalizedLocalEvents = (localFeed?.events ?? []).map((event) =>
+      applyDetectedGeography(event, countryDirectory, country),
+    );
     countryFeeds[country.name] = {
       events: mergeEventFeeds(
-        localFeed?.events.slice(0, MAX_PREPARED_COUNTRY_EVENTS) ?? [],
+        normalizedLocalEvents.slice(0, MAX_PREPARED_COUNTRY_EVENTS),
         currentGlobalEventsByCountry.get(country.name) ?? [],
       ).sort(
         (left, right) =>

@@ -6,6 +6,7 @@ import {
   MAX_PREPARED_COUNTRY_EVENTS,
   mergePreparedCountryFeedSnapshots,
   prepareCompleteWorldSnapshot,
+  prepareCompleteWorldSnapshotFromFeeds,
 } from "@/lib/world-snapshot";
 import {
   decodePreparedWorldNews,
@@ -193,6 +194,52 @@ describe("prepared minute world state", () => {
     expect(merged.Canada.events).toHaveLength(1);
     expect(merged.Canada.events[0]?.headline).toBe("Canada current story");
     expect(merged.Canada.updatedAt).toBe(fresh.Canada.updatedAt);
+  });
+
+  it("reapplies the verified local country when assembling stored feeds", () => {
+    const generatedAt = new Date().toISOString();
+    const directory: MapCountry[] = [
+      { mapId: "120", name: "Cameroon", iso2: "CM", events: [] },
+      { mapId: "566", name: "Nigeria", iso2: "NG", events: [] },
+    ];
+    const globalPayload: LiveNewsPayload = {
+      scope: "global",
+      countryName: null,
+      generatedAt,
+      refreshAfterSeconds: 60,
+      provider: "Live providers",
+      articles: [],
+    };
+    const cameroonEvent = prepareCompleteWorldSnapshot(
+      globalPayload,
+      [{
+        countryName: "Cameroon",
+        generatedAt,
+        available: true,
+        articles: [liveArticle("semifinal", "Cameroon reaches the semifinal")],
+      }],
+      directory,
+      generatedAt,
+    ).countryFeeds.Cameroon.events[0];
+
+    const prepared = prepareCompleteWorldSnapshotFromFeeds(
+      globalPayload,
+      {
+        Nigeria: {
+          events: [cameroonEvent],
+          updatedAt: generatedAt,
+          provider: "Stored country feed",
+          loading: false,
+          error: null,
+        },
+      },
+      directory,
+      generatedAt,
+    );
+
+    expect(prepared.countryFeeds.Nigeria.events[0].affectedCountries).toContain(
+      "NG",
+    );
   });
 
   it("decodes an explicitly compressed snapshot response", async () => {
