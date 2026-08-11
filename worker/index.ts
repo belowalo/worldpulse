@@ -448,11 +448,8 @@ async function handlePreparedWorld(
       current = await env.SNAPSHOTS.get(PREPARED_WORLD_KEY);
     }
   } else if (age >= PREPARED_WORLD_FRESH_MS) {
-    ctx.waitUntil(
-      refreshPreparedCountryBatchSafely(env).then(() =>
-        refreshPreparedWorldSafely(env),
-      ),
-    );
+    ctx.waitUntil(refreshPreparedWorldSafely(env));
+    ctx.waitUntil(refreshPreparedCountryBatchSafely(env));
   }
   if (!current) {
     return Response.json(
@@ -846,11 +843,8 @@ const worker = {
       ctx.waitUntil(refreshStoredGlobalFeedSafely(env));
       return;
     }
-    ctx.waitUntil(
-      refreshPreparedCountryBatchSafely(env).then(() =>
-        refreshPreparedWorldSafely(env),
-      ),
-    );
+    ctx.waitUntil(refreshPreparedWorldSafely(env));
+    ctx.waitUntil(refreshPreparedCountryBatchSafely(env));
   },
 };
 
