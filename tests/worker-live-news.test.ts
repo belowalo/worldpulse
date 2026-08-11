@@ -290,6 +290,47 @@ describe("worker live-news providers", () => {
     expect(payload.provider).toContain("1 feeds");
   });
 
+  it("retries a thin country response and keeps the richer seven-day result", async () => {
+    vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    let googleRequests = 0;
+    const story = (index: number) => `
+      <item>
+        <title>United States current story ${index} - Example News ${index}</title>
+        <description>Current reporting from the United States.</description>
+        <link>https://news.google.com/rss/articles/us-story-${index}</link>
+        <guid>us-story-${index}</guid>
+        <pubDate>Sun, 26 Jul 2026 ${String(index).padStart(2, "0")}:00:00 GMT</pubDate>
+        <source url="https://publisher${index}.example/">Example News ${index}</source>
+      </item>
+    `;
+    const fetchMock = vi.fn(async (input: URL | RequestInfo) => {
+      const url = String(input);
+      if (!url.startsWith("https://news.google.com/rss/search")) {
+        return new Response("Unavailable", { status: 503 });
+      }
+      googleRequests += 1;
+      const items = googleRequests === 1
+        ? story(1)
+        : Array.from({ length: 9 }, (_, index) => story(index + 1)).join("");
+      return new Response(`<rss><channel>${items}</channel></rss>`, {
+        status: 200,
+        headers: { "Content-Type": "application/rss+xml" },
+      });
+    });
+
+    const response = await handleLiveNews(
+      new Request(
+        "https://worldpulse.test/api/live-news?country=United%20States&iso2=US",
+      ),
+      fetchMock as typeof fetch,
+    );
+    const payload = (await response.json()) as { articles: unknown[] };
+
+    expect(response.status).toBe(200);
+    expect(googleRequests).toBe(2);
+    expect(payload.articles).toHaveLength(9);
+  });
+
   it("uses broad and latest live searches for a country", async () => {
     vi.spyOn(console, "warn").mockImplementation(() => undefined);
     const requestedUrls: string[] = [];

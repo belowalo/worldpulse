@@ -57,6 +57,7 @@ const MAX_GLOBAL_ARTICLES = 700;
 const MAX_EVENT_ARTICLES = 40;
 const MAX_MAP_BATCH_COUNTRIES = 40;
 const MAX_MAP_ARTICLES_PER_COUNTRY = 32;
+const MIN_COUNTRY_ARTICLES_BEFORE_RETRY = 8;
 const CACHE_SECONDS = 300;
 const MAX_ARTICLE_AGE_MS = 8 * 24 * 60 * 60 * 1_000;
 const VALID_COUNTRY_NAME = /^[\p{L}\p{M}\d .,'’()&-]+$/u;
@@ -1328,10 +1329,12 @@ export async function handleLiveNews(
   );
   if (scope === "country") {
     let relevantResults = countryRelevantResults(results, terms);
-    if (!hasProviderArticles(relevantResults)) {
-      const retryIndexes = results.flatMap((result, index) =>
-        result.articles.length ? [] : [index],
-      );
+    const relevantArticleCount = relevantResults.reduce(
+      (total, result) => total + result.articles.length,
+      0,
+    );
+    if (relevantArticleCount < MIN_COUNTRY_ARTICLES_BEFORE_RETRY) {
+      const retryIndexes = results.map((_, index) => index);
       const retryProviders = retryIndexes.map((index) => providers[index]);
       const retryResults = await mapWithConcurrency(
         retryProviders,
@@ -1340,8 +1343,9 @@ export async function handleLiveNews(
           fetchProvider(provider, scope, countryName, terms, fetchImpl),
       );
       retryResults.forEach((retry, retryIndex) => {
-        if (retry.articles.length) {
-          results[retryIndexes[retryIndex]] = retry;
+        const resultIndex = retryIndexes[retryIndex];
+        if (retry.articles.length > results[resultIndex].articles.length) {
+          results[resultIndex] = retry;
         }
       });
       relevantResults = countryRelevantResults(results, terms);
