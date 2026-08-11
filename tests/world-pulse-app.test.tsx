@@ -73,9 +73,15 @@ function preparedWorldResponse(
   countries: Array<{ mapId: string; name: string; iso2?: string }>,
   articlesByCountry: Record<string, TestLiveArticle[]> = {},
 ) {
+  return Response.json(preparedWorldPayload(countries, articlesByCountry));
+}
+
+function preparedWorldPayload(
+  countries: Array<{ mapId: string; name: string; iso2?: string }>,
+  articlesByCountry: Record<string, TestLiveArticle[]> = {},
+) {
   const generatedAt = new Date().toISOString();
-  return Response.json(
-    prepareCompleteWorldSnapshot(
+  return prepareCompleteWorldSnapshot(
       {
         countryName: null,
         scope: "global",
@@ -92,8 +98,7 @@ function preparedWorldResponse(
       })),
       countries.map((country) => ({ ...country, events: [] })),
       generatedAt,
-    ),
-  );
+    );
 }
 
 beforeEach(() => {
@@ -116,6 +121,7 @@ function TestMap({
   const japan = countryPulses.find((country) => country.iso2 === "JP");
   const egypt = countryPulses.find((country) => country.iso2 === "EG");
   const canada = countries.find((country) => country.iso2 === "CA");
+  const unitedStates = countries.find((country) => country.iso2 === "US");
   const australia = countries.find((country) => country.iso2 === "AU");
   return (
     <>
@@ -170,6 +176,12 @@ function TestMap({
       </button>
       <button type="button" onClick={() => australia && onSelect(australia)}>
         Select Australia on map
+      </button>
+      <button
+        type="button"
+        onClick={() => unitedStates && onSelect(unitedStates)}
+      >
+        Select United States on map
       </button>
       <button
         type="button"
@@ -372,6 +384,9 @@ describe("WorldPulse interactions", () => {
     expect(
       within(liveNewsDialog).getByText("Across the newsrooms"),
     ).toBeInTheDocument();
+    expect(
+      within(liveNewsDialog).queryByText("What this stream is covering"),
+    ).not.toBeInTheDocument();
   });
 
   it("switches newsroom feeds and preserves the selected feed during a directory refresh", async () => {
@@ -461,8 +476,8 @@ describe("WorldPulse interactions", () => {
       expect.stringContaining("youtube-nocookie.com/embed/bbcnews001"),
     );
     expect(
-      within(dialog).getByText(/following diplomatic talks in Europe/),
-    ).toBeInTheDocument();
+      within(dialog).queryByText(/following diplomatic talks in Europe/),
+    ).not.toBeInTheDocument();
 
     fireEvent.click(
       within(dialog).getByRole("button", { name: "Refresh" }),
@@ -477,8 +492,8 @@ describe("WorldPulse interactions", () => {
       expect.stringContaining("youtube-nocookie.com/embed/bbcnews001"),
     );
     expect(
-      within(dialog).getByText(/moved to the international summit/),
-    ).toBeInTheDocument();
+      within(dialog).queryByText(/moved to the international summit/),
+    ).not.toBeInTheDocument();
     expect(within(dialog).queryByText(/Breaking 01/)).not.toBeInTheDocument();
   });
 
@@ -550,7 +565,7 @@ describe("WorldPulse interactions", () => {
     render(<WorldPulseApp MapComponent={TestMap} />);
     fireEvent.click(await screen.findByRole("button", { name: "Top Stories" }));
     const dialog = screen.getByRole("dialog", { name: "Top Stories" });
-    expect(within(dialog).getByText("Situation 12")).toBeInTheDocument();
+    expect(within(dialog).getByText("Story 12")).toBeInTheDocument();
     expect(within(dialog).getAllByRole("link")).toHaveLength(12);
   });
 
@@ -788,7 +803,7 @@ describe("WorldPulse interactions", () => {
 
     render(<WorldPulseApp MapComponent={TestMap} />);
 
-    await screen.findByRole("heading", { name: localHeadline });
+    await screen.findByRole("heading", { name: globalHeadline });
     fireEvent.click(screen.getByRole("button", { name: "Top Stories" }));
     const dialog = screen.getByRole("dialog", { name: "Top Stories" });
     expect(
@@ -913,7 +928,7 @@ describe("WorldPulse interactions", () => {
     ).not.toBeInTheDocument();
   });
 
-  it("uses the prepared world and immediately refreshes the selected country", async () => {
+  it("uses the prepared world without a second selected-country request", async () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input);
       if (url === "/countries.geojson") {
@@ -968,7 +983,7 @@ describe("WorldPulse interactions", () => {
       requestedUrls.some(
         (url) => url.includes("country=Canada") && url.includes("fresh=1"),
       ),
-    ).toBe(true);
+    ).toBe(false);
     expect(requestedUrls).not.toContain("/api/live-news?scope=global");
     expect(
       await screen.findByRole("button", { name: "Top Stories" }),
@@ -976,6 +991,117 @@ describe("WorldPulse interactions", () => {
     expect(
       screen.queryByRole("button", { name: "Global feed" }),
     ).not.toBeInTheDocument();
+  });
+
+  it("opens Canada and the United States immediately from the server snapshot", async () => {
+    const countries = [
+      { mapId: "124", name: "Canada", iso2: "CA" },
+      { mapId: "840", name: "United States", iso2: "US" },
+    ];
+    const initialWorld = preparedWorldPayload(countries, {
+      Canada: [liveArticleFor("Canada")],
+      "United States": [liveArticleFor("United States")],
+    });
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      if (String(input) === "/countries.geojson") {
+        return Response.json({
+          features: countries.map((country) => ({
+            id: country.mapId,
+            properties: { name: country.name },
+          })),
+        });
+      }
+      return new Response("Unexpected client story request", { status: 500 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(
+      <WorldPulseApp
+        MapComponent={TestMap}
+        initialWorld={initialWorld}
+      />,
+    );
+
+    expect(
+      await screen.findByRole("heading", { name: liveArticleFor("Canada").title }),
+    ).toBeInTheDocument();
+    fireEvent.click(
+      screen.getByRole("button", { name: "Select United States on map" }),
+    );
+    expect(
+      screen.getByRole("heading", {
+        name: liveArticleFor("United States").title,
+      }),
+    ).toBeInTheDocument();
+    expect(
+      fetchMock.mock.calls.some(([input]) =>
+        String(input).includes("country="),
+      ),
+    ).toBe(false);
+  });
+
+  it("keeps the last complete snapshot when a refresh is incomplete", async () => {
+    const countries = [
+      { mapId: "124", name: "Canada", iso2: "CA" },
+      { mapId: "840", name: "United States", iso2: "US" },
+    ];
+    const initialWorld = preparedWorldPayload(countries, {
+      Canada: [liveArticleFor("Canada")],
+      "United States": [liveArticleFor("United States")],
+    });
+    const incompleteCanadaHeadline = "Canada incomplete replacement";
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === "/countries.geojson") {
+        return Response.json({
+          features: countries.map((country) => ({
+            id: country.mapId,
+            properties: { name: country.name },
+          })),
+        });
+      }
+      if (url.includes("scope=prepared-world")) {
+        return preparedWorldResponse([countries[0]], {
+          Canada: [
+            {
+              ...liveArticleFor("Canada"),
+              id: "canada-incomplete",
+              title: incompleteCanadaHeadline,
+            },
+          ],
+        });
+      }
+      return new Response("Unexpected request", { status: 500 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(
+      <WorldPulseApp
+        MapComponent={TestMap}
+        initialWorld={initialWorld}
+      />,
+    );
+    await screen.findByRole("heading", { name: liveArticleFor("Canada").title });
+    fireEvent.click(screen.getByRole("button", { name: "Refresh" }));
+    await waitFor(() =>
+      expect(
+        fetchMock.mock.calls.some(([input]) =>
+          String(input).includes("scope=prepared-world"),
+        ),
+      ).toBe(true),
+    );
+
+    expect(
+      screen.queryByRole("heading", { name: incompleteCanadaHeadline }),
+    ).not.toBeInTheDocument();
+    fireEvent.click(
+      screen.getByRole("button", { name: "Select United States on map" }),
+    );
+    expect(
+      screen.getByRole("heading", {
+        name: liveArticleFor("United States").title,
+      }),
+    ).toBeInTheDocument();
   });
 
   it("keeps a country neutral when prepared reporting is unavailable", async () => {
@@ -1020,11 +1146,10 @@ describe("WorldPulse interactions", () => {
       screen.getByRole("button", { name: "Select Spain on map" }),
     );
     expect(
-      fetchMock.mock.calls.some(([input]) => {
-        const url = String(input);
-        return url.includes("country=Spain") && url.includes("fresh=1");
-      }),
-    ).toBe(true);
+      fetchMock.mock.calls.some(([input]) =>
+        String(input).includes("country=Spain"),
+      ),
+    ).toBe(false);
     expect(
       await screen.findByText("No recent news for Spain"),
     ).toBeInTheDocument();
@@ -1089,7 +1214,7 @@ describe("WorldPulse interactions", () => {
     ).toBeInTheDocument();
   });
 
-  it("refreshes map-loaded country reporting on map click", async () => {
+  it("opens map-loaded country reporting without fetching on click", async () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input);
       if (url === "/countries.geojson") {
@@ -1138,14 +1263,11 @@ describe("WorldPulse interactions", () => {
         name: liveArticleFor("Senegal").title,
       }),
     ).toBeInTheDocument();
-    await waitFor(() =>
-      expect(
-        fetchMock.mock.calls.filter(([input]) => {
-          const url = String(input);
-          return url.includes("country=Senegal") && url.includes("fresh=1");
-        }).length,
-      ).toBeGreaterThan(requestsBeforeClick),
-    );
+    expect(
+      fetchMock.mock.calls.filter(([input]) =>
+        String(input).includes("country=Senegal"),
+      ).length,
+    ).toBe(requestsBeforeClick);
   });
 
   it("opens Egypt by its numeric map id and renders Arabic reporting correctly", async () => {
@@ -1225,14 +1347,12 @@ describe("WorldPulse interactions", () => {
     const egyptRequestsAfterClick = fetchMock.mock.calls.filter(([input]) =>
       String(input).includes("country=Egypt"),
     );
-    expect(egyptRequestsAfterClick.length).toBeGreaterThan(
-      egyptRequestsBeforeClick,
-    );
+    expect(egyptRequestsAfterClick.length).toBe(egyptRequestsBeforeClick);
     expect(
       egyptRequestsAfterClick.some(([input]) =>
         String(input).includes("fresh=1"),
       ),
-    ).toBe(true);
+    ).toBe(false);
   });
 
   it("keeps the loading screen up until the complete country index is ready", async () => {
@@ -1623,12 +1743,6 @@ describe("WorldPulse interactions", () => {
     const mapHeadline = "Canada trade exports rise after a new market agreement";
     const countryHeadline =
       "Canada military forces clash near a disputed border base";
-    let resolveCountryFeed:
-      | ((response: Response) => void)
-      | undefined;
-    const countryFeedResponse = new Promise<Response>((resolve) => {
-      resolveCountryFeed = resolve;
-    });
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input);
       if (url === "/countries.geojson") {
@@ -1643,9 +1757,9 @@ describe("WorldPulse interactions", () => {
             Canada: [
               {
                 ...liveArticleFor("Canada"),
-                id: "canada-map-economy",
-                title: mapHeadline,
-                publishedAt: "2026-07-25T00:00:00.000Z",
+                id: "canada-country-conflict",
+                title: countryHeadline,
+                publishedAt: "2026-07-25T01:00:00.000Z",
               },
             ],
           },
@@ -1673,11 +1787,29 @@ describe("WorldPulse interactions", () => {
           articles: [],
         });
       }
-      return countryFeedResponse;
+      return new Response("Unavailable", { status: 503 });
     });
     vi.stubGlobal("fetch", fetchMock);
 
-    render(<WorldPulseApp MapComponent={TestMap} />);
+    const initialWorld = preparedWorldPayload(
+      [{ mapId: "124", name: "Canada", iso2: "CA" }],
+      {
+        Canada: [
+          {
+            ...liveArticleFor("Canada"),
+            id: "canada-map-economy",
+            title: mapHeadline,
+            publishedAt: "2026-07-25T00:00:00.000Z",
+          },
+        ],
+      },
+    );
+    render(
+      <WorldPulseApp
+        MapComponent={TestMap}
+        initialWorld={initialWorld}
+      />,
+    );
 
     await screen.findByText("Live country index complete");
     expect(
@@ -1687,26 +1819,6 @@ describe("WorldPulse interactions", () => {
       "Economy",
     );
     fireEvent.click(screen.getByRole("button", { name: "Refresh" }));
-    await act(async () => {
-      resolveCountryFeed?.(
-        Response.json({
-          countryName: "Canada",
-          scope: "country",
-          generatedAt: "2026-07-25T02:00:00.000Z",
-          refreshAfterSeconds: 600,
-          provider: "Test live index",
-          articles: [
-            {
-              ...liveArticleFor("Canada"),
-              id: "canada-country-conflict",
-              title: countryHeadline,
-              publishedAt: "2026-07-25T01:00:00.000Z",
-            },
-          ],
-        }),
-      );
-      await countryFeedResponse;
-    });
     expect(
       await screen.findByRole("heading", { name: countryHeadline }),
     ).toBeInTheDocument();

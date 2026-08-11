@@ -4,6 +4,7 @@ import { gzipSync } from "node:zlib";
 import {
   MAX_PREPARED_GLOBAL_ARTICLES,
   MAX_PREPARED_COUNTRY_EVENTS,
+  mergePreparedCountryFeedSnapshots,
   prepareCompleteWorldSnapshot,
 } from "@/lib/world-snapshot";
 import {
@@ -150,6 +151,48 @@ describe("prepared minute world state", () => {
 
   it("allows up to eight local events per country", () => {
     expect(MAX_PREPARED_COUNTRY_EVENTS).toBeGreaterThan(6);
+  });
+
+  it("keeps recent last-known-good country stories when a fresh feed is thin", () => {
+    const generatedAt = new Date().toISOString();
+    const directory: MapCountry[] = [
+      { mapId: "124", name: "Canada", iso2: "CA", events: [] },
+    ];
+    const previous = prepareCompleteWorldSnapshot(
+      {
+        scope: "global",
+        countryName: null,
+        generatedAt,
+        refreshAfterSeconds: 60,
+        provider: "Live providers",
+        articles: [],
+      },
+      [{
+        countryName: "Canada",
+        generatedAt,
+        available: true,
+        articles: [liveArticle("canada-current", "Canada current story")],
+      }],
+      directory,
+      generatedAt,
+    ).countryFeeds;
+    const fresh = {
+      Canada: {
+        ...previous.Canada,
+        events: [],
+        updatedAt: new Date(Date.now() + 60_000).toISOString(),
+      },
+    };
+
+    const merged = mergePreparedCountryFeedSnapshots(
+      fresh,
+      previous,
+      ["Canada"],
+    );
+
+    expect(merged.Canada.events).toHaveLength(1);
+    expect(merged.Canada.events[0]?.headline).toBe("Canada current story");
+    expect(merged.Canada.updatedAt).toBe(fresh.Canada.updatedAt);
   });
 
   it("decodes an explicitly compressed snapshot response", async () => {

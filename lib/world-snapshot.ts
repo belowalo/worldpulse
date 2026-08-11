@@ -28,6 +28,36 @@ export interface PreparedCountryFeed {
 // country feeds remain independently complete.
 export const MAX_PREPARED_GLOBAL_ARTICLES = 30;
 export const MAX_PREPARED_COUNTRY_EVENTS = 8;
+export const PREPARED_STORY_RETENTION_MS = 7 * 24 * 60 * 60 * 1_000;
+
+export function mergePreparedCountryFeedSnapshots(
+  freshFeeds: Record<string, PreparedNewsFeed>,
+  previousFeeds: Record<string, PreparedNewsFeed>,
+  countryNames: string[],
+  now = Date.now(),
+) {
+  const cutoff = now - PREPARED_STORY_RETENTION_MS;
+  const merged: Record<string, PreparedNewsFeed> = {};
+  for (const countryName of countryNames) {
+    const fresh = freshFeeds[countryName];
+    const previous = previousFeeds[countryName];
+    if (!fresh && !previous) continue;
+    const base = fresh ?? previous;
+    merged[countryName] = {
+      ...base,
+      events: mergeEventFeeds(
+        fresh?.events ?? [],
+        previous?.events ?? [],
+      ).filter((event) => {
+        const updatedAt = Date.parse(event.lastUpdatedAt);
+        return Number.isFinite(updatedAt) && updatedAt >= cutoff;
+      }),
+      loading: false,
+      error: null,
+    };
+  }
+  return merged;
+}
 
 export function applyDetectedGeography(
   event: Event,

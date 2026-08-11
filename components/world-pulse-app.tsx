@@ -9,15 +9,20 @@ import {
   useState,
   useTransition,
   type ComponentType,
+  type ReactNode,
 } from "react";
 import {
-  articlesMentioningCountry,
   buildLiveEvents,
   enrichEventWithCoverage,
   eventsDescribeSameOccurrence,
   mergeCanonicalEvents,
   mergeEventFeeds,
 } from "@/lib/live-news";
+import {
+  decodePreparedWorldPayload,
+  isCompletePreparedWorld,
+  isPreparedWorldFresh,
+} from "@/lib/prepared-world";
 import {
   biasDistributionForArticles,
   publisherBiasRating,
@@ -32,6 +37,7 @@ import {
   type MapNewsPayload,
   type MapCountry,
   type PreparedWorldNewsPayload,
+  type PreparedWorldNewsWirePayload,
 } from "@/lib/types";
 import {
   countryPulses,
@@ -39,7 +45,6 @@ import {
 } from "@/lib/seed-data";
 import { categoryColor } from "@/lib/scoring";
 import {
-  decodePreparedWorldNews,
   isPreparedWorldNewsWire,
   parsePreparedWorldResponseBytes,
 } from "@/lib/snapshot-transport";
@@ -97,7 +102,6 @@ const EMPTY_FEED: FeedState = {
   error: null,
 };
 
-const MAX_REMEMBERED_COUNTRY_FEEDS = 8;
 const INITIAL_VISIBLE_EVENT_LIMIT = 40;
 const LIVE_REQUEST_TIMEOUT_MS = 30_000;
 const WORLD_BATCH_REQUEST_TIMEOUT_MS = 60_000;
@@ -108,11 +112,12 @@ let worldSnapshotFetchIdentity: typeof fetch | null = null;
 let preparedWorldPromise: Promise<PreparedWorldNewsPayload> | null = null;
 let preparedWorldFetchIdentity: typeof fetch | null = null;
 
-function loadPreparedWorld() {
+function loadPreparedWorld({ fresh = false }: { fresh?: boolean } = {}) {
   if (preparedWorldFetchIdentity !== fetch) {
     preparedWorldPromise = null;
     preparedWorldFetchIdentity = fetch;
   }
+  if (fresh) preparedWorldPromise = null;
   const supportsCompressedSnapshots =
     typeof globalThis.DecompressionStream !== "undefined";
   const preparedWorldUrl = supportsCompressedSnapshots
@@ -126,17 +131,14 @@ function loadPreparedWorld() {
     }
     const responseBytes = new Uint8Array(await response.arrayBuffer());
     const responsePayload = await parsePreparedWorldResponseBytes(responseBytes);
-    const payload = isPreparedWorldNewsWire(responsePayload)
-      ? decodePreparedWorldNews(responsePayload)
-      : (responsePayload as PreparedWorldNewsPayload);
-    if (
-      payload.scope !== "prepared-world" ||
-      !payload.globalFeed ||
-      !payload.countryFeeds
-    ) {
-      throw new Error("The minute world state is invalid.");
-    }
-    return payload;
+    return decodePreparedWorldPayload(
+      isPreparedWorldNewsWire(responsePayload)
+        ? responsePayload
+        : (responsePayload as PreparedWorldNewsPayload),
+    );
+  }).catch((error) => {
+    preparedWorldPromise = null;
+    throw error;
   });
   return preparedWorldPromise;
 }
@@ -197,20 +199,6 @@ function chunkItems<T>(items: T[], size: number) {
   return chunks;
 }
 
-function rememberCountryFeed(
-  feeds: Record<string, FeedState>,
-  countryName: string,
-  feed: FeedState,
-) {
-  const next = { ...feeds };
-  delete next[countryName];
-  next[countryName] = feed;
-  while (Object.keys(next).length > MAX_REMEMBERED_COUNTRY_FEEDS) {
-    delete next[Object.keys(next)[0]];
-  }
-  return next;
-}
-
 function coverageIsFresh(coverage?: CoverageState) {
   if (!coverage?.payload || !coverage.fetchedAt) return false;
   const lifetime =
@@ -244,7 +232,7 @@ const initialCountry =
   countryMetadata[0];
 
 const formatTime = (value: string) =>
-  new Intl.DateTimeFormat(undefined, {
+  new Intl.DateTimeFormat("en-US", {
     month: "short",
     day: "numeric",
     hour: "numeric",
@@ -698,6 +686,65 @@ function MethodologyModal({ onClose }: { onClose: () => void }) {
   );
 }
 
+function NewsModalShell({
+  children,
+  description,
+  eyebrow,
+  onClose,
+  title,
+  titleId,
+}: {
+  children: ReactNode;
+  description: string;
+  eyebrow: string;
+  onClose: () => void;
+  title: string;
+  titleId: string;
+}) {
+  return (
+    <div
+      className="fixed inset-0 z-50 overflow-y-auto bg-[#04070d]/97 px-4 py-4 backdrop-blur-xl sm:px-7 sm:py-7"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby={titleId}
+    >
+      <section className="mx-auto w-full max-w-7xl pb-8">
+        <header className="sticky top-0 z-20 flex items-start justify-between gap-5 rounded-2xl border border-[#2a384c] bg-[#08111d]/95 px-5 py-5 shadow-[0_18px_60px_rgba(0,0,0,0.3)] backdrop-blur-xl sm:px-6">
+          <div>
+            <div className="flex items-center gap-2">
+              <span
+                className="h-1.5 w-1.5 rounded-full bg-[#ff6874] shadow-[0_0_10px_rgba(255,104,116,0.8)]"
+                aria-hidden="true"
+              />
+              <p className="font-mono text-[9px] uppercase tracking-[0.24em] text-[#ff7b85]">
+                {eyebrow}
+              </p>
+            </div>
+            <h2
+              id={titleId}
+              className="mt-2 text-3xl font-semibold tracking-[-0.045em] text-white"
+            >
+              {title}
+            </h2>
+            <p className="mt-2 max-w-2xl text-sm leading-6 text-[#92a0b3]">
+              {description}
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            autoFocus
+            className="shrink-0 rounded-full border border-[#3a4659] bg-[#0d1724] px-4 py-2 text-xs text-[#d4dce7] transition hover:border-[#5b6c83] hover:bg-[#182335]"
+          >
+            Close
+          </button>
+        </header>
+        {children}
+      </section>
+    </div>
+  );
+}
+
 function LiveSituationModal({
   events,
   onClose,
@@ -715,40 +762,15 @@ function LiveSituationModal({
 
   const stories = events.slice(0, 12);
   return (
-    <div
-      className="fixed inset-0 z-50 overflow-y-auto bg-[#050910]/95 p-4 backdrop-blur-xl sm:p-7"
-      role="dialog"
-      aria-modal="true"
-      aria-labelledby="live-situation-title"
+    <NewsModalShell
+      titleId="live-situation-title"
+      eyebrow="Updated live"
+      title="Top Stories"
+      description="The twelve strongest current global stories, with one primary source per story for a fast, uncluttered briefing."
+      onClose={onClose}
     >
-      <section className="mx-auto w-full max-w-6xl">
-        <div className="flex items-start justify-between gap-5 border-b border-[#28364a] pb-5">
-          <div>
-            <p className="font-mono text-[9px] uppercase tracking-[0.24em] text-[#ff727d]">
-              Updated live
-            </p>
-            <h2
-              id="live-situation-title"
-              className="mt-2 text-3xl font-semibold tracking-[-0.045em] text-white"
-            >
-              Top Stories
-            </h2>
-            <p className="mt-2 max-w-2xl text-sm leading-6 text-[#92a0b3]">
-              The twelve strongest current global stories, with one primary source
-              per story for a fast, uncluttered briefing.
-            </p>
-          </div>
-          <button
-            type="button"
-            onClick={onClose}
-            autoFocus
-            className="rounded-full border border-[#3a4659] px-4 py-2 text-xs text-[#cad2dd] transition hover:bg-[#1a2537]"
-          >
-            Close
-          </button>
-        </div>
         {stories.length ? (
-          <div className="mt-6 grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+          <div className="mt-5 grid gap-4 md:grid-cols-2 xl:grid-cols-3">
             {stories.map((event, index) => {
               const source =
                 event.articles.find((article) => article.imageUrl) ??
@@ -756,8 +778,8 @@ function LiveSituationModal({
               const content = (
                 <div className="relative z-10 flex min-h-64 flex-col p-5">
                   <div className="flex items-center justify-between gap-3">
-                    <span className="font-mono text-[9px] uppercase tracking-[0.18em] text-[#718197]">
-                      Situation {String(index + 1).padStart(2, "0")}
+                    <span className="font-mono text-[9px] uppercase tracking-[0.18em] text-[#8593a6]">
+                      Story {String(index + 1).padStart(2, "0")}
                     </span>
                     <span
                       className="rounded-full border px-2 py-1 font-mono text-[8px] uppercase tracking-[0.12em]"
@@ -838,11 +860,10 @@ function LiveSituationModal({
           </div>
         ) : (
           <div className="mt-6 rounded-2xl border border-dashed border-[#34445a] p-12 text-center text-sm text-[#8996a8]">
-            The live situation feed is still settling. Try again shortly.
+            Top stories are still settling. Try again shortly.
           </div>
         )}
-      </section>
-    </div>
+    </NewsModalShell>
   );
 }
 
@@ -874,15 +895,6 @@ function formatViewerCount(value: number) {
     notation: value >= 1_000 ? "compact" : "standard",
     maximumFractionDigits: 1,
   }).format(value);
-}
-
-function liveCoverageSummary(video: LiveVideo) {
-  const newsroom = video.newsroomName ?? video.channelName;
-  const introduction = `${newsroom} is currently broadcasting “${video.title}.”`;
-  const detail = video.coverageDescription
-    ? `The broadcaster describes the live coverage this way: ${video.coverageDescription.replace(/[.!?]?$/, ".")}`
-    : "The broadcaster has not published a more detailed description for this live feed.";
-  return `${introduction} ${detail} This summary updates automatically when the newsroom changes its live listing.`;
 }
 
 function LiveNewsDirectory() {
@@ -1062,7 +1074,7 @@ function LiveNewsDirectory() {
       ) : null}
 
       <div className="mt-4 grid gap-5 xl:grid-cols-[minmax(0,1fr)_390px]">
-        <div className="overflow-hidden rounded-2xl border border-[#313d50] bg-black shadow-2xl">
+        <div className="overflow-hidden rounded-2xl border border-[#2a394e] bg-black shadow-[0_18px_60px_rgba(0,0,0,0.3)]">
           <div className="aspect-video">
             <iframe
               key={selectedVideo.id}
@@ -1101,20 +1113,9 @@ function LiveNewsDirectory() {
               </a>
             </div>
           </div>
-          <div
-            className="border-t border-[#273244] bg-[#0c1420] px-4 py-4"
-            aria-live="polite"
-          >
-            <div className="font-mono text-[8px] uppercase tracking-[0.16em] text-[#73e2cc]">
-              What this stream is covering
-            </div>
-            <p className="mt-2 text-xs leading-5 text-[#aab5c4]">
-              {liveCoverageSummary(selectedVideo)}
-            </p>
-          </div>
         </div>
 
-        <aside className="rounded-2xl border border-[#273549] bg-[#09111c] p-4">
+        <aside className="rounded-2xl border border-[#2a394e] bg-[#0b131f] p-4 shadow-[0_18px_60px_rgba(0,0,0,0.18)]">
           <div className="flex items-end justify-between gap-3">
             <div>
               <p className="font-mono text-[9px] uppercase tracking-[0.2em] text-[#718197]">
@@ -1134,6 +1135,7 @@ function LiveNewsDirectory() {
                 type="button"
                 key={video.id}
                 aria-label={`Watch ${video.newsroomName ?? video.channelName}: ${video.title}`}
+                aria-pressed={video.id === selectedVideo.id}
                 onClick={() =>
                   setCoverage((current) => ({
                     ...current,
@@ -1189,42 +1191,15 @@ function LiveNewsModal({ onClose }: { onClose: () => void }) {
   }, [onClose]);
 
   return (
-    <div
-      className="fixed inset-0 z-50 overflow-y-auto bg-[#04070d]/97 p-4 backdrop-blur-xl sm:p-7"
-      role="dialog"
-      aria-modal="true"
-      aria-labelledby="live-news-title"
+    <NewsModalShell
+      titleId="live-news-title"
+      eyebrow="Active broadcasts"
+      title="Live News"
+      description="See what leading international newsrooms are broadcasting now. Choose any active channel without leaving the live desk."
+      onClose={onClose}
     >
-      <section className="mx-auto w-full max-w-7xl">
-        <div className="flex items-start justify-between gap-5 border-b border-[#332b35] pb-5">
-          <div>
-            <p className="font-mono text-[9px] uppercase tracking-[0.24em] text-[#ff6874]">
-              Active broadcasts
-            </p>
-            <h2
-              id="live-news-title"
-              className="mt-2 text-3xl font-semibold tracking-[-0.045em] text-white"
-            >
-              Live News
-            </h2>
-            <p className="mt-2 max-w-2xl text-sm leading-6 text-[#92a0b3]">
-              See what leading international newsrooms are broadcasting now.
-              Choose any active channel without leaving the live desk.
-            </p>
-          </div>
-          <button
-            type="button"
-            onClick={onClose}
-            autoFocus
-            className="rounded-full border border-[#3a4659] px-4 py-2 text-xs text-[#cad2dd] transition hover:bg-[#1a2537]"
-          >
-            Close
-          </button>
-        </div>
-
-        <LiveNewsDirectory />
-      </section>
-    </div>
+      <LiveNewsDirectory />
+    </NewsModalShell>
   );
 }
 
@@ -1307,6 +1282,7 @@ function BreakingNewsBar({ events }: { events: Event[] }) {
 interface WorldPulseAppProps {
   MapComponent?: ComponentType<WorldMapProps>;
   liveUpdates?: boolean;
+  initialWorld?: PreparedWorldNewsPayload | PreparedWorldNewsWirePayload;
 }
 
 function WorldLoadingScreen({
@@ -1444,25 +1420,41 @@ function WorldLoadingScreen({
 export function WorldPulseApp({
   MapComponent = WorldMap,
   liveUpdates = true,
+  initialWorld: initialWorldPayload,
 }: WorldPulseAppProps = {}) {
+  const initialWorld = useMemo(
+    () =>
+      initialWorldPayload
+        ? decodePreparedWorldPayload(initialWorldPayload)
+        : undefined,
+    [initialWorldPayload],
+  );
   const [selectedCountry, setSelectedCountry] =
     useState<MapCountry>(initialCountry);
   const [countryDirectory, setCountryDirectory] =
     useState<MapCountry[]>(countryMetadata);
-  const [globalFeed, setGlobalFeed] = useState<FeedState>(EMPTY_FEED);
+  const [globalFeed, setGlobalFeed] = useState<FeedState>(
+    initialWorld?.globalFeed ?? EMPTY_FEED,
+  );
   const [countryFeeds, setCountryFeeds] = useState<Record<string, FeedState>>(
-    {},
+    initialWorld?.countryFeeds ?? {},
   );
   const [liveCountryFeeds, setLiveCountryFeeds] = useState<
     Record<string, FeedState>
-  >({});
+  >(initialWorld?.countryFeeds ?? {});
   const [countrySignalFeeds, setCountrySignalFeeds] = useState<
     Record<string, FeedState>
-  >({});
+  >(initialWorld?.countryFeeds ?? {});
   const [countryDirectoryReady, setCountryDirectoryReady] = useState(false);
-  const [worldScanSettled, setWorldScanSettled] = useState(!liveUpdates);
-  const [preparedCountryCount, setPreparedCountryCount] = useState(0);
-  const [globalFeedReady, setGlobalFeedReady] = useState(!liveUpdates);
+  const [worldScanSettled, setWorldScanSettled] = useState(
+    !liveUpdates || Boolean(initialWorld),
+  );
+  const [preparedCountryCount, setPreparedCountryCount] = useState(
+    initialWorld ? Object.keys(initialWorld.countryFeeds).length : 0,
+  );
+  const [globalFeedReady, setGlobalFeedReady] = useState(
+    !liveUpdates || Boolean(initialWorld),
+  );
   const [globeReady, setGlobeReady] = useState(!liveUpdates);
   const [globalView, setGlobalView] = useState(false);
   const [connectionEventId, setConnectionEventId] = useState<string | null>(
@@ -1484,8 +1476,6 @@ export function WorldPulseApp({
   const coverageRequests = useRef(new Set<string>());
   const activeCoverageRequests = useRef(0);
   const coverageGeneration = useRef(0);
-  const countryFeedCache = useRef(new Map<string, FeedState>());
-  const selectedCountryRef = useRef(initialCountry);
   const [isSwitchingCountry, startCountryTransition] = useTransition();
 
   const fetchGlobalNews = useCallback(async () => {
@@ -1521,90 +1511,6 @@ export function WorldPulseApp({
     }
   }, []);
 
-  const fetchCountryNews = useCallback(
-    async (
-      country: MapCountry,
-      {
-        promoteToPanel = true,
-        forceFresh = false,
-      }: { promoteToPanel?: boolean; forceFresh?: boolean } = {},
-    ) => {
-      const key = country.name;
-      if (promoteToPanel) {
-        setCountryFeeds((current) => ({
-          ...rememberCountryFeed(current, key, {
-            ...(current[key] ?? EMPTY_FEED),
-            loading: true,
-            error: null,
-          }),
-        }));
-      }
-      try {
-        const parameters = new URLSearchParams({ country: country.name });
-        if (country.iso2) parameters.set("iso2", country.iso2);
-        if (forceFresh) parameters.set("fresh", "1");
-        const response = await fetch(`/api/live-news?${parameters.toString()}`, {
-          signal: AbortSignal.timeout(LIVE_REQUEST_TIMEOUT_MS),
-        });
-        if (!response.ok) {
-          throw new Error(
-            `Local reporting for ${country.name} is temporarily unavailable.`,
-          );
-        }
-        const payload = (await response.json()) as LiveNewsPayload;
-        const countryArticles = articlesMentioningCountry(
-          payload,
-          country.name,
-        );
-        const events = buildLiveEvents(
-          { ...payload, articles: countryArticles },
-          country,
-        ).map((event) =>
-          applyDetectedGeography(event, countryDirectory, country),
-        );
-        const feed: FeedState = {
-          events,
-          updatedAt: payload.generatedAt,
-          provider: `${payload.provider} · local + international discovery`,
-          loading: false,
-          error: null,
-        };
-        countryFeedCache.current.set(key, feed);
-        setCountrySignalFeeds((current) => ({
-          ...current,
-          [key]: feed,
-        }));
-        if (
-          promoteToPanel ||
-          selectedCountryRef.current.name === country.name
-        ) {
-          setCountryFeeds((current) =>
-            rememberCountryFeed(current, key, feed),
-          );
-        }
-        return feed;
-      } catch (error) {
-        if (
-          promoteToPanel ||
-          selectedCountryRef.current.name === country.name
-        ) {
-          setCountryFeeds((current) =>
-            rememberCountryFeed(current, key, {
-              ...(current[key] ?? EMPTY_FEED),
-              loading: false,
-              error:
-                error instanceof Error
-                  ? error.message
-                  : `Local reporting for ${country.name} is temporarily unavailable.`,
-            }),
-          );
-        }
-        return null;
-      }
-    },
-    [countryDirectory],
-  );
-
   const invalidateCoverage = useCallback(() => {
     coverageGeneration.current += 1;
     coverageRequests.current.clear();
@@ -1622,10 +1528,12 @@ export function WorldPulseApp({
     } else {
       setGlobeReady(true);
     }
-    void loadPreparedWorld().catch(() => {
-      // The country scan effect retains the raw snapshot and live fallbacks.
-    });
-  }, [MapComponent, liveUpdates]);
+    if (!initialWorld) {
+      void loadPreparedWorld().catch(() => {
+        // The legacy fallback remains available outside the server-rendered app.
+      });
+    }
+  }, [MapComponent, initialWorld, liveUpdates]);
 
   useEffect(() => {
     if (!liveUpdates) return;
@@ -1671,6 +1579,21 @@ export function WorldPulseApp({
   useEffect(() => {
     if (!liveUpdates || !countryDirectoryReady) return;
     if (!countryDirectory.length) {
+      setWorldScanSettled(true);
+      return;
+    }
+    if (initialWorld) {
+      const countryNames = countryDirectory.map((country) => country.name);
+      if (!isCompletePreparedWorld(initialWorld, countryNames)) {
+        setWorldScanSettled(false);
+        return;
+      }
+      setGlobalFeed(initialWorld.globalFeed);
+      setCountryFeeds(initialWorld.countryFeeds);
+      setLiveCountryFeeds(initialWorld.countryFeeds);
+      setCountrySignalFeeds(initialWorld.countryFeeds);
+      setPreparedCountryCount(countryNames.length);
+      setGlobalFeedReady(true);
       setWorldScanSettled(true);
       return;
     }
@@ -1841,43 +1764,46 @@ export function WorldPulseApp({
     countryDirectory,
     countryDirectoryReady,
     fetchGlobalNews,
+    initialWorld,
     liveUpdates,
   ]);
 
-  useEffect(() => {
-    if (!liveUpdates) return;
-    if (!countryDirectoryReady) return;
-    const currentCountry = countryDirectory.find(
-      (country) =>
-        country.mapId === selectedCountry.mapId ||
-        country.name === selectedCountry.name,
-    );
-    if (!currentCountry) return;
-    void fetchCountryNews(currentCountry, { forceFresh: true });
-  }, [
-    countryDirectory,
-    countryDirectoryReady,
-    fetchCountryNews,
-    liveUpdates,
-    selectedCountry,
-  ]);
-
-  useEffect(() => {
-    if (!liveUpdates) return;
-    const refreshTimer = window.setInterval(() => {
+  const refreshPreparedWorldFromServer = useCallback(async () => {
+    if (!countryDirectoryReady || !countryDirectory.length) return false;
+    try {
+      const prepared = await loadPreparedWorld({ fresh: true });
+      const countryNames = countryDirectory.map((country) => country.name);
+      if (
+        !isCompletePreparedWorld(prepared, countryNames) ||
+        !isPreparedWorldFresh(prepared)
+      ) {
+        return false;
+      }
+      setGlobalFeed(prepared.globalFeed);
+      setCountryFeeds(prepared.countryFeeds);
+      setLiveCountryFeeds(prepared.countryFeeds);
+      setCountrySignalFeeds(prepared.countryFeeds);
+      setPreparedCountryCount(countryNames.length);
+      setGlobalFeedReady(true);
+      setWorldScanSettled(true);
       invalidateCoverage();
-      if (globalView || globalFeed.updatedAt) void fetchGlobalNews();
-      void fetchCountryNews(selectedCountry, { forceFresh: true });
-    }, 600_000);
+      return true;
+    } catch {
+      return false;
+    }
+  }, [countryDirectory, countryDirectoryReady, invalidateCoverage]);
+
+  useEffect(() => {
+    if (!liveUpdates || !initialWorld || !countryDirectoryReady) return;
+    const refreshTimer = window.setInterval(() => {
+      void refreshPreparedWorldFromServer();
+    }, 60_000);
     return () => window.clearInterval(refreshTimer);
   }, [
-    fetchCountryNews,
-    fetchGlobalNews,
-    globalFeed.updatedAt,
-    globalView,
-    invalidateCoverage,
+    countryDirectoryReady,
+    initialWorld,
     liveUpdates,
-    selectedCountry,
+    refreshPreparedWorldFromServer,
   ]);
 
   const mapCountries = useMemo(
@@ -2267,14 +2193,7 @@ export function WorldPulseApp({
           candidate.mapId === country.mapId ||
           candidate.name === country.name,
       ) ?? country;
-    selectedCountryRef.current = resolvedCountry;
     invalidateCoverage();
-    const cachedFeed = countryFeedCache.current.get(resolvedCountry.name);
-    if (cachedFeed) {
-      setCountryFeeds((current) =>
-        rememberCountryFeed(current, resolvedCountry.name, cachedFeed),
-      );
-    }
     startCountryTransition(() => {
       setSelectedCountry(resolvedCountry);
       setGlobalView(false);
@@ -2323,9 +2242,7 @@ export function WorldPulseApp({
     !hasActiveFilters;
   const refreshActiveFeed = () => {
     invalidateCoverage();
-    void (globalView
-      ? fetchGlobalNews()
-      : fetchCountryNews(activeCountry));
+    void refreshPreparedWorldFromServer();
   };
 
   const initialWorldReady =

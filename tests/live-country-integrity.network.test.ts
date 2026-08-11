@@ -18,6 +18,7 @@ import type {
 const runLiveAudit = process.env.WORLD_PULSE_LIVE_QA === "1";
 const baseUrl = process.env.WORLD_PULSE_QA_URL ?? "http://localhost:3000";
 const ALLOWED_NEUTRAL_MAP_AREAS = new Set([
+  "Antarctica",
   "Fr. S. Antarctic Lands",
   "Heard I. and McDonald Is.",
 ]);
@@ -106,7 +107,7 @@ describe.skipIf(!runLiveAudit)("live country integrity", () => {
           articlesMentioningCountry(payload, country.name).filter(
             (article) =>
               Date.now() - Date.parse(article.publishedAt) <=
-              8 * 24 * 3_600_000,
+              7 * 24 * 3_600_000,
           ),
         ] as const;
       }),
@@ -186,7 +187,7 @@ describe.skipIf(!runLiveAudit)("live country integrity", () => {
       }
       const ageHours =
         (Date.now() - Date.parse(topEvent.lastUpdatedAt)) / 3_600_000;
-      if (!Number.isFinite(ageHours) || ageHours > 8 * 24) {
+      if (!Number.isFinite(ageHours) || ageHours > 7 * 24) {
         failures.push(`${country.name}: top event is not current`);
       }
       if (

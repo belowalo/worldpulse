@@ -9,6 +9,7 @@ import {
 } from "../db/news-cache";
 import { countryCodeForName } from "../lib/country-locale";
 import {
+  mergePreparedCountryFeedSnapshots,
   prepareCompleteWorldSnapshotFromFeeds,
   prepareWorldSnapshotFeeds,
 } from "../lib/world-snapshot";
@@ -92,6 +93,20 @@ function preparedCountryChunkKey(batchIndex: number) {
   return `world/countries/${batchIndex}.json`;
 }
 
+async function readPreparedCountryChunk(
+  snapshots: R2Bucket,
+  chunkIndex: number,
+) {
+  const object = await snapshots.get(preparedCountryChunkKey(chunkIndex));
+  if (!object) return null;
+  try {
+    const chunk = JSON.parse(await object.text()) as PreparedCountryChunk;
+    return chunk?.countryFeeds ? chunk : null;
+  } catch {
+    return null;
+  }
+}
+
 async function readCompletePreparedCountryFeeds(
   snapshots: R2Bucket,
   directory: MapCountry[],
@@ -101,14 +116,8 @@ async function readCompletePreparedCountryFeeds(
   );
   const feeds: Record<string, PreparedNewsFeed> = {};
   for (let batchIndex = 0; batchIndex < batchCount; batchIndex += 1) {
-    const object = await snapshots.get(preparedCountryChunkKey(batchIndex));
-    if (!object) continue;
-    try {
-      const chunk = JSON.parse(await object.text()) as PreparedCountryChunk;
-      Object.assign(feeds, chunk.countryFeeds);
-    } catch {
-      // The completeness check below prevents a malformed chunk from release.
-    }
+    const chunk = await readPreparedCountryChunk(snapshots, batchIndex);
+    if (chunk) Object.assign(feeds, chunk.countryFeeds);
   }
   const missingCountries = directory.filter(
     (country) => !feeds[country.name],
@@ -300,15 +309,25 @@ async function refreshPreparedCountryBatch(
     (chunkIndex + 1) * PREPARED_WORLD_CHUNK_SIZE,
   );
   const expectedCountryNames = new Set(chunkCountries);
+  const previousChunk = await readPreparedCountryChunk(
+    env.SNAPSHOTS,
+    chunkIndex,
+  );
   const consolidated = collectStoredMapCountries(
     await readStoredMapFeeds(env.DB),
     expectedCountryNames,
   );
-  const consolidatedNames = new Set(
-    consolidated.countries.map((country) => country.countryName),
+  const freshFeeds = prepareWorldSnapshotFeeds(
+    consolidated.countries,
+    directory,
+  );
+  const countryFeeds = mergePreparedCountryFeedSnapshots(
+    freshFeeds,
+    previousChunk?.countryFeeds ?? {},
+    chunkCountries,
   );
   const missingCountries = chunkCountries.filter(
-    (countryName) => !consolidatedNames.has(countryName),
+    (countryName) => !countryFeeds[countryName],
   );
   if (missingCountries.length) {
     throw new Error(
@@ -318,10 +337,7 @@ async function refreshPreparedCountryBatch(
   const generatedAt = new Date().toISOString();
   const chunk: PreparedCountryChunk = {
     generatedAt,
-    countryFeeds: prepareWorldSnapshotFeeds(
-      consolidated.countries,
-      directory,
-    ),
+    countryFeeds,
   };
   await env.SNAPSHOTS.put(
     preparedCountryChunkKey(chunkIndex),
@@ -379,6 +395,15 @@ async function refreshPreparedCountryBatchSafely(env: Env) {
       }),
     );
   }
+}
+
+async function refreshMinuteWorldState(
+  env: Env,
+  refreshGlobal = false,
+) {
+  if (refreshGlobal) await refreshStoredGlobalFeedSafely(env);
+  await refreshPreparedCountryBatchSafely(env);
+  await refreshPreparedWorldSafely(env);
 }
 
 async function handlePreparedWorld(
@@ -448,8 +473,7 @@ async function handlePreparedWorld(
       current = await env.SNAPSHOTS.get(PREPARED_WORLD_KEY);
     }
   } else if (age >= PREPARED_WORLD_FRESH_MS) {
-    ctx.waitUntil(refreshPreparedWorldSafely(env));
-    ctx.waitUntil(refreshPreparedCountryBatchSafely(env));
+    ctx.waitUntil(refreshMinuteWorldState(env));
   }
   if (!current) {
     return Response.json(
@@ -839,12 +863,12 @@ const worker = {
     ctx: ExecutionContext,
   ) {
     const minute = Math.floor(Date.now() / 60_000);
-    if (minute % PREPARED_GLOBAL_REFRESH_INTERVAL_MINUTES === 0) {
-      ctx.waitUntil(refreshStoredGlobalFeedSafely(env));
-      return;
-    }
-    ctx.waitUntil(refreshPreparedWorldSafely(env));
-    ctx.waitUntil(refreshPreparedCountryBatchSafely(env));
+    ctx.waitUntil(
+      refreshMinuteWorldState(
+        env,
+        minute % PREPARED_GLOBAL_REFRESH_INTERVAL_MINUTES === 0,
+      ),
+    );
   },
 };
 
