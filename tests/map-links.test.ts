@@ -91,6 +91,24 @@ describe("multi-country map links", () => {
         countrySearchTerms("Kiribati"),
       ),
     ).toBe(true);
+    expect(
+      textMatchesCountry(
+        "Mariehamn expands ferry service across the islands",
+        countrySearchTerms("Aland"),
+      ),
+    ).toBe(true);
+    expect(
+      textMatchesCountry(
+        "Saipan officials publish the new CNMI budget",
+        countrySearchTerms("N. Mariana Is."),
+      ),
+    ).toBe(true);
+    expect(
+      textMatchesCountry(
+        "Charlotte Amalie begins a USVI port upgrade",
+        countrySearchTerms("U.S. Virgin Is."),
+      ),
+    ).toBe(true);
   });
 
   it("recognizes the countries named in an international event", () => {

@@ -9,6 +9,7 @@ export const EXPECTED_EMPTY_COUNTRIES = new Set([
   "Antarctica",
   "Fr. S. Antarctic Lands",
   "Heard I. and McDonald Is.",
+  "S. Geo. and S. Sandw. Is.",
 ]);
 
 export function buildWorldDiagnostics(

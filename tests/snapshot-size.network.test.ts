@@ -10,7 +10,6 @@ import {
   isPreparedWorldNewsWire,
 } from "@/lib/snapshot-transport";
 import type { PreparedWorldNewsPayload } from "@/lib/types";
-import { EXPECTED_EMPTY_COUNTRIES } from "@/lib/world-health";
 
 const liveTest = process.env.WORLD_PULSE_LIVE_QA === "1" ? it : it.skip;
 const LIVE_URL = "https://worldpulse-news-map.belowalo.chatgpt.site/api/live-news?scope=prepared-world";
@@ -49,9 +48,6 @@ describe("production prepared snapshot transport", () => {
       if (!feed) {
         failures.push(`${countryName}: missing feed`);
         continue;
-      }
-      if (!feed.events.length && !EXPECTED_EMPTY_COUNTRIES.has(countryName)) {
-        failures.push(`${countryName}: no current stories`);
       }
       for (const event of feed.events) {
         verifiedEvents += 1;

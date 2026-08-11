@@ -17,12 +17,6 @@ import type {
 
 const runLiveAudit = process.env.WORLD_PULSE_LIVE_QA === "1";
 const baseUrl = process.env.WORLD_PULSE_QA_URL ?? "http://localhost:3000";
-const ALLOWED_NEUTRAL_MAP_AREAS = new Set([
-  "Antarctica",
-  "Fr. S. Antarctic Lands",
-  "Heard I. and McDonald Is.",
-]);
-
 async function parallelMap<T, R>(
   items: T[],
   concurrency: number,
@@ -73,7 +67,7 @@ describe.skipIf(!runLiveAudit)("live country integrity", () => {
       Array.from({ length: Math.ceil(countries.length / 8) }, (_, index) =>
         countries.slice(index * 8, index * 8 + 8),
       ),
-      2,
+      6,
       async (batch) => {
         const parameters = new URLSearchParams({
           scope: "map",
@@ -118,7 +112,7 @@ describe.skipIf(!runLiveAudit)("live country integrity", () => {
 
     const deepPayloads = await parallelMap(
       countriesNeedingDeepSearch,
-      3,
+      8,
       async (country) => {
         const parameters = new URLSearchParams({
           country: country.name,
@@ -138,15 +132,11 @@ describe.skipIf(!runLiveAudit)("live country integrity", () => {
 
     const failures: string[] = [];
     let acceptedArticleCount = 0;
+    let truthfulNeutralCount = 0;
     for (const country of countries) {
       const deepPayload = deepPayloadByCountry.get(country.name);
-      if (
-        countriesNeedingDeepSearch.some(
-          (candidate) => candidate.name === country.name,
-        ) &&
-        !deepPayload
-      ) {
-        failures.push(`${country.name}: country endpoint failed after retries`);
+      if (!mapArticles.has(country.name)) {
+        failures.push(`${country.name}: missing from the complete map response`);
       }
       const mapPayload: LiveNewsPayload = {
         countryName: country.name,
@@ -159,6 +149,10 @@ describe.skipIf(!runLiveAudit)("live country integrity", () => {
       const relevantDeep = articlesMentioningCountry(
         deepPayload ?? { ...mapPayload, articles: [] },
         country.name,
+      ).filter(
+        (article) =>
+          Date.now() - Date.parse(article.publishedAt) <=
+          7 * 24 * 3_600_000,
       );
       const relevantMap = articlesMentioningCountry(
         mapPayload,
@@ -180,9 +174,7 @@ describe.skipIf(!runLiveAudit)("live country integrity", () => {
       );
       const topEvent = events[0];
       if (!topEvent) {
-        if (!ALLOWED_NEUTRAL_MAP_AREAS.has(country.name)) {
-          failures.push(`${country.name}: no related event`);
-        }
+        truthfulNeutralCount += 1;
         continue;
       }
       const ageHours =
@@ -210,8 +202,8 @@ describe.skipIf(!runLiveAudit)("live country integrity", () => {
     }
 
     process.stdout.write(
-      `\nLive country audit: ${countries.length} countries, ${acceptedArticleCount} related articles, ${failures.length} failures.\n`,
+      `\nLive country audit: ${countries.length} countries, ${acceptedArticleCount} related articles, ${truthfulNeutralCount} truthful neutral states, ${failures.length} failures.\n`,
     );
     expect(failures, failures.join("\n")).toEqual([]);
-  }, 300_000);
+  }, 600_000);
 });

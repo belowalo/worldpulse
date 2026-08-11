@@ -106,18 +106,24 @@ const GENERIC_OCCURRENCE_TOKENS = new Set([
   "victim",
 ]);
 const COUNTRY_NEWS_QUERY_OVERRIDES: Record<string, string> = {
+  "Åland Islands": "Aland Islands Mariehamn Finland",
+  "American Samoa": "American Samoa Pago Pago",
   "Antigua and Barbuda": "Antigua Barbuda St John's",
   Barbados: "Barbados Bridgetown",
   "British Indian Ocean Territory": "Diego Garcia",
   "Cook Islands": "Cook Islands Rarotonga",
+  Comoros: "Comoros Moroni",
   Dominica: "Dominica Roseau Caribbean",
   "French Polynesia": "Tahiti French Polynesia",
   Grenada: "Grenada St George's Caribbean",
   Kiribati: "Tarawa",
   "Marshall Islands": "Marshall Islands Majuro",
   Micronesia: "Micronesia Pohnpei",
+  Montserrat: "Montserrat Caribbean Brades",
   Nauru: "Nauru Yaren",
   Niue: "Niue Alofi",
+  "Northern Cyprus": "Northern Cyprus Nicosia",
+  "Northern Mariana Islands": "Northern Mariana Islands Saipan",
   Palau: "Palau Koror",
   Samoa: "Samoa Apia",
   "Saint Helena, Ascension and Tristan da Cunha": "St Helena",
@@ -125,10 +131,12 @@ const COUNTRY_NEWS_QUERY_OVERRIDES: Record<string, string> = {
   "Saint Lucia": "Saint Lucia Castries",
   "Saint Pierre and Miquelon": "Saint-Pierre-et-Miquelon",
   "Saint Vincent and the Grenadines": "Saint Vincent Grenadines Kingstown",
+  "São Tomé and Principe": "Sao Tome and Principe news",
   "Solomon Islands": "Solomon Islands Honiara",
   "South Georgia and the South Sandwich Islands": "South Georgia island",
   Tonga: "Tonga Nuku'alofa",
   Tuvalu: "Tuvalu Funafuti",
+  "U.S. Virgin Islands": "US Virgin Islands Charlotte Amalie",
   Vanuatu: "Vanuatu Port Vila",
 };
 const ENGLISH_SIGNAL_WORDS = new Set([
@@ -560,6 +568,7 @@ const CARIBBEAN_COUNTRIES = new Set([
   "Martinique", "Montserrat", "Puerto Rico", "Saint Barthélemy",
   "Saint Kitts and Nevis", "Saint Lucia", "Saint Martin", "Saint Vincent and the Grenadines",
   "Sint Maarten", "Trinidad and Tobago", "Turks and Caicos Islands", "U.S. Virgin Is.",
+  "U.S. Virgin Islands",
 ]);
 const AFRICAN_COUNTRIES = new Set([
   "Algeria", "Angola", "Benin", "Botswana", "Burkina Faso", "Burundi",

@@ -36,6 +36,8 @@ const COUNTRY_ALIASES: Record<string, string> = {
 };
 
 const COUNTRY_RELATED_TERMS: Record<string, string[]> = {
+  "Åland Islands": ["Aland Islands", "Åland", "Mariehamn"],
+  "American Samoa": ["Pago Pago", "Samoan territory"],
   Afghanistan: ["Afghan"],
   Albania: ["Albanian"],
   Algeria: ["Algerian"],
@@ -59,6 +61,7 @@ const COUNTRY_RELATED_TERMS: Record<string, string[]> = {
   Chile: ["Chilean"],
   China: ["Chinese"],
   Colombia: ["Colombian"],
+  Comoros: ["Comorian", "Moroni"],
   Croatia: ["Croatian"],
   Cuba: ["Cuban"],
   Cyprus: ["Cypriot"],
@@ -103,8 +106,11 @@ const COUNTRY_RELATED_TERMS: Record<string, string[]> = {
   "Cook Islands": ["Rarotonga"],
   "Marshall Islands": ["Majuro", "Marshallese"],
   Micronesia: ["Federated States of Micronesia", "Pohnpei", "FSM"],
+  Montserrat: ["Montserratian", "Brades", "Plymouth Montserrat"],
   Nauru: ["Yaren", "Nauruan"],
   Niue: ["Alofi", "Niuean"],
+  "Northern Cyprus": ["Turkish Cypriot", "North Cyprus"],
+  "Northern Mariana Islands": ["CNMI", "Saipan", "Marianas"],
   Palau: ["Koror", "Palauan"],
   Samoa: ["Apia", "Samoan"],
   "Solomon Islands": ["Honiara", "Solomon Islander"],
@@ -162,6 +168,7 @@ const COUNTRY_RELATED_TERMS: Record<string, string[]> = {
   "Saint Kitts and Nevis": ["Kittitian", "Nevisian", "Basseterre"],
   "Saint Lucia": ["Saint Lucian", "Castries"],
   "Saint Vincent and the Grenadines": ["Vincentian", "Kingstown"],
+  "U.S. Virgin Islands": ["USVI", "Virgin Islands", "Charlotte Amalie"],
   "Saudi Arabia": ["Saudi"],
   Senegal: ["Senegalese", "Sénégal", "Sénégalais", "Dakar"],
   Serbia: ["Serbian"],
