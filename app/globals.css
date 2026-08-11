@@ -387,6 +387,14 @@ select:focus-visible {
   scrollbar-width: thin;
 }
 
+.news-modal-scroll {
+  scrollbar-width: none;
+}
+
+.news-modal-scroll::-webkit-scrollbar {
+  display: none;
+}
+
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,

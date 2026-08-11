@@ -703,7 +703,7 @@ function NewsModalShell({
 }) {
   return (
     <div
-      className="fixed inset-0 z-50 overflow-y-auto bg-[#04070d]/97 px-4 py-4 backdrop-blur-xl sm:px-7 sm:py-7"
+      className="news-modal-scroll fixed inset-0 z-50 overflow-y-auto bg-[#04070d]/97 px-4 py-4 backdrop-blur-xl sm:px-7 sm:py-7"
       role="dialog"
       aria-modal="true"
       aria-labelledby={titleId}
@@ -734,9 +734,10 @@ function NewsModalShell({
             type="button"
             onClick={onClose}
             autoFocus
-            className="shrink-0 rounded-full border border-[#3a4659] bg-[#0d1724] px-4 py-2 text-xs text-[#d4dce7] transition hover:border-[#5b6c83] hover:bg-[#182335]"
+            aria-label="Close"
+            className="grid h-10 w-10 shrink-0 place-items-center rounded-full border border-[#3a4659] bg-[#0d1724] text-2xl font-light leading-none text-[#d4dce7] transition hover:border-[#5b6c83] hover:bg-[#182335] hover:text-white"
           >
-            Close
+            <span aria-hidden="true">×</span>
           </button>
         </header>
         {children}
@@ -1061,7 +1062,7 @@ function LiveNewsDirectory() {
           type="button"
           onClick={() => void loadNewsrooms(false)}
           disabled={coverage.refreshing}
-          className="rounded-full border border-[#3a4659] px-3 py-2 text-[9px] uppercase tracking-[0.12em] text-[#cad2dd] transition hover:bg-[#182335] disabled:cursor-wait disabled:opacity-60"
+          className="rounded-full border border-[#3a4659] bg-[#0d1724] px-4 py-2 text-xs font-medium text-[#cad2dd] transition hover:border-[#5b6c83] hover:bg-[#182335] hover:text-white disabled:cursor-wait disabled:opacity-60"
         >
           {coverage.refreshing ? "Refreshing" : "Refresh"}
         </button>

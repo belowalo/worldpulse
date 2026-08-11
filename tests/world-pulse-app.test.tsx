@@ -365,6 +365,10 @@ describe("WorldPulse interactions", () => {
     render(<WorldPulseApp MapComponent={TestMap} />);
     fireEvent.click(await screen.findByRole("button", { name: "Top Stories" }));
     const dialog = screen.getByRole("dialog", { name: "Top Stories" });
+    expect(dialog).toHaveClass("news-modal-scroll");
+    expect(
+      within(dialog).getByRole("button", { name: "Close" }),
+    ).toHaveTextContent("×");
     expect(within(dialog).getByRole("heading", { name: headline })).toBeInTheDocument();
     expect(within(dialog).getAllByRole("link")).toHaveLength(1);
     expect(
@@ -480,9 +484,11 @@ describe("WorldPulse interactions", () => {
       within(dialog).queryByText(/following diplomatic talks in Europe/),
     ).not.toBeInTheDocument();
 
-    fireEvent.click(
-      within(dialog).getByRole("button", { name: "Refresh" }),
-    );
+    const refreshButton = within(dialog).getByRole("button", {
+      name: "Refresh",
+    });
+    expect(refreshButton).not.toHaveClass("uppercase");
+    fireEvent.click(refreshButton);
     await waitFor(() => expect(directoryRequestCount).toBe(2));
     expect(
       await within(dialog).findByTitle(
