@@ -212,13 +212,52 @@ export function prepareCompleteWorldSnapshotFromFeeds(
       error: null,
     };
   }
+  const affectedCountriesByEvent = new Map<string, Set<string>>();
+  for (const event of [
+    ...globalEvents,
+    ...Object.values(countryFeeds).flatMap((feed) => feed.events),
+  ]) {
+    const affected = affectedCountriesByEvent.get(event.id) ?? new Set<string>();
+    for (const identifier of event.affectedCountries) affected.add(identifier);
+    affectedCountriesByEvent.set(event.id, affected);
+  }
+  const finalizeEventGeography = (event: Event) => {
+    const affectedCountries = [
+      ...(affectedCountriesByEvent.get(event.id) ?? event.affectedCountries),
+    ];
+    const scoringInput = {
+      ...event.scoringInput,
+      affectedCountryCount: Math.max(1, affectedCountries.length),
+    };
+    const scoring = calculateImportance(scoringInput);
+    return {
+      ...event,
+      affectedCountries,
+      geographicScope:
+        affectedCountries.length > 1
+          ? ("International" as const)
+          : event.geographicScope,
+      primaryCountry:
+        event.primaryCountry === "GLOBAL" && affectedCountries[0]
+          ? affectedCountries[0]
+          : event.primaryCountry,
+      importanceScore: scoring.score,
+      importanceLabel: scoring.label,
+      scoringComponents: scoring.components,
+      scoringInput,
+    };
+  };
+  for (const feed of Object.values(countryFeeds)) {
+    feed.events = feed.events.map(finalizeEventGeography);
+  }
+  const finalizedGlobalEvents = globalEvents.map(finalizeEventGeography);
   return {
     scope: "prepared-world",
     version: generatedAt.slice(0, 16),
     generatedAt,
     refreshAfterSeconds: 60,
     globalFeed: {
-      events: globalEvents,
+      events: finalizedGlobalEvents,
       updatedAt: globalPayload.generatedAt,
       provider: globalPayload.provider,
       loading: false,

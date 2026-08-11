@@ -225,6 +225,13 @@ describe("prepared minute world state", () => {
     const prepared = prepareCompleteWorldSnapshotFromFeeds(
       globalPayload,
       {
+        Cameroon: {
+          events: [cameroonEvent],
+          updatedAt: generatedAt,
+          provider: "Stored country feed",
+          loading: false,
+          error: null,
+        },
         Nigeria: {
           events: [cameroonEvent],
           updatedAt: generatedAt,
@@ -238,6 +245,9 @@ describe("prepared minute world state", () => {
     );
 
     expect(prepared.countryFeeds.Nigeria.events[0].affectedCountries).toContain(
+      "NG",
+    );
+    expect(prepared.countryFeeds.Cameroon.events[0].affectedCountries).toContain(
       "NG",
     );
   });
