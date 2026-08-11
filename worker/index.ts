@@ -421,6 +421,52 @@ async function refreshPreparedCountryBatchSafely(env: Env) {
   }
 }
 
+async function promoteCountriesToPreparedWorld(
+  env: Env,
+  requestedCountryNames: string[],
+) {
+  if (!requestedCountryNames.length) return;
+  const directory = loadWorldDirectory();
+  const countryIndexByName = new Map(
+    directory.map((country, index) => [country.name, index]),
+  );
+  const chunkIndexes = new Set<number>();
+  for (const countryName of requestedCountryNames) {
+    const countryIndex = countryIndexByName.get(countryName);
+    if (countryIndex !== undefined) {
+      chunkIndexes.add(Math.floor(countryIndex / PREPARED_WORLD_CHUNK_SIZE));
+    }
+  }
+  const batchesPerChunk = Math.ceil(
+    PREPARED_WORLD_CHUNK_SIZE / PREPARED_COUNTRY_REFRESH_BATCH_SIZE,
+  );
+  for (const chunkIndex of chunkIndexes) {
+    await refreshPreparedCountryBatch(
+      env,
+      chunkIndex * batchesPerChunk,
+      true,
+    );
+  }
+  await refreshPreparedWorldSafely(env);
+}
+
+async function promoteCountriesToPreparedWorldSafely(
+  env: Env,
+  requestedCountryNames: string[],
+) {
+  try {
+    await promoteCountriesToPreparedWorld(env, requestedCountryNames);
+  } catch (error) {
+    console.error(
+      JSON.stringify({
+        event: "prepared_country_promotion_failed",
+        countries: requestedCountryNames,
+        error: error instanceof Error ? error.message : "unknown error",
+      }),
+    );
+  }
+}
+
 async function refreshMinuteWorldState(
   env: Env,
   refreshGlobal = false,
@@ -744,6 +790,24 @@ async function handleCachedLiveNews(
   const cacheKey = normalizedLiveCacheKey(request);
   const requestUrl = new URL(request.url);
   const isMapSearch = requestUrl.searchParams.get("scope") === "map";
+  const requestedScope = requestUrl.searchParams.get("scope") ?? "country";
+  const requestedPreparedCountries = isMapSearch
+    ? (requestUrl.searchParams.get("countries") ?? "")
+        .split("|")
+        .map((country) => country.trim())
+        .filter(Boolean)
+    : requestedScope === "country" && requestUrl.searchParams.get("country")
+      ? [requestUrl.searchParams.get("country") as string]
+      : [];
+  const storeAndPromote = async (response: Response) => {
+    await storeLiveResponse(cache, cacheKey, response, env.DB);
+    if (requestedPreparedCountries.length) {
+      await promoteCountriesToPreparedWorldSafely(
+        env,
+        requestedPreparedCountries,
+      );
+    }
+  };
   const forceFresh = requestUrl.searchParams.get("fresh") === "1";
   const cached = await cache.match(cacheKey);
   if (forceFresh) {
@@ -773,9 +837,7 @@ async function handleCachedLiveNews(
       return responseWithCacheState(fallback, "stale-if-error");
     }
     const merged = await mergeFreshResponse(fresh, fallback);
-    ctx.waitUntil(
-      storeLiveResponse(cache, cacheKey, merged.clone(), env.DB),
-    );
+    ctx.waitUntil(storeAndPromote(merged.clone()));
     return responseWithCacheState(merged, "miss");
   }
 
@@ -850,9 +912,7 @@ async function handleCachedLiveNews(
   }
 
   const fresh = await handleLiveNews(request);
-  if (fresh.ok) {
-    ctx.waitUntil(storeLiveResponse(cache, cacheKey, fresh.clone(), env.DB));
-  }
+  if (fresh.ok) ctx.waitUntil(storeAndPromote(fresh.clone()));
   return responseWithCacheState(fresh, "miss");
 }
 
