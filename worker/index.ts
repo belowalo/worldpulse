@@ -445,6 +445,7 @@ async function handlePreparedWorld(
     );
   }
   let current = await env.SNAPSHOTS.get(PREPARED_WORLD_KEY);
+  let currentBytes: ArrayBuffer | null = null;
   const generatedAt = Date.parse(current?.customMetadata?.generatedAt ?? "");
   const age = Number.isFinite(generatedAt)
     ? Date.now() - generatedAt
@@ -502,6 +503,9 @@ async function handlePreparedWorld(
   } else if (age >= PREPARED_WORLD_FRESH_MS) {
     // Serve the last complete snapshot immediately while the next atomic
     // minute snapshot is rebuilt entirely on the server.
+    // Materialize the small compressed object before replacing the same R2
+    // key so the outgoing stream cannot contend with the background write.
+    if (current) currentBytes = await current.arrayBuffer();
     const minute = Math.floor(Date.now() / 60_000);
     ctx.waitUntil(
       refreshMinuteWorldState(
@@ -527,12 +531,14 @@ async function handlePreparedWorld(
     "X-WorldPulse-Country-Count":
       current.customMetadata?.countryCount ?? String(loadWorldDirectory().length),
   });
-  let body: ReadableStream | null = current.body;
+  let body: BodyInit | null = currentBytes ?? current.body;
   if (
     current.customMetadata?.encoding === "gzip" &&
     requestUrl.searchParams.get("plain") === "1"
   ) {
-    body = current.body.pipeThrough(new DecompressionStream("gzip"));
+    body = new Response(body).body?.pipeThrough(
+      new DecompressionStream("gzip"),
+    ) ?? null;
     headers.set("Content-Type", "application/json; charset=utf-8");
   }
   return new Response(body, { headers });
