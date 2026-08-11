@@ -1569,6 +1569,7 @@ export function WorldPulseApp({
   const [search, setSearch] = useState("");
   const [showMethodology, setShowMethodology] = useState(false);
   const [showTopics, setShowTopics] = useState(false);
+  const [showNewsPanel, setShowNewsPanel] = useState(true);
   const [showLiveSituation, setShowLiveSituation] = useState(false);
   const [showLiveNews, setShowLiveNews] = useState(false);
   const [visibleEventLimit, setVisibleEventLimit] = useState(
@@ -2345,6 +2346,7 @@ export function WorldPulseApp({
           candidate.name === country.name,
       ) ?? country;
     invalidateCoverage();
+    setShowNewsPanel(true);
     startCountryTransition(() => {
       setSelectedCountry(resolvedCountry);
       setGlobalView(false);
@@ -2451,14 +2453,14 @@ export function WorldPulseApp({
           <button
             type="button"
             onClick={() => setShowLiveNews(true)}
-            aria-label="Live News"
+            aria-label="Live Broadcasts"
             className="live-news-button-pulse inline-flex items-center gap-2 whitespace-nowrap rounded-full border border-[#df5b67] bg-[#701822] px-2.5 py-2 text-[10px] text-white transition hover:border-[#ff8b94] sm:px-4"
           >
             <span
               className="world-live-status__dot h-1.5 w-1.5 rounded-full bg-white"
               aria-hidden="true"
             />
-            <span>Live</span>
+            <span>Live Broadcasts</span>
           </button>
           <button
             type="button"
@@ -2481,8 +2483,18 @@ export function WorldPulseApp({
         </nav>
       </header>
 
-      <div className="grid min-h-[calc(100vh-6.25rem)] lg:grid-cols-[minmax(0,1fr)_420px]">
-        <section className="relative min-h-[54vh] border-b border-[#222d3e] lg:h-[calc(100vh-6.25rem)] lg:border-b-0 lg:border-r">
+      <div
+        className={`grid min-h-[calc(100vh-6.25rem)] ${
+          showNewsPanel
+            ? "lg:grid-cols-[minmax(0,1fr)_420px]"
+            : "lg:grid-cols-1"
+        }`}
+      >
+        <section
+          className={`relative min-h-[54vh] border-b border-[#222d3e] lg:h-[calc(100vh-6.25rem)] lg:border-b-0 ${
+            showNewsPanel ? "lg:border-r" : ""
+          }`}
+        >
           <MapComponent
             countries={mapCountries}
             selectedMapId={globalView ? null : selectedCountry.mapId}
@@ -2499,9 +2511,20 @@ export function WorldPulseApp({
           </span>
           <button
             type="button"
+            onClick={() => setShowNewsPanel((current) => !current)}
+            className="absolute right-4 top-4 z-10 grid h-9 w-9 place-items-center rounded-full border border-[#334055] bg-[#0d1522]/95 text-xl leading-none text-[#d4dce7] shadow-xl backdrop-blur-sm transition hover:border-[#52667f] hover:bg-[#162235]"
+            aria-label={showNewsPanel ? "Hide news panel" : "Show news panel"}
+            aria-controls="country-news-panel"
+            aria-expanded={showNewsPanel}
+            title={showNewsPanel ? "Hide news panel" : "Show news panel"}
+          >
+            <span aria-hidden="true">{showNewsPanel ? "›" : "‹"}</span>
+          </button>
+          <button
+            type="button"
             onClick={() => setShowTopics(true)}
             className="absolute bottom-4 right-4 z-10 inline-flex items-center gap-2 rounded-full border border-[#334055] bg-[#0d1522]/95 px-4 py-2.5 text-[10px] font-medium text-[#d4dce7] shadow-xl backdrop-blur-sm transition hover:border-[#52667f] hover:bg-[#162235]"
-            aria-label="Topics"
+            aria-label="Map legend"
           >
             <span className="flex items-center gap-1" aria-hidden="true">
               {CATEGORIES.slice(0, 3).map((item) => (
@@ -2512,14 +2535,16 @@ export function WorldPulseApp({
                 />
               ))}
             </span>
-            Topics
+            Map legend
           </button>
         </section>
 
-        <aside
-          className="flex min-h-[620px] flex-col bg-[#101722] lg:h-[calc(100vh-4rem)] lg:min-h-0"
-          aria-label={globalView ? "Global events" : "Country news panel"}
-        >
+        {showNewsPanel ? (
+          <aside
+            id="country-news-panel"
+            className="flex min-h-[620px] flex-col bg-[#101722] lg:h-[calc(100vh-4rem)] lg:min-h-0"
+            aria-label={globalView ? "Global events" : "Country news panel"}
+          >
           <div className="sticky top-16 z-20 border-b border-[#273246] bg-[#101722]/95 px-5 pb-4 pt-5 backdrop-blur lg:static">
             <div className="flex items-start justify-between gap-4">
               <div>
@@ -2760,7 +2785,8 @@ export function WorldPulseApp({
               </div>
             )}
           </div>
-        </aside>
+          </aside>
+        ) : null}
       </div>
       {showMethodology ? (
         <MethodologyModal onClose={() => setShowMethodology(false)} />

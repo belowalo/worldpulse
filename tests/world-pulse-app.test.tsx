@@ -236,13 +236,13 @@ describe("WorldPulse interactions", () => {
     ).not.toBeInTheDocument();
   });
 
-  it("opens the complete map legend from a compact Topics button", () => {
+  it("opens the complete map legend from a compact Map legend button", () => {
     render(<WorldPulseApp MapComponent={TestMap} liveUpdates={false} />);
 
     expect(
       screen.queryByRole("dialog", { name: "Topics and map signals" }),
     ).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Topics" }));
+    fireEvent.click(screen.getByRole("button", { name: "Map legend" }));
 
     const dialog = screen.getByRole("dialog", {
       name: "Topics and map signals",
@@ -256,6 +256,27 @@ describe("WorldPulse interactions", () => {
         "Select a story to see its verified international connections.",
       ),
     ).toBeInTheDocument();
+  });
+
+  it("toggles the news panel and reopens it when a country is selected", () => {
+    render(<WorldPulseApp MapComponent={TestMap} liveUpdates={false} />);
+
+    expect(
+      screen.getByRole("complementary", { name: "Country news panel" }),
+    ).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Hide news panel" }));
+    expect(
+      screen.queryByRole("complementary", { name: "Country news panel" }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Show news panel" }),
+    ).toHaveAttribute("aria-expanded", "false");
+
+    fireEvent.click(screen.getByRole("button", { name: "Select Japan on map" }));
+    expect(
+      screen.getByRole("complementary", { name: "Country news panel" }),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Japan" })).toBeInTheDocument();
   });
 
   it("shows no country connections until a specific event is selected", async () => {
@@ -400,7 +421,7 @@ describe("WorldPulse interactions", () => {
     ).not.toBeInTheDocument();
 
     fireEvent.click(within(dialog).getByRole("button", { name: "Close" }));
-    fireEvent.click(screen.getByRole("button", { name: "Live News" }));
+    fireEvent.click(screen.getByRole("button", { name: "Live Broadcasts" }));
     const liveNewsDialog = screen.getByRole("dialog", { name: "Live News" });
     expect(
       await within(liveNewsDialog).findByTitle(
@@ -492,7 +513,9 @@ describe("WorldPulse interactions", () => {
     vi.stubGlobal("fetch", fetchMock);
 
     render(<WorldPulseApp MapComponent={TestMap} />);
-    fireEvent.click(await screen.findByRole("button", { name: "Live News" }));
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Live Broadcasts" }),
+    );
     const dialog = screen.getByRole("dialog", { name: "Live News" });
 
     fireEvent.click(
@@ -560,7 +583,9 @@ describe("WorldPulse interactions", () => {
     vi.stubGlobal("fetch", fetchMock);
 
     render(<WorldPulseApp MapComponent={TestMap} />);
-    fireEvent.click(await screen.findByRole("button", { name: "Live News" }));
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Live Broadcasts" }),
+    );
     expect(
       await screen.findByText("No major newsrooms are live right now"),
     ).toBeInTheDocument();
