@@ -236,6 +236,28 @@ describe("WorldPulse interactions", () => {
     ).not.toBeInTheDocument();
   });
 
+  it("opens the complete map legend from a compact Topics button", () => {
+    render(<WorldPulseApp MapComponent={TestMap} liveUpdates={false} />);
+
+    expect(
+      screen.queryByRole("dialog", { name: "Topics and map signals" }),
+    ).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Topics" }));
+
+    const dialog = screen.getByRole("dialog", {
+      name: "Topics and map signals",
+    });
+    for (const item of CATEGORIES) {
+      expect(within(dialog).getByText(item)).toBeInTheDocument();
+    }
+    expect(within(dialog).getByText("No current coverage")).toBeInTheDocument();
+    expect(
+      within(dialog).getByText(
+        "Select a story to see its verified international connections.",
+      ),
+    ).toBeInTheDocument();
+  });
+
   it("shows no country connections until a specific event is selected", async () => {
     const tradeHeadline =
       "Canada and Mexico agree a cross-border trade accord";

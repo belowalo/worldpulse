@@ -686,6 +686,89 @@ function MethodologyModal({ onClose }: { onClose: () => void }) {
   );
 }
 
+function TopicsModal({ onClose }: { onClose: () => void }) {
+  useEffect(() => {
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") onClose();
+    };
+    window.addEventListener("keydown", closeOnEscape);
+    return () => window.removeEventListener("keydown", closeOnEscape);
+  }, [onClose]);
+
+  return (
+    <div
+      className="fixed inset-0 z-50 grid place-items-center bg-black/75 p-4 backdrop-blur-md"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="topics-title"
+      onMouseDown={(event) => {
+        if (event.target === event.currentTarget) onClose();
+      }}
+    >
+      <section className="max-h-[88vh] w-full max-w-2xl overflow-y-auto rounded-2xl border border-[#344157] bg-[#0e1724] p-6 shadow-2xl">
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <p className="font-mono text-[10px] uppercase tracking-[0.2em] text-[#73e2cc]">
+              Map legend
+            </p>
+            <h2
+              id="topics-title"
+              className="mt-2 text-2xl font-semibold tracking-[-0.04em]"
+            >
+              Topics and map signals
+            </h2>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            autoFocus
+            className="rounded-full border border-[#3a4659] px-3 py-1.5 text-sm text-[#cad2dd] hover:bg-[#1a2537]"
+          >
+            Close
+          </button>
+        </div>
+        <p className="mt-5 text-sm leading-6 text-[#b5bfcd]">
+          Each country is colored by the topic of its strongest current story.
+          Countries without current verified coverage remain neutral.
+        </p>
+        <div className="mt-5 grid gap-3 sm:grid-cols-2">
+          {CATEGORIES.map((item) => (
+            <div
+              key={item}
+              className="flex items-center gap-3 rounded-xl border border-[#26354a] bg-[#152132] px-4 py-3"
+            >
+              <span
+                className="h-2.5 w-2.5 shrink-0 rounded-full"
+                style={{ background: categoryColor(item) }}
+                aria-hidden="true"
+              />
+              <span className="text-xs text-[#d0d8e3]">{item}</span>
+            </div>
+          ))}
+          <div className="flex items-center gap-3 rounded-xl border border-[#26354a] bg-[#152132] px-4 py-3">
+            <span
+              className="h-2.5 w-2.5 shrink-0 rounded-full bg-[#5a6573]"
+              aria-hidden="true"
+            />
+            <span className="text-xs text-[#d0d8e3]">
+              No current coverage
+            </span>
+          </div>
+        </div>
+        <div className="mt-5 flex items-center gap-3 rounded-xl border border-[#26354a] bg-[#101b2a] px-4 py-3">
+          <span
+            className="h-2 w-7 shrink-0 rounded-[50%] border-t-2 border-[#d8fff7] shadow-[0_0_6px_#73e2cc]"
+            aria-hidden="true"
+          />
+          <span className="text-xs leading-5 text-[#b5bfcd]">
+            Select a story to see its verified international connections.
+          </span>
+        </div>
+      </section>
+    </div>
+  );
+}
+
 function NewsModalShell({
   children,
   description,
@@ -1485,6 +1568,7 @@ export function WorldPulseApp({
   const [timeRange, setTimeRange] = useState<TimeFilter>("7 days");
   const [search, setSearch] = useState("");
   const [showMethodology, setShowMethodology] = useState(false);
+  const [showTopics, setShowTopics] = useState(false);
   const [showLiveSituation, setShowLiveSituation] = useState(false);
   const [showLiveNews, setShowLiveNews] = useState(false);
   const [visibleEventLimit, setVisibleEventLimit] = useState(
@@ -2413,40 +2497,23 @@ export function WorldPulseApp({
               ? "Live country index complete"
               : "Preparing country stories"}
           </span>
-          <div className="absolute inset-x-4 bottom-4 z-10 rounded-xl border border-[#334055] bg-[#0d1522]/95 p-3 shadow-xl backdrop-blur-sm sm:left-auto sm:w-[min(620px,calc(100%-2rem))]">
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <span className="font-mono text-[9px] uppercase tracking-[0.17em] text-[#8996a8]">
-                Topics
-              </span>
-              <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[9px] text-[#647286]">
-                <span className="inline-flex items-center gap-1.5">
-                  <span className="h-2 w-5 rounded-[50%] border-t-2 border-[#d8fff7] shadow-[0_0_6px_#73e2cc]" />
-                  Select a story to see its verified international connections
-                </span>
-              </div>
-            </div>
-            <div className="mt-2 flex flex-nowrap gap-3 overflow-x-auto pb-1 scrollbar-thin">
-              {CATEGORIES.map((item) => (
-                <div
-                  key={item}
-                  className="flex shrink-0 items-center gap-1.5 text-[9px] text-[#b7c1ce]"
-                >
-                  <span
-                    className="h-2 w-2 rounded-full"
-                    style={{ background: categoryColor(item) }}
-                  />
-                  {item}
-                </div>
-              ))}
-              <div className="flex shrink-0 items-center gap-1.5 text-[9px] text-[#b7c1ce]">
+          <button
+            type="button"
+            onClick={() => setShowTopics(true)}
+            className="absolute bottom-4 right-4 z-10 inline-flex items-center gap-2 rounded-full border border-[#334055] bg-[#0d1522]/95 px-4 py-2.5 text-[10px] font-medium text-[#d4dce7] shadow-xl backdrop-blur-sm transition hover:border-[#52667f] hover:bg-[#162235]"
+            aria-label="Topics"
+          >
+            <span className="flex items-center gap-1" aria-hidden="true">
+              {CATEGORIES.slice(0, 3).map((item) => (
                 <span
-                  className="h-2 w-2 rounded-full bg-[#5a6573]"
-                  aria-hidden="true"
+                  key={item}
+                  className="h-1.5 w-1.5 rounded-full"
+                  style={{ background: categoryColor(item) }}
                 />
-                No current coverage
-              </div>
-            </div>
-          </div>
+              ))}
+            </span>
+            Topics
+          </button>
         </section>
 
         <aside
@@ -2697,6 +2764,9 @@ export function WorldPulseApp({
       </div>
       {showMethodology ? (
         <MethodologyModal onClose={() => setShowMethodology(false)} />
+      ) : null}
+      {showTopics ? (
+        <TopicsModal onClose={() => setShowTopics(false)} />
       ) : null}
       {showLiveSituation ? (
         <LiveSituationModal
