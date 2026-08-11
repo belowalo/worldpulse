@@ -370,6 +370,7 @@ describe("WorldPulse interactions", () => {
       within(dialog).getByRole("button", { name: "Close" }),
     ).toHaveClass("fixed");
     expect(within(dialog).getByRole("banner")).not.toHaveClass("sticky");
+    expect(within(dialog).getByRole("banner")).not.toHaveClass("mr-14");
     expect(within(dialog).getByRole("heading", { name: headline })).toBeInTheDocument();
     expect(within(dialog).getAllByRole("link")).toHaveLength(1);
     expect(
@@ -387,6 +388,10 @@ describe("WorldPulse interactions", () => {
       "src",
       expect.stringContaining("youtube-nocookie.com/embed/testlive001"),
     );
+    expect(
+      within(liveNewsDialog).getByTitle(`Example Live: ${headline} live`)
+        .parentElement?.parentElement,
+    ).toHaveClass("self-start");
     expect(
       within(liveNewsDialog).getByText("Across the newsrooms"),
     ).toBeInTheDocument();

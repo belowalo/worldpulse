@@ -718,7 +718,7 @@ function NewsModalShell({
         <span aria-hidden="true">×</span>
       </button>
       <section className="mx-auto w-full max-w-7xl pb-8">
-        <header className="mr-14 rounded-2xl border border-[#2a384c] bg-[#08111d]/95 px-5 py-5 shadow-[0_18px_60px_rgba(0,0,0,0.3)] backdrop-blur-xl sm:px-6">
+        <header className="rounded-2xl border border-[#2a384c] bg-[#08111d]/95 px-5 py-5 shadow-[0_18px_60px_rgba(0,0,0,0.3)] backdrop-blur-xl sm:px-6">
           <div>
             <div className="flex items-center gap-2">
               <span
@@ -1075,7 +1075,7 @@ function LiveNewsDirectory() {
       ) : null}
 
       <div className="mt-4 grid gap-5 xl:grid-cols-[minmax(0,1fr)_390px]">
-        <div className="overflow-hidden rounded-2xl border border-[#2a394e] bg-black shadow-[0_18px_60px_rgba(0,0,0,0.3)]">
+        <div className="self-start overflow-hidden rounded-2xl border border-[#2a394e] bg-black shadow-[0_18px_60px_rgba(0,0,0,0.3)]">
           <div className="aspect-video">
             <iframe
               key={selectedVideo.id}
