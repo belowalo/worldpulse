@@ -2,11 +2,12 @@ import { describe, expect, it, vi } from "vitest";
 
 import {
   COMPLETE_WORLD_COUNTRY_COUNT,
+  fetchPreparedWorldCompressedFromServer,
   fetchPreparedWorldFromServer,
-  fetchPreparedWorldTransportFromServer,
   hasCompleteWorldCardinality,
   isCompletePreparedWorld,
   isPreparedWorldFresh,
+  isPreparedWorldGeneratedAtFresh,
 } from "@/lib/prepared-world";
 import { encodePreparedWorldNews } from "@/lib/snapshot-transport";
 import type { PreparedWorldNewsPayload } from "@/lib/types";
@@ -62,6 +63,18 @@ describe("complete server world state", () => {
     expect(isPreparedWorldFresh(payload, generatedAt + 4 * 60_000)).toBe(
       false,
     );
+    expect(
+      isPreparedWorldGeneratedAtFresh(
+        payload.generatedAt,
+        generatedAt + 60_000,
+      ),
+    ).toBe(true);
+    expect(
+      isPreparedWorldGeneratedAtFresh(
+        payload.generatedAt,
+        generatedAt + 4 * 60_000,
+      ),
+    ).toBe(false);
   });
 
   it("loads the complete snapshot through the server API with no cache", async () => {
@@ -80,17 +93,34 @@ describe("complete server world state", () => {
     );
   });
 
-  it("keeps the compact wire payload for the server-to-browser handoff", async () => {
+  it("keeps the compressed payload intact for the server-to-browser handoff", async () => {
     const payload = preparedWorld(["Canada"]);
     const wire = encodePreparedWorldNews(payload);
-    const fetchMock = vi.fn(async () => Response.json(wire));
+    const bytes = new TextEncoder().encode(JSON.stringify(wire));
+    const fetchMock = vi.fn(async () =>
+      new Response(bytes, {
+        headers: {
+          "X-WorldPulse-Country-Count": "215",
+          "X-WorldPulse-Snapshot-Generated-At": payload.generatedAt,
+        },
+      }),
+    );
 
-    const result = await fetchPreparedWorldTransportFromServer(
+    const result = await fetchPreparedWorldCompressedFromServer(
       "https://worldpulse.test",
       fetchMock as unknown as typeof fetch,
     );
 
-    expect(result.decoded).toEqual(payload);
-    expect(result.transport).toEqual(wire);
+    expect(result.countryCount).toBe(215);
+    expect(result.generatedAt).toBe(payload.generatedAt);
+    expect([
+      ...Uint8Array.from(atob(result.compressed), (character) =>
+        character.charCodeAt(0),
+      ),
+    ]).toEqual([...bytes]);
+    expect(fetchMock).toHaveBeenCalledWith(
+      "https://worldpulse.test/api/live-news?scope=prepared-world",
+      { cache: "no-store" },
+    );
   });
 });

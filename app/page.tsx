@@ -1,10 +1,9 @@
 import { WorldPulseApp } from "@/components/world-pulse-app";
 import {
-  fetchPreparedWorldTransportFromServer,
-  hasCompleteWorldCardinality,
-  isPreparedWorldFresh,
+  COMPLETE_WORLD_COUNTRY_COUNT,
+  fetchPreparedWorldCompressedFromServer,
+  isPreparedWorldGeneratedAtFresh,
 } from "@/lib/prepared-world";
-import type { PreparedWorldNewsWirePayload } from "@/lib/types";
 import { headers } from "next/headers";
 
 async function requestOrigin() {
@@ -45,22 +44,22 @@ function ServerWorldLoading() {
 }
 
 export default async function Home() {
-  let initialWorld: PreparedWorldNewsWirePayload | null = null;
+  let initialWorldCompressed: string | null = null;
   try {
-    const serverWorld = await fetchPreparedWorldTransportFromServer(
+    const serverWorld = await fetchPreparedWorldCompressedFromServer(
       await requestOrigin(),
     );
     if (
-      hasCompleteWorldCardinality(serverWorld.decoded) &&
-      isPreparedWorldFresh(serverWorld.decoded)
+      serverWorld.countryCount >= COMPLETE_WORLD_COUNTRY_COUNT &&
+      isPreparedWorldGeneratedAtFresh(serverWorld.generatedAt)
     ) {
-      initialWorld = serverWorld.transport;
+      initialWorldCompressed = serverWorld.compressed;
     }
   } catch {
     // Keep the application closed until a complete server snapshot exists.
   }
-  if (!initialWorld) {
+  if (!initialWorldCompressed) {
     return <ServerWorldLoading />;
   }
-  return <WorldPulseApp initialWorld={initialWorld} />;
+  return <WorldPulseApp initialWorldCompressed={initialWorldCompressed} />;
 }

@@ -1,7 +1,10 @@
 import { describe, expect, it, vi } from "vitest";
 
 import type { StoredNewsPayload } from "@/db/news-cache";
-import { collectStoredMapCountries } from "@/worker/map-cache";
+import {
+  collectStoredCountryCountries,
+  collectStoredMapCountries,
+} from "@/worker/map-cache";
 
 function row(
   generatedAt: number,
@@ -108,6 +111,47 @@ describe("durable map cache consolidation", () => {
     expect(result.countries[0].articles.map(({ id }) => id)).toEqual([
       "spain-new",
       "spain-old",
+    ]);
+  });
+});
+
+describe("durable country cache consolidation", () => {
+  it("reuses current country-specific stories and ignores unrelated rows", () => {
+    vi.setSystemTime(new Date("2026-08-02T23:00:00.000Z"));
+    const currentArticle = article(
+      "canada-country",
+      "Canada announces a new national energy program",
+      "2026-08-02T22:00:00.000Z",
+    );
+    const rows: StoredNewsPayload[] = [
+      {
+        generated_at: Date.parse("2026-08-02T22:59:00.000Z"),
+        payload: JSON.stringify({
+          scope: "country",
+          countryName: "Canada",
+          generatedAt: "2026-08-02T22:59:00.000Z",
+          articles: [currentArticle],
+        }),
+      },
+      {
+        generated_at: Date.parse("2026-08-02T22:58:00.000Z"),
+        payload: JSON.stringify({
+          scope: "event",
+          countryName: "Canada",
+          generatedAt: "2026-08-02T22:58:00.000Z",
+          articles: [article("event", "Canada event coverage expands", "2026-08-02T21:00:00.000Z")],
+        }),
+      },
+    ];
+
+    expect(
+      collectStoredCountryCountries(rows, new Set(["Canada"])).countries,
+    ).toEqual([
+      expect.objectContaining({
+        countryName: "Canada",
+        available: true,
+        articles: [expect.objectContaining({ id: "canada-country" })],
+      }),
     ]);
   });
 });

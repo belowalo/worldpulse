@@ -3,6 +3,7 @@ import { handleImageOptimization, DEFAULT_DEVICE_SIZES, DEFAULT_IMAGE_SIZES } fr
 import handler from "vinext/server/app-router-entry";
 import {
   readLatestStoredGlobalFeed,
+  readStoredCountryFeeds,
   readStoredMapFeeds,
   readStoredNewsFeed,
   writeStoredNewsFeed,
@@ -22,7 +23,10 @@ import type {
   WorldPulseDiagnostics,
 } from "../lib/types";
 import { mergeCachedPayloads } from "./live-cache";
-import { collectStoredMapCountries } from "./map-cache";
+import {
+  collectStoredCountryCountries,
+  collectStoredMapCountries,
+} from "./map-cache";
 import { handleLiveNews } from "./live-news";
 import { handleLiveVideo } from "./live-video";
 import worldGeometrySource from "../public/countries.geojson?raw";
@@ -165,9 +169,37 @@ async function refreshPreparedWorld(env: Env) {
     await writeStoredNewsFeed(env.DB, globalCacheKey, payload, Date.now());
   }
   const generatedAt = new Date().toISOString();
-  const localFeeds = await readCompletePreparedCountryFeeds(
+  const chunkFeeds = await readCompletePreparedCountryFeeds(
     env.SNAPSHOTS,
     directory,
+  );
+  const expectedCountryNames = new Set(
+    directory.map((country) => country.name),
+  );
+  const [storedMapFeeds, storedCountryFeeds] = await Promise.all([
+    readStoredMapFeeds(env.DB),
+    readStoredCountryFeeds(env.DB),
+  ]);
+  const mapFeeds = prepareWorldSnapshotFeeds(
+    collectStoredMapCountries(storedMapFeeds, expectedCountryNames).countries,
+    directory,
+  );
+  const countryFeeds = prepareWorldSnapshotFeeds(
+    collectStoredCountryCountries(
+      storedCountryFeeds,
+      expectedCountryNames,
+    ).countries,
+    directory,
+  );
+  const durableFeeds = mergePreparedCountryFeedSnapshots(
+    countryFeeds,
+    mapFeeds,
+    [...expectedCountryNames],
+  );
+  const localFeeds = mergePreparedCountryFeedSnapshots(
+    durableFeeds,
+    chunkFeeds,
+    [...expectedCountryNames],
   );
   const snapshot = prepareCompleteWorldSnapshotFromFeeds(
     globalPayload,
@@ -199,7 +231,11 @@ async function refreshPreparedWorld(env: Env) {
         contentEncoding: "gzip",
         contentType: "application/json; charset=utf-8",
       },
-      customMetadata: { generatedAt, encoding: "gzip" },
+      customMetadata: {
+        generatedAt,
+        encoding: "gzip",
+        countryCount: String(directory.length),
+      },
     }),
     env.SNAPSHOTS.put(
       PREPARED_WORLD_HEALTH_KEY,
@@ -313,13 +349,25 @@ async function refreshPreparedCountryBatch(
     env.SNAPSHOTS,
     chunkIndex,
   );
-  const consolidated = collectStoredMapCountries(
-    await readStoredMapFeeds(env.DB),
-    expectedCountryNames,
-  );
-  const freshFeeds = prepareWorldSnapshotFeeds(
-    consolidated.countries,
+  const [storedMapFeeds, storedCountryFeeds] = await Promise.all([
+    readStoredMapFeeds(env.DB),
+    readStoredCountryFeeds(env.DB),
+  ]);
+  const mapFeeds = prepareWorldSnapshotFeeds(
+    collectStoredMapCountries(storedMapFeeds, expectedCountryNames).countries,
     directory,
+  );
+  const directCountryFeeds = prepareWorldSnapshotFeeds(
+    collectStoredCountryCountries(
+      storedCountryFeeds,
+      expectedCountryNames,
+    ).countries,
+    directory,
+  );
+  const freshFeeds = mergePreparedCountryFeedSnapshots(
+    directCountryFeeds,
+    mapFeeds,
+    chunkCountries,
   );
   const countryFeeds = mergePreparedCountryFeedSnapshots(
     freshFeeds,
@@ -473,7 +521,27 @@ async function handlePreparedWorld(
       current = await env.SNAPSHOTS.get(PREPARED_WORLD_KEY);
     }
   } else if (age >= PREPARED_WORLD_FRESH_MS) {
-    ctx.waitUntil(refreshMinuteWorldState(env));
+    // Refresh the complete snapshot from the durable server-side country
+    // index before responding. Provider refreshes continue in the background,
+    // so the user never has to wait for live upstream requests.
+    try {
+      await refreshPreparedWorldOnce(env);
+      current = await env.SNAPSHOTS.get(PREPARED_WORLD_KEY);
+    } catch (error) {
+      console.warn(
+        JSON.stringify({
+          event: "prepared_world_request_refresh_failed",
+          error: error instanceof Error ? error.message : "unknown error",
+        }),
+      );
+    }
+    const minute = Math.floor(Date.now() / 60_000);
+    ctx.waitUntil(
+      refreshMinuteWorldState(
+        env,
+        minute % PREPARED_GLOBAL_REFRESH_INTERVAL_MINUTES === 0,
+      ),
+    );
   }
   if (!current) {
     return Response.json(
@@ -489,6 +557,8 @@ async function handlePreparedWorld(
         : "application/json; charset=utf-8",
     "X-WorldPulse-Snapshot-Generated-At":
       current.customMetadata?.generatedAt ?? "unknown",
+    "X-WorldPulse-Country-Count":
+      current.customMetadata?.countryCount ?? String(loadWorldDirectory().length),
   });
   let body: ReadableStream | null = current.body;
   if (

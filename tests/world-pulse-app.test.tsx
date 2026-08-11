@@ -14,6 +14,7 @@ import { WorldPulseApp } from "@/components/world-pulse-app";
 import type { WorldMapProps } from "@/components/world-map";
 import { mapStyleForEvent } from "@/lib/scoring";
 import { countryPulses } from "@/lib/seed-data";
+import { encodePreparedWorldNews } from "@/lib/snapshot-transport";
 import { CATEGORIES } from "@/lib/types";
 import { prepareCompleteWorldSnapshot } from "@/lib/world-snapshot";
 
@@ -1036,6 +1037,51 @@ describe("WorldPulse interactions", () => {
     expect(
       fetchMock.mock.calls.some(([input]) =>
         String(input).includes("country="),
+      ),
+    ).toBe(false);
+  });
+
+  it("opens from the compressed server handoff without client story requests", async () => {
+    const countries = [
+      { mapId: "124", name: "Canada", iso2: "CA" },
+      { mapId: "840", name: "United States", iso2: "US" },
+    ];
+    const wire = encodePreparedWorldNews(
+      preparedWorldPayload(countries, {
+        Canada: [liveArticleFor("Canada")],
+        "United States": [liveArticleFor("United States")],
+      }),
+    );
+    const bytes = new TextEncoder().encode(JSON.stringify(wire));
+    const initialWorldCompressed = btoa(
+      String.fromCharCode(...bytes),
+    );
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      if (String(input) === "/countries.geojson") {
+        return Response.json({
+          features: countries.map((country) => ({
+            id: country.mapId,
+            properties: { name: country.name },
+          })),
+        });
+      }
+      return new Response("Unexpected client story request", { status: 500 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(
+      <WorldPulseApp
+        MapComponent={TestMap}
+        initialWorldCompressed={initialWorldCompressed}
+      />,
+    );
+
+    expect(
+      await screen.findByRole("heading", { name: liveArticleFor("Canada").title }),
+    ).toBeInTheDocument();
+    expect(
+      fetchMock.mock.calls.some(([input]) =>
+        String(input).includes("scope=prepared-world"),
       ),
     ).toBe(false);
   });

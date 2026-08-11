@@ -1283,6 +1283,16 @@ interface WorldPulseAppProps {
   MapComponent?: ComponentType<WorldMapProps>;
   liveUpdates?: boolean;
   initialWorld?: PreparedWorldNewsPayload | PreparedWorldNewsWirePayload;
+  initialWorldCompressed?: string;
+}
+
+function decodeBase64Bytes(value: string) {
+  const binary = atob(value);
+  const bytes = new Uint8Array(binary.length);
+  for (let index = 0; index < binary.length; index += 1) {
+    bytes[index] = binary.charCodeAt(index);
+  }
+  return bytes;
 }
 
 function WorldLoadingScreen({
@@ -1421,14 +1431,21 @@ export function WorldPulseApp({
   MapComponent = WorldMap,
   liveUpdates = true,
   initialWorld: initialWorldPayload,
+  initialWorldCompressed,
 }: WorldPulseAppProps = {}) {
-  const initialWorld = useMemo(
+  const decodedInitialWorld = useMemo(
     () =>
       initialWorldPayload
         ? decodePreparedWorldPayload(initialWorldPayload)
         : undefined,
     [initialWorldPayload],
   );
+  const [initialWorld, setInitialWorld] = useState(decodedInitialWorld);
+  const hasServerWorldPayload = Boolean(
+    initialWorldPayload || initialWorldCompressed,
+  );
+  const [initialWorldDecodeFailed, setInitialWorldDecodeFailed] =
+    useState(false);
   const [selectedCountry, setSelectedCountry] =
     useState<MapCountry>(initialCountry);
   const [countryDirectory, setCountryDirectory] =
@@ -1477,6 +1494,36 @@ export function WorldPulseApp({
   const activeCoverageRequests = useRef(0);
   const coverageGeneration = useRef(0);
   const [isSwitchingCountry, startCountryTransition] = useTransition();
+
+  useEffect(() => {
+    if (!initialWorldCompressed) return;
+    let cancelled = false;
+    const decodeServerWorld = async () => {
+      try {
+        const responsePayload = await parsePreparedWorldResponseBytes(
+          decodeBase64Bytes(initialWorldCompressed),
+        );
+        const prepared = decodePreparedWorldPayload(
+          isPreparedWorldNewsWire(responsePayload)
+            ? responsePayload
+            : (responsePayload as PreparedWorldNewsPayload),
+        );
+        if (!cancelled) setInitialWorld(prepared);
+      } catch {
+        if (!cancelled) setInitialWorldDecodeFailed(true);
+      }
+    };
+    void decodeServerWorld();
+    return () => {
+      cancelled = true;
+    };
+  }, [initialWorldCompressed]);
+
+  useEffect(() => {
+    if (!initialWorldDecodeFailed) return;
+    const reloadTimer = window.setTimeout(() => window.location.reload(), 3_000);
+    return () => window.clearTimeout(reloadTimer);
+  }, [initialWorldDecodeFailed]);
 
   const fetchGlobalNews = useCallback(async () => {
     setGlobalFeed((current) => ({
@@ -1528,12 +1575,12 @@ export function WorldPulseApp({
     } else {
       setGlobeReady(true);
     }
-    if (!initialWorld) {
+    if (!hasServerWorldPayload) {
       void loadPreparedWorld().catch(() => {
         // The legacy fallback remains available outside the server-rendered app.
       });
     }
-  }, [MapComponent, initialWorld, liveUpdates]);
+  }, [MapComponent, hasServerWorldPayload, liveUpdates]);
 
   useEffect(() => {
     if (!liveUpdates) return;
@@ -1580,6 +1627,10 @@ export function WorldPulseApp({
     if (!liveUpdates || !countryDirectoryReady) return;
     if (!countryDirectory.length) {
       setWorldScanSettled(true);
+      return;
+    }
+    if (hasServerWorldPayload && !initialWorld) {
+      setWorldScanSettled(false);
       return;
     }
     if (initialWorld) {
@@ -1764,6 +1815,7 @@ export function WorldPulseApp({
     countryDirectory,
     countryDirectoryReady,
     fetchGlobalNews,
+    hasServerWorldPayload,
     initialWorld,
     liveUpdates,
   ]);

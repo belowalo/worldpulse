@@ -128,3 +128,54 @@ export function collectStoredMapCountries(
   };
 }
 
+/**
+ * Converts durable country-request rows into the same shape as map results so
+ * successful deep searches can repair gaps in the complete world snapshot.
+ */
+export function collectStoredCountryCountries(
+  storedFeeds: StoredNewsPayload[],
+  expectedCountryNames?: ReadonlySet<string>,
+) {
+  const countries = new Map<string, MapNewsCountryPayload>();
+  let latestGeneratedAt = 0;
+
+  for (const stored of storedFeeds) {
+    try {
+      const payload = JSON.parse(stored.payload) as {
+        scope?: string;
+        countryName?: unknown;
+        generatedAt?: unknown;
+        articles?: unknown[];
+      };
+      if (
+        payload.scope !== "country" ||
+        typeof payload.countryName !== "string" ||
+        typeof payload.generatedAt !== "string" ||
+        !Array.isArray(payload.articles) ||
+        (expectedCountryNames &&
+          !expectedCountryNames.has(payload.countryName))
+      ) {
+        continue;
+      }
+      latestGeneratedAt = Math.max(latestGeneratedAt, stored.generated_at);
+      const articles = payload.articles.filter(isCurrentLiveArticle);
+      const existing = countries.get(payload.countryName);
+      const mergedArticles = existing
+        ? mergeCountryArticles(existing.articles, articles)
+        : articles;
+      countries.set(payload.countryName, {
+        countryName: payload.countryName,
+        generatedAt: existing?.generatedAt ?? payload.generatedAt,
+        available: mergedArticles.length > 0,
+        articles: mergedArticles,
+      });
+    } catch {
+      // A malformed historical row cannot invalidate the remaining cache.
+    }
+  }
+
+  return {
+    countries: [...countries.values()],
+    generatedAt: new Date(latestGeneratedAt || Date.now()).toISOString(),
+  };
+}

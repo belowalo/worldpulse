@@ -95,3 +95,21 @@ export async function readStoredMapFeeds(
     .all<StoredNewsPayload>();
   return result.results ?? [];
 }
+
+export async function readStoredCountryFeeds(
+  db: D1Database,
+  limit = 320,
+) {
+  await ensureNewsCache(db);
+  const result = await db
+    .prepare(
+      `SELECT payload, generated_at
+       FROM news_feed_cache
+       WHERE cache_key LIKE '%country=%'
+       ORDER BY generated_at DESC
+       LIMIT ?1`,
+    )
+    .bind(limit)
+    .all<StoredNewsPayload>();
+  return result.results ?? [];
+}
