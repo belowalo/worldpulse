@@ -1086,6 +1086,54 @@ describe("WorldPulse interactions", () => {
     ).toBe(false);
   });
 
+  it("opens from one complete server snapshot request without country requests", async () => {
+    const countries = [
+      { mapId: "124", name: "Canada", iso2: "CA" },
+      { mapId: "840", name: "United States", iso2: "US" },
+    ];
+    const wire = encodePreparedWorldNews(
+      preparedWorldPayload(countries, {
+        Canada: [liveArticleFor("Canada")],
+        "United States": [liveArticleFor("United States")],
+      }),
+    );
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === "/countries.geojson") {
+        return Response.json({
+          features: countries.map((country) => ({
+            id: country.mapId,
+            properties: { name: country.name },
+          })),
+        });
+      }
+      if (url === "/api/live-news?scope=prepared-world") {
+        return new Response(JSON.stringify(wire));
+      }
+      return new Response("Unexpected client story request", { status: 500 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(
+      <WorldPulseApp
+        MapComponent={TestMap}
+        initialWorldUrl="/api/live-news?scope=prepared-world"
+      />,
+    );
+
+    expect(
+      await screen.findByRole("heading", { name: liveArticleFor("Canada").title }),
+    ).toBeInTheDocument();
+    expect(
+      fetchMock.mock.calls.filter(([input]) =>
+        String(input).includes("scope=prepared-world"),
+      ),
+    ).toHaveLength(1);
+    expect(
+      fetchMock.mock.calls.some(([input]) => String(input).includes("country=")),
+    ).toBe(false);
+  });
+
   it("keeps the last complete snapshot when a refresh is incomplete", async () => {
     const countries = [
       { mapId: "124", name: "Canada", iso2: "CA" },

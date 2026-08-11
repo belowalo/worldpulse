@@ -1284,6 +1284,7 @@ interface WorldPulseAppProps {
   liveUpdates?: boolean;
   initialWorld?: PreparedWorldNewsPayload | PreparedWorldNewsWirePayload;
   initialWorldCompressed?: string;
+  initialWorldUrl?: string;
 }
 
 function decodeBase64Bytes(value: string) {
@@ -1432,6 +1433,7 @@ export function WorldPulseApp({
   liveUpdates = true,
   initialWorld: initialWorldPayload,
   initialWorldCompressed,
+  initialWorldUrl,
 }: WorldPulseAppProps = {}) {
   const decodedInitialWorld = useMemo(
     () =>
@@ -1442,7 +1444,7 @@ export function WorldPulseApp({
   );
   const [initialWorld, setInitialWorld] = useState(decodedInitialWorld);
   const hasServerWorldPayload = Boolean(
-    initialWorldPayload || initialWorldCompressed,
+    initialWorldPayload || initialWorldCompressed || initialWorldUrl,
   );
   const [initialWorldDecodeFailed, setInitialWorldDecodeFailed] =
     useState(false);
@@ -1496,12 +1498,24 @@ export function WorldPulseApp({
   const [isSwitchingCountry, startCountryTransition] = useTransition();
 
   useEffect(() => {
-    if (!initialWorldCompressed) return;
+    if (!initialWorldCompressed && !initialWorldUrl) return;
     let cancelled = false;
     const decodeServerWorld = async () => {
       try {
+        let responseBytes: Uint8Array;
+        if (initialWorldCompressed) {
+          responseBytes = decodeBase64Bytes(initialWorldCompressed);
+        } else {
+          const response = await fetch(initialWorldUrl as string, {
+            signal: AbortSignal.timeout(WORLD_BATCH_REQUEST_TIMEOUT_MS),
+          });
+          if (!response.ok) {
+            throw new Error("The complete server world state is unavailable.");
+          }
+          responseBytes = new Uint8Array(await response.arrayBuffer());
+        }
         const responsePayload = await parsePreparedWorldResponseBytes(
-          decodeBase64Bytes(initialWorldCompressed),
+          responseBytes,
         );
         const prepared = decodePreparedWorldPayload(
           isPreparedWorldNewsWire(responsePayload)
@@ -1517,7 +1531,7 @@ export function WorldPulseApp({
     return () => {
       cancelled = true;
     };
-  }, [initialWorldCompressed]);
+  }, [initialWorldCompressed, initialWorldUrl]);
 
   useEffect(() => {
     if (!initialWorldDecodeFailed) return;
