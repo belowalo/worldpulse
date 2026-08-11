@@ -252,6 +252,55 @@ describe("prepared minute world state", () => {
     );
   });
 
+  it("drops stored stories that have aged beyond the seven-day window", () => {
+    const generatedAt = new Date().toISOString();
+    const directory: MapCountry[] = [
+      { mapId: "266", name: "Gabon", iso2: "GA", events: [] },
+    ];
+    const globalPayload: LiveNewsPayload = {
+      scope: "global",
+      countryName: null,
+      generatedAt,
+      refreshAfterSeconds: 60,
+      provider: "Live providers",
+      articles: [],
+    };
+    const event = prepareCompleteWorldSnapshot(
+      globalPayload,
+      [{
+        countryName: "Gabon",
+        generatedAt,
+        available: true,
+        articles: [liveArticle("gabon-old", "Gabon current affairs")],
+      }],
+      directory,
+      generatedAt,
+    ).countryFeeds.Gabon.events[0];
+    const expiredEvent = {
+      ...event,
+      lastUpdatedAt: new Date(
+        Date.parse(generatedAt) - 8 * 24 * 60 * 60 * 1_000,
+      ).toISOString(),
+    };
+
+    const prepared = prepareCompleteWorldSnapshotFromFeeds(
+      globalPayload,
+      {
+        Gabon: {
+          events: [expiredEvent],
+          updatedAt: generatedAt,
+          provider: "Stored country feed",
+          loading: false,
+          error: null,
+        },
+      },
+      directory,
+      generatedAt,
+    );
+
+    expect(prepared.countryFeeds.Gabon.events).toEqual([]);
+  });
+
   it("decodes an explicitly compressed snapshot response", async () => {
     const wire = { s: "pw2", v: "test", g: new Date().toISOString(), r: 60, n: [], a: [], e: [], f: { g: [[], null, null], c: [] } };
     const compressed = gzipSync(JSON.stringify(wire));

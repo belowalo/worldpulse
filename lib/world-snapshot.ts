@@ -29,6 +29,7 @@ export interface PreparedCountryFeed {
 export const MAX_PREPARED_GLOBAL_ARTICLES = 30;
 export const MAX_PREPARED_COUNTRY_EVENTS = 8;
 export const PREPARED_STORY_RETENTION_MS = 7 * 24 * 60 * 60 * 1_000;
+const PREPARED_STORY_ROLLOVER_GUARD_MS = 5 * 60_000;
 
 export function mergePreparedCountryFeedSnapshots(
   freshFeeds: Record<string, PreparedNewsFeed>,
@@ -169,13 +170,24 @@ export function prepareCompleteWorldSnapshotFromFeeds(
   countryDirectory: MapCountry[],
   generatedAt = new Date().toISOString(),
 ): PreparedWorldNewsPayload {
+  const generatedTimestamp = Date.parse(generatedAt);
+  const retentionCutoff =
+    (Number.isFinite(generatedTimestamp) ? generatedTimestamp : Date.now()) -
+    PREPARED_STORY_RETENTION_MS +
+    PREPARED_STORY_ROLLOVER_GUARD_MS;
+  const isRetainedStory = (event: Event) => {
+    const updatedAt = Date.parse(event.lastUpdatedAt);
+    return Number.isFinite(updatedAt) && updatedAt >= retentionCutoff;
+  };
   const globalEvents = buildLiveEvents(
     {
       ...globalPayload,
       articles: globalPayload.articles.slice(0, MAX_PREPARED_GLOBAL_ARTICLES),
     },
     null,
-  ).map((event) => applyDetectedGeography(event, countryDirectory));
+  )
+    .map((event) => applyDetectedGeography(event, countryDirectory))
+    .filter(isRetainedStory);
   const countriesByIdentifier = new Map<string, MapCountry>();
   for (const country of countryDirectory) {
     countriesByIdentifier.set(country.name, country);
@@ -194,9 +206,11 @@ export function prepareCompleteWorldSnapshotFromFeeds(
   const countryFeeds: PreparedWorldNewsPayload["countryFeeds"] = {};
   for (const country of countryDirectory) {
     const localFeed = localFeeds[country.name];
-    const normalizedLocalEvents = (localFeed?.events ?? []).map((event) =>
-      applyDetectedGeography(event, countryDirectory, country),
-    );
+    const normalizedLocalEvents = (localFeed?.events ?? [])
+      .map((event) =>
+        applyDetectedGeography(event, countryDirectory, country),
+      )
+      .filter(isRetainedStory);
     countryFeeds[country.name] = {
       events: mergeEventFeeds(
         normalizedLocalEvents.slice(0, MAX_PREPARED_COUNTRY_EVENTS),
