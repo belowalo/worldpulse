@@ -18,6 +18,8 @@ const countries: MapCountry[] = [
   { mapId: "818", name: "Egypt", iso2: "EG", events: [] },
   { mapId: "840", name: "United States", iso2: "US", events: [] },
   { mapId: "364", name: "Iran", iso2: "IR", events: [] },
+  { mapId: "120", name: "Cameroon", iso2: "CM", events: [] },
+  { mapId: "566", name: "Nigeria", iso2: "NG", events: [] },
 ];
 
 const makeEvent = (headline: string, primaryCountry = "CN") =>
@@ -120,6 +122,20 @@ describe("multi-country map links", () => {
         (country) => country.name,
       ),
     ).toEqual(["China", "Philippines"]);
+  });
+
+  it("keeps a verified local-feed country as an affected country", () => {
+    const event = makeEvent(
+      "Cameroon and Malawi reach the continental semifinals",
+      "CM",
+    );
+    const nigeria = countries.find((country) => country.name === "Nigeria");
+
+    expect(
+      countriesMentionedByEvent(event, countries, nigeria).map(
+        (country) => country.name,
+      ),
+    ).toEqual(["Cameroon", "Nigeria"]);
   });
 
   it("treats uppercase US as a country without matching lowercase us", () => {

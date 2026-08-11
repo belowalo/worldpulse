@@ -175,16 +175,26 @@ function curvedLine(
 export function countriesMentionedByEvent(
   event: Event,
   countries: MapCountry[],
-  _anchorCountry?: MapCountry,
+  anchorCountry?: MapCountry,
 ) {
-  void _anchorCountry;
   const searchableText = [
     event.headline,
     ...event.articles.map((article) => article.headline),
   ].join(" ");
-  return countries.filter((country) =>
+  const mentioned = countries.filter((country) =>
     textMatchesCountry(searchableText, termsForCountry(country.name)),
   );
+  if (
+    anchorCountry &&
+    !mentioned.some(
+      (country) =>
+        country.mapId === anchorCountry.mapId ||
+        country.name === anchorCountry.name,
+    )
+  ) {
+    mentioned.push(anchorCountry);
+  }
+  return mentioned;
 }
 
 const countryTermsCache = new Map<string, string[]>();
