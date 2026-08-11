@@ -119,8 +119,12 @@ async function readCompletePreparedCountryFeeds(
     directory.length / PREPARED_WORLD_CHUNK_SIZE,
   );
   const feeds: Record<string, PreparedNewsFeed> = {};
-  for (let batchIndex = 0; batchIndex < batchCount; batchIndex += 1) {
-    const chunk = await readPreparedCountryChunk(snapshots, batchIndex);
+  const chunks = await Promise.all(
+    Array.from({ length: batchCount }, (_, batchIndex) =>
+      readPreparedCountryChunk(snapshots, batchIndex),
+    ),
+  );
+  for (const chunk of chunks) {
     if (chunk) Object.assign(feeds, chunk.countryFeeds);
   }
   const missingCountries = directory.filter(
@@ -547,30 +551,15 @@ async function handlePreparedWorld(
       current = await env.SNAPSHOTS.get(PREPARED_WORLD_KEY);
     }
   } else if (age >= PREPARED_WORLD_FRESH_MS) {
-    // Rebuild from the already-prepared R2 country chunks before responding.
-    // This path performs no live provider or broad database scan, so every
-    // minute poll receives one fresh atomic snapshot without client assembly.
-    try {
-      await refreshPreparedWorldOnce(env);
-      current = await env.SNAPSHOTS.get(PREPARED_WORLD_KEY);
-    } catch (error) {
-      console.warn(
-        JSON.stringify({
-          event: "prepared_world_request_refresh_failed",
-          error: error instanceof Error ? error.message : "unknown error",
-        }),
-      );
-      if (current) currentBytes = await current.arrayBuffer();
-    }
+    // Never hold the first paint behind a world rebuild. Return the last
+    // complete atomic snapshot and roll it forward in the background.
+    if (current) currentBytes = await current.arrayBuffer();
     const minute = Math.floor(Date.now() / 60_000);
     ctx.waitUntil(
-      (async () => {
-        if (minute % PREPARED_GLOBAL_REFRESH_INTERVAL_MINUTES === 0) {
-          await refreshStoredGlobalFeedSafely(env);
-        }
-        await refreshPreparedCountryBatchSafely(env);
-        await refreshPreparedWorldSafely(env);
-      })(),
+      refreshMinuteWorldState(
+        env,
+        minute % PREPARED_GLOBAL_REFRESH_INTERVAL_MINUTES === 0,
+      ),
     );
   }
   if (!current) {
