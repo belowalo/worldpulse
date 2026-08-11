@@ -169,37 +169,9 @@ async function refreshPreparedWorld(env: Env) {
     await writeStoredNewsFeed(env.DB, globalCacheKey, payload, Date.now());
   }
   const generatedAt = new Date().toISOString();
-  const chunkFeeds = await readCompletePreparedCountryFeeds(
+  const localFeeds = await readCompletePreparedCountryFeeds(
     env.SNAPSHOTS,
     directory,
-  );
-  const expectedCountryNames = new Set(
-    directory.map((country) => country.name),
-  );
-  const [storedMapFeeds, storedCountryFeeds] = await Promise.all([
-    readStoredMapFeeds(env.DB),
-    readStoredCountryFeeds(env.DB),
-  ]);
-  const mapFeeds = prepareWorldSnapshotFeeds(
-    collectStoredMapCountries(storedMapFeeds, expectedCountryNames).countries,
-    directory,
-  );
-  const countryFeeds = prepareWorldSnapshotFeeds(
-    collectStoredCountryCountries(
-      storedCountryFeeds,
-      expectedCountryNames,
-    ).countries,
-    directory,
-  );
-  const durableFeeds = mergePreparedCountryFeedSnapshots(
-    countryFeeds,
-    mapFeeds,
-    [...expectedCountryNames],
-  );
-  const localFeeds = mergePreparedCountryFeedSnapshots(
-    durableFeeds,
-    chunkFeeds,
-    [...expectedCountryNames],
   );
   const snapshot = prepareCompleteWorldSnapshotFromFeeds(
     globalPayload,
@@ -351,7 +323,11 @@ async function refreshPreparedCountryBatch(
   );
   const [storedMapFeeds, storedCountryFeeds] = await Promise.all([
     readStoredMapFeeds(env.DB),
-    readStoredCountryFeeds(env.DB),
+    readStoredCountryFeeds(
+      env.DB,
+      chunkCountries,
+      chunkCountries.length * 3,
+    ),
   ]);
   const mapFeeds = prepareWorldSnapshotFeeds(
     collectStoredMapCountries(storedMapFeeds, expectedCountryNames).countries,
@@ -449,6 +425,9 @@ async function refreshMinuteWorldState(
   env: Env,
   refreshGlobal = false,
 ) {
+  // Roll the existing complete index forward before any provider request so
+  // freshness never depends on upstream latency.
+  await refreshPreparedWorldSafely(env);
   if (refreshGlobal) await refreshStoredGlobalFeedSafely(env);
   await refreshPreparedCountryBatchSafely(env);
   await refreshPreparedWorldSafely(env);
@@ -521,20 +500,8 @@ async function handlePreparedWorld(
       current = await env.SNAPSHOTS.get(PREPARED_WORLD_KEY);
     }
   } else if (age >= PREPARED_WORLD_FRESH_MS) {
-    // Refresh the complete snapshot from the durable server-side country
-    // index before responding. Provider refreshes continue in the background,
-    // so the user never has to wait for live upstream requests.
-    try {
-      await refreshPreparedWorldOnce(env);
-      current = await env.SNAPSHOTS.get(PREPARED_WORLD_KEY);
-    } catch (error) {
-      console.warn(
-        JSON.stringify({
-          event: "prepared_world_request_refresh_failed",
-          error: error instanceof Error ? error.message : "unknown error",
-        }),
-      );
-    }
+    // Serve the last complete snapshot immediately while the next atomic
+    // minute snapshot is rebuilt entirely on the server.
     const minute = Math.floor(Date.now() / 60_000);
     ctx.waitUntil(
       refreshMinuteWorldState(

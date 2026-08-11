@@ -2,7 +2,6 @@ import { WorldPulseApp } from "@/components/world-pulse-app";
 import {
   COMPLETE_WORLD_COUNTRY_COUNT,
   fetchPreparedWorldCompressedFromServer,
-  isPreparedWorldGeneratedAtFresh,
 } from "@/lib/prepared-world";
 import { headers } from "next/headers";
 
@@ -49,10 +48,7 @@ export default async function Home() {
     const serverWorld = await fetchPreparedWorldCompressedFromServer(
       await requestOrigin(),
     );
-    if (
-      serverWorld.countryCount >= COMPLETE_WORLD_COUNTRY_COUNT &&
-      isPreparedWorldGeneratedAtFresh(serverWorld.generatedAt)
-    ) {
+    if (serverWorld.countryCount >= COMPLETE_WORLD_COUNTRY_COUNT) {
       initialWorldCompressed = serverWorld.compressed;
     }
   } catch {

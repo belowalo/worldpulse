@@ -98,9 +98,27 @@ export async function readStoredMapFeeds(
 
 export async function readStoredCountryFeeds(
   db: D1Database,
+  countryNames: string[] = [],
   limit = 320,
 ) {
   await ensureNewsCache(db);
+  if (countryNames.length) {
+    const placeholders = countryNames
+      .map((_, index) => `?${index + 1}`)
+      .join(", ");
+    const result = await db
+      .prepare(
+        `SELECT payload, generated_at
+         FROM news_feed_cache
+         WHERE json_extract(payload, '$.scope') = 'country'
+           AND json_extract(payload, '$.countryName') IN (${placeholders})
+         ORDER BY generated_at DESC
+         LIMIT ?${countryNames.length + 1}`,
+      )
+      .bind(...countryNames, limit)
+      .all<StoredNewsPayload>();
+    return result.results ?? [];
+  }
   const result = await db
     .prepare(
       `SELECT payload, generated_at
