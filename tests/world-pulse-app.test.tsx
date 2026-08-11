@@ -368,7 +368,8 @@ describe("WorldPulse interactions", () => {
     expect(dialog).toHaveClass("news-modal-scroll");
     expect(
       within(dialog).getByRole("button", { name: "Close" }),
-    ).toHaveTextContent("×");
+    ).toHaveClass("fixed");
+    expect(within(dialog).getByRole("banner")).not.toHaveClass("sticky");
     expect(within(dialog).getByRole("heading", { name: headline })).toBeInTheDocument();
     expect(within(dialog).getAllByRole("link")).toHaveLength(1);
     expect(

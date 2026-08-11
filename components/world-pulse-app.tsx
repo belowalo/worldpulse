@@ -708,8 +708,17 @@ function NewsModalShell({
       aria-modal="true"
       aria-labelledby={titleId}
     >
+      <button
+        type="button"
+        onClick={onClose}
+        autoFocus
+        aria-label="Close"
+        className="fixed right-4 top-4 z-30 grid h-10 w-10 place-items-center rounded-full border border-[#3a4659] bg-[#0d1724]/95 text-2xl font-light leading-none text-[#d4dce7] shadow-[0_12px_32px_rgba(0,0,0,0.35)] backdrop-blur-xl transition hover:border-[#5b6c83] hover:bg-[#182335] hover:text-white sm:right-7 sm:top-7"
+      >
+        <span aria-hidden="true">×</span>
+      </button>
       <section className="mx-auto w-full max-w-7xl pb-8">
-        <header className="sticky top-0 z-20 flex items-start justify-between gap-5 rounded-2xl border border-[#2a384c] bg-[#08111d]/95 px-5 py-5 shadow-[0_18px_60px_rgba(0,0,0,0.3)] backdrop-blur-xl sm:px-6">
+        <header className="mr-14 rounded-2xl border border-[#2a384c] bg-[#08111d]/95 px-5 py-5 shadow-[0_18px_60px_rgba(0,0,0,0.3)] backdrop-blur-xl sm:px-6">
           <div>
             <div className="flex items-center gap-2">
               <span
@@ -730,15 +739,6 @@ function NewsModalShell({
               {description}
             </p>
           </div>
-          <button
-            type="button"
-            onClick={onClose}
-            autoFocus
-            aria-label="Close"
-            className="grid h-10 w-10 shrink-0 place-items-center rounded-full border border-[#3a4659] bg-[#0d1724] text-2xl font-light leading-none text-[#d4dce7] transition hover:border-[#5b6c83] hover:bg-[#182335] hover:text-white"
-          >
-            <span aria-hidden="true">×</span>
-          </button>
         </header>
         {children}
       </section>
