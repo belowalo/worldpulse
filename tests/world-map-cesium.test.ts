@@ -91,10 +91,11 @@ describe("Cesium country overlays", () => {
     const cartographic = position
       ? runtime.Cartographic.fromCartesian(position)
       : undefined;
-    expect(cartographic?.height).toBeCloseTo(1_000, 3);
+    expect(cartographic?.height).toBeCloseTo(8_000, 3);
     expect(marker.point?.heightReference?.getValue(time)).toBe(
       runtime.HeightReference.NONE,
     );
+    expect(marker.point?.disableDepthTestDistance?.getValue(time)).toBe(0);
     expect(requestRender).toHaveBeenCalledOnce();
   }, 15_000);
 });

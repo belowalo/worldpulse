@@ -90,7 +90,7 @@ const ARC_LIMIT = 20;
 const TERRAIN_TILE_SAMPLES = 65;
 const TERRAIN_MAX_LEVEL = 15;
 const TERRAIN_CACHE_LIMIT = 256;
-const CAPITAL_MARKER_HEIGHT_METERS = 1_000;
+const CAPITAL_MARKER_HEIGHT_METERS = 8_000;
 const INITIAL_LONGITUDE = 17;
 const INITIAL_LATITUDE = 12;
 const INITIAL_HEIGHT_METERS = 18_500_000;
@@ -399,7 +399,7 @@ export function updatePoints(scene: CesiumGlobeScene, points: GlobePoint[]) {
       ),
       point: {
         color: scene.runtime.Color.fromCssColorString(point.color),
-        disableDepthTestDistance: Number.POSITIVE_INFINITY,
+        disableDepthTestDistance: 0,
         heightReference: scene.runtime.HeightReference.NONE,
         outlineColor: scene.runtime.Color.WHITE.withAlpha(0.92),
         outlineWidth: 1.2,
