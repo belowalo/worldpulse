@@ -242,7 +242,7 @@ const formatTime = (value: string) =>
 function ImportancePill({ event }: { event: Event }) {
   return (
     <span
-      className="rounded-full border px-2 py-1 font-mono text-[9px] uppercase tracking-[0.12em]"
+      className="event-score-label border px-2 py-1 font-mono text-[9px] uppercase tracking-[0.12em]"
       style={{
         borderColor: `${categoryColor(event.category)}80`,
         color: categoryColor(event.category),
@@ -915,7 +915,7 @@ function LiveSituationModal({
                       Story {String(index + 1).padStart(2, "0")}
                     </span>
                     <span
-                      className="rounded-full border px-2 py-1 font-mono text-[8px] uppercase tracking-[0.12em]"
+                      className="event-score-label border px-2 py-1 font-mono text-[8px] uppercase tracking-[0.12em]"
                       style={{
                         borderColor: `${categoryColor(event.category)}70`,
                         color: categoryColor(event.category),
