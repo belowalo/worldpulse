@@ -9,6 +9,7 @@
   --panel-2: #151f30;
   --background: #080d15;
   --accent: #73e2cc;
+  --control-radius: 0.65rem;
 }
 
 * {
@@ -47,6 +48,7 @@ button:not(.source-button):not(.icon-button),
 .app-control-select,
 .app-control-input,
 .app-control-link {
+  border-radius: var(--control-radius);
   color: #ffffff;
   font-family: var(--font-geist-mono), monospace;
   font-size: 0.625rem;
@@ -61,7 +63,7 @@ button:not(.source-button):not(.colored-button):not(.icon-button),
 .app-control-input,
 .app-control-link {
   border: 1px solid #46566d;
-  border-radius: 0.65rem;
+  border-radius: var(--control-radius);
   background: rgba(8, 17, 28, 0.94);
   box-shadow: 0 8px 25px rgba(0, 0, 0, 0.32);
 }
@@ -137,20 +139,31 @@ select:focus-visible {
 }
 
 .world-globe .cesium-viewer-bottom {
-  top: 4.25rem;
-  right: 0.75rem;
-  bottom: auto;
-  left: auto;
+  top: auto;
+  right: auto;
+  bottom: 0.35rem;
+  left: 50%;
   z-index: 12;
-  max-width: calc(100% - 13rem);
+  width: max-content;
+  max-width: calc(100% - 2rem);
+  transform: translateX(-50%);
 }
 
 .world-globe .cesium-widget-credits {
-  padding: 0.2rem 0.35rem;
-  border-radius: 0.35rem;
+  padding: 0.1rem 0.25rem;
+  border-radius: 0.25rem;
   background: rgba(4, 10, 17, 0.72);
   font-family: var(--font-geist-sans), Arial, sans-serif;
-  font-size: 0.56rem;
+  font-size: 0.45rem;
+  line-height: 1;
+  opacity: 0.62;
+  white-space: nowrap;
+  transition: opacity 150ms ease;
+}
+
+.world-globe .cesium-widget-credits:hover,
+.world-globe .cesium-widget-credits:focus-within {
+  opacity: 1;
 }
 
 .world-globe .cesium-credit-logoContainer {
@@ -168,7 +181,7 @@ select:focus-visible {
   min-height: 2.75rem;
   place-items: center;
   border: 1px solid #46566d;
-  border-radius: 0.65rem;
+  border-radius: var(--control-radius);
   background: rgba(8, 17, 28, 0.94);
   color: white;
   box-shadow: 0 8px 25px rgba(0, 0, 0, 0.32);
