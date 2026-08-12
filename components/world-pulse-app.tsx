@@ -1213,7 +1213,7 @@ function LiveNewsDirectory() {
               Live
             </span>
           </div>
-          <div className="mt-3 min-h-0 flex-1 space-y-2 overflow-y-auto pr-1 max-xl:max-h-[620px]">
+          <div className="mt-3 min-h-0 flex-1 space-y-2 overflow-y-auto pr-1 scrollbar-thin max-xl:max-h-[620px]">
             {coverage.videos.map((video) => (
               <button
                 type="button"

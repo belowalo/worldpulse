@@ -439,6 +439,10 @@ describe("WorldPulse interactions", () => {
       "xl:inset-y-0",
     );
     expect(
+      within(liveNewsDialog).getByText("Across the newsrooms").parentElement
+        ?.parentElement?.nextElementSibling,
+    ).toHaveClass("scrollbar-thin");
+    expect(
       within(liveNewsDialog).getByText("Across the newsrooms"),
     ).toBeInTheDocument();
     expect(
