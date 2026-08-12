@@ -78,6 +78,44 @@ const NEWSROOM_SEARCHES = [
   "business news live",
 ];
 
+const VERIFIED_LIVE_STREAMS = [
+  {
+    id: "YDvsBbKfLPA",
+    newsroomName: "Sky News",
+    title: "Sky News live",
+  },
+  {
+    id: "gCNeDWCI0vo",
+    newsroomName: "Al Jazeera English",
+    title: "Al Jazeera English live",
+  },
+  {
+    id: "HvZt-nh9sGg",
+    newsroomName: "France 24 English",
+    title: "France 24 English live",
+  },
+  {
+    id: "LuKwFajn37U",
+    newsroomName: "DW News",
+    title: "DW News live",
+  },
+  {
+    id: "iipR5yUp36o",
+    newsroomName: "ABC News",
+    title: "ABC News live",
+  },
+  {
+    id: "QB5BNdBFujE",
+    newsroomName: "Bloomberg Television",
+    title: "Bloomberg Television live",
+  },
+  {
+    id: "60yRxWnUNXs",
+    newsroomName: "WION",
+    title: "WION live",
+  },
+] as const;
+
 const VIDEO_ID_PATTERN = /^[A-Za-z0-9_-]{6,20}$/;
 const HEADLINE_PATTERN = /^[^\u0000-\u001f\u007f]{8,250}$/u;
 const SEARCH_STOP_WORDS = new Set([
@@ -338,6 +376,19 @@ export function parseLiveNewsroomSearch(body: string) {
   });
 }
 
+export function verifiedLiveNewsroomFallback() {
+  return VERIFIED_LIVE_STREAMS.map((stream) => ({
+    id: stream.id,
+    title: stream.title,
+    channelName: stream.newsroomName,
+    newsroomName: stream.newsroomName,
+    viewerCount: 0,
+    thumbnailUrl: `https://i.ytimg.com/vi/${stream.id}/hqdefault.jpg`,
+    watchUrl: `https://www.youtube.com/watch?v=${stream.id}`,
+    embedUrl: `https://www.youtube-nocookie.com/embed/${stream.id}?autoplay=1&mute=1&playsinline=1`,
+  }));
+}
+
 function youtubeSearchUrl(query: string) {
   const searchUrl = new URL("https://www.youtube.com/results");
   searchUrl.searchParams.set("search_query", query);
@@ -373,7 +424,7 @@ export async function discoverLiveNewsrooms(
     (result) => result.status === "fulfilled",
   );
   if (!successful.length) {
-    throw new Error("Every live newsroom lookup failed.");
+    return verifiedLiveNewsroomFallback();
   }
   const bestByNewsroom = new Map<
     string,
@@ -388,13 +439,14 @@ export async function discoverLiveNewsrooms(
       }
     }
   }
-  return [...bestByNewsroom.values()]
+  const discovered = [...bestByNewsroom.values()]
     .sort(
       (left, right) =>
         right.viewerCount - left.viewerCount ||
         left.newsroomName.localeCompare(right.newsroomName),
     )
     .slice(0, 12);
+  return discovered.length ? discovered : verifiedLiveNewsroomFallback();
 }
 
 export async function handleLiveVideo(

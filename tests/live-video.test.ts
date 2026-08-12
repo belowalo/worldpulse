@@ -5,6 +5,7 @@ import {
   handleLiveVideo,
   parseLiveNewsroomSearch,
   parseLiveVideoSearch,
+  verifiedLiveNewsroomFallback,
 } from "../worker/live-video";
 
 function liveRenderer({
@@ -213,6 +214,44 @@ describe("live video discovery", () => {
       id: "wionlive02",
       viewerCount: 1200,
     });
+  });
+
+  it("returns verified newsroom streams when every search request fails", async () => {
+    const fetchMock = vi.fn(async () =>
+      new Response("Unavailable", { status: 503 }),
+    );
+
+    const videos = await discoverLiveNewsrooms(fetchMock);
+
+    expect(fetchMock).toHaveBeenCalledTimes(5);
+    expect(videos).toEqual(verifiedLiveNewsroomFallback());
+    expect(videos).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          newsroomName: "Sky News",
+          embedUrl: expect.stringContaining("youtube-nocookie.com/embed/"),
+        }),
+        expect.objectContaining({ newsroomName: "Al Jazeera English" }),
+      ]),
+    );
+  });
+
+  it("serves the verified directory fallback instead of a 502 response", async () => {
+    const fetchMock = vi.fn(async () =>
+      new Response("Unavailable", { status: 503 }),
+    );
+
+    const response = await handleLiveVideo(
+      new Request("https://worldpulse.test/api/live-video?mode=newsrooms"),
+      fetchMock,
+    );
+    const payload = (await response.json()) as {
+      videos: Array<{ newsroomName: string }>;
+    };
+
+    expect(response.status).toBe(200);
+    expect(payload.videos.length).toBeGreaterThanOrEqual(7);
+    expect(payload.videos[0]?.newsroomName).toBe("Sky News");
   });
 
   it("serves the auto-refreshing newsroom directory mode", async () => {

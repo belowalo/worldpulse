@@ -153,6 +153,10 @@ select:focus-visible {
   font-size: 0.56rem;
 }
 
+.world-globe .cesium-credit-logoContainer {
+  display: none !important;
+}
+
 .world-globe .cesium-widget-credits a,
 .world-globe .cesium-widget-credits a:visited {
   color: #aab5c5;

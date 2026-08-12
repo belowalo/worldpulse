@@ -1044,6 +1044,11 @@ function LiveNewsDirectory() {
   const loadNewsrooms = useCallback(async (initial: boolean) => {
     requestRef.current?.abort();
     const controller = new AbortController();
+    let timedOut = false;
+    const timeout = window.setTimeout(() => {
+      timedOut = true;
+      controller.abort();
+    }, 15_000);
     requestRef.current = controller;
     setCoverage((current) => ({
       ...current,
@@ -1079,16 +1084,20 @@ function LiveNewsDirectory() {
         generatedAt: payload.generatedAt ?? new Date().toISOString(),
       }));
     } catch (error) {
-      if (controller.signal.aborted) return;
+      if (controller.signal.aborted && !timedOut) return;
       setCoverage((current) => ({
         ...current,
         loading: false,
         refreshing: false,
         error:
-          error instanceof Error
+          timedOut
+            ? "Live broadcasts took too long to respond. Please try again."
+            : error instanceof Error
             ? error.message
             : "Live newsrooms could not be checked right now.",
       }));
+    } finally {
+      window.clearTimeout(timeout);
     }
   }, []);
 
