@@ -58,6 +58,10 @@ button:not(.source-button):not(.icon-button),
   text-transform: uppercase;
 }
 
+button.icon-button {
+  border-radius: var(--control-radius);
+}
+
 button:not(.source-button):not(.colored-button):not(.icon-button),
 .app-control-select,
 .app-control-input,
