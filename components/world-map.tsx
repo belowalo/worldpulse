@@ -72,6 +72,8 @@ interface GlobeScene {
   renderer: Three.WebGLRenderer;
   scene: Three.Scene;
   sphere: Three.Mesh;
+  terrainNormalTexture: Three.Texture | null;
+  terrainTexture: Three.Texture | null;
   texture: Three.CanvasTexture;
   textureCanvas: HTMLCanvasElement;
 }
@@ -85,6 +87,11 @@ interface HoveredCountry {
 const TEXTURE_WIDTH = 4096;
 const TEXTURE_HEIGHT = 2048;
 const SPHERE_RADIUS = 1;
+const TERRAIN_DISPLACEMENT_SCALE = 0.05;
+const TERRAIN_BUMP_SCALE = 0.11;
+const TERRAIN_HEIGHTMAP_URL = "/terrain-height.png";
+const TERRAIN_NORMALMAP_URL = "/terrain-normal.png";
+const TERRAIN_NORMAL_SCALE = 0.14;
 const ARC_LIMIT = 20;
 const SMALL_ISLAND_HIT_OFFSETS = [
   [0, -3],
@@ -106,6 +113,8 @@ let geometryFetchIdentity: typeof fetch | null = null;
 let globeRuntimePromise: Promise<GlobeRuntime> | null =
   typeof window === "undefined" ? null : importGlobeRuntime();
 let capitalsPromise: Promise<CapitalCoordinate[]> | null = null;
+let terrainHeightImagePromise: Promise<HTMLImageElement | null> | null = null;
+let terrainNormalImagePromise: Promise<HTMLImageElement | null> | null = null;
 
 export function loadWorldGeometry({
   fresh = false,
@@ -181,11 +190,45 @@ function loadCapitalCoordinates() {
   return capitalsPromise;
 }
 
+function loadTerrainHeightImage() {
+  if (!terrainHeightImagePromise) {
+    terrainHeightImagePromise = new Promise<HTMLImageElement | null>((resolve) => {
+      const image = new Image();
+      image.decoding = "async";
+      image.onload = () => resolve(image);
+      image.onerror = () => {
+        console.warn("Terrain heightmap was unavailable; using the smooth globe.");
+        resolve(null);
+      };
+      image.src = TERRAIN_HEIGHTMAP_URL;
+    });
+  }
+  return terrainHeightImagePromise;
+}
+
+function loadTerrainNormalImage() {
+  if (!terrainNormalImagePromise) {
+    terrainNormalImagePromise = new Promise<HTMLImageElement | null>((resolve) => {
+      const image = new Image();
+      image.decoding = "async";
+      image.onload = () => resolve(image);
+      image.onerror = () => {
+        console.warn("Terrain normal map was unavailable; using height shading.");
+        resolve(null);
+      };
+      image.src = TERRAIN_NORMALMAP_URL;
+    });
+  }
+  return terrainNormalImagePromise;
+}
+
 export async function preloadWorldGlobe() {
   await Promise.all([
     loadWorldGeometry(),
     loadGlobeRuntime(),
     loadCapitalCoordinates(),
+    loadTerrainHeightImage(),
+    loadTerrainNormalImage(),
   ]);
 }
 
@@ -391,7 +434,7 @@ function updatePoints(
       runtime.THREE,
       point.lat,
       point.lng,
-      1.003,
+      1.04,
     );
     const color = new runtime.THREE.Color(point.color);
     position.toArray(positions, index * 3);
@@ -450,7 +493,7 @@ function updateArcs(
         .clone()
         .lerp(end, progress)
         .normalize()
-        .multiplyScalar(1.025 + Math.sin(Math.PI * progress) * peak);
+        .multiplyScalar(1.045 + Math.sin(Math.PI * progress) * peak);
       vertices.push(position);
     }
     const curve = new runtime.THREE.CatmullRomCurve3(vertices);
@@ -664,8 +707,16 @@ export function WorldMap({
       loadWorldGeometry(),
       loadGlobeRuntime(),
       loadCapitalCoordinates(),
+      loadTerrainHeightImage(),
+      loadTerrainNormalImage(),
     ])
-      .then(([geometry, runtime, capitals]) => {
+      .then(([
+        geometry,
+        runtime,
+        capitals,
+        terrainHeightImage,
+        terrainNormalImage,
+      ]) => {
         if (cancelled || !containerRef.current) return;
         runtimeRef.current = runtime;
         geometryRef.current = geometry;
@@ -700,10 +751,57 @@ export function WorldMap({
           renderer.capabilities.getMaxAnisotropy(),
         );
 
+        const terrainTexture = terrainHeightImage
+          ? new runtime.THREE.Texture(terrainHeightImage)
+          : null;
+        if (terrainTexture) {
+          terrainTexture.colorSpace = runtime.THREE.NoColorSpace;
+          terrainTexture.minFilter = runtime.THREE.LinearMipmapLinearFilter;
+          terrainTexture.magFilter = runtime.THREE.LinearFilter;
+          terrainTexture.generateMipmaps = true;
+          terrainTexture.wrapS = runtime.THREE.RepeatWrapping;
+          terrainTexture.anisotropy = Math.min(
+            8,
+            renderer.capabilities.getMaxAnisotropy(),
+          );
+          terrainTexture.needsUpdate = true;
+        }
+
+        const terrainNormalTexture = terrainNormalImage
+          ? new runtime.THREE.Texture(terrainNormalImage)
+          : null;
+        if (terrainNormalTexture) {
+          terrainNormalTexture.colorSpace = runtime.THREE.NoColorSpace;
+          terrainNormalTexture.minFilter =
+            runtime.THREE.LinearMipmapLinearFilter;
+          terrainNormalTexture.magFilter = runtime.THREE.LinearFilter;
+          terrainNormalTexture.generateMipmaps = true;
+          terrainNormalTexture.wrapS = runtime.THREE.RepeatWrapping;
+          terrainNormalTexture.anisotropy = Math.min(
+            8,
+            renderer.capabilities.getMaxAnisotropy(),
+          );
+          terrainNormalTexture.needsUpdate = true;
+        }
+
         const sphere = new runtime.THREE.Mesh(
           new runtime.THREE.SphereGeometry(SPHERE_RADIUS, 256, 160),
           new runtime.THREE.MeshStandardMaterial({
             map: texture,
+            displacementMap: terrainTexture ?? undefined,
+            displacementScale: terrainTexture
+              ? TERRAIN_DISPLACEMENT_SCALE
+              : 0,
+            bumpMap: terrainNormalTexture
+              ? undefined
+              : (terrainTexture ?? undefined),
+            bumpScale:
+              terrainTexture && !terrainNormalTexture ? TERRAIN_BUMP_SCALE : 0,
+            normalMap: terrainNormalTexture ?? undefined,
+            normalScale: new runtime.THREE.Vector2(
+              TERRAIN_NORMAL_SCALE,
+              TERRAIN_NORMAL_SCALE,
+            ),
             color: 0xffffff,
             emissive: 0x02070d,
             emissiveIntensity: 0.22,
@@ -755,6 +853,8 @@ export function WorldMap({
           renderer,
           scene,
           sphere,
+          terrainNormalTexture,
+          terrainTexture,
           texture,
           textureCanvas,
         };
@@ -805,6 +905,8 @@ export function WorldMap({
         globeScene.controls.dispose();
         disposeObject(globeScene.scene);
         globeScene.markerTexture.dispose();
+        globeScene.terrainNormalTexture?.dispose();
+        globeScene.terrainTexture?.dispose();
         globeScene.texture.dispose();
         globeScene.renderer.dispose();
       }

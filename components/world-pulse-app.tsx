@@ -776,6 +776,30 @@ function TopicsModal({ onClose }: { onClose: () => void }) {
             Select a story to see its verified international connections.
           </span>
         </div>
+        <details className="mt-4 text-[9px] leading-4 text-[#68778a]">
+          <summary className="cursor-pointer text-[#8fcfc4] hover:underline">
+            Terrain data credits
+          </summary>
+          <p className="mt-2">
+            Mapzen terrain data includes ArcticDEM (DigitalGlobe imagery and
+            NSF awards 1043681, 1559691, and 1542736); © Commonwealth of
+            Australia (Geoscience Australia) 2017; © offene Daten Österreichs
+            — DGM Österreich; information licensed under the Open Government
+            Licence — Canada; EU-DEM layers produced using Copernicus data and
+            EU funding; NOAA global ETOPO1; INEGI Continental relief 2016;
+            Copyright 2011 Crown copyright, LINZ and the New Zealand Government;
+            © Kartverket; © Environment Agency copyright and/or database right
+            2015; and USGS 3DEP, GMTED2010, and SRTM data.
+          </p>
+          <a
+            href="https://registry.opendata.aws/terrain-tiles/"
+            target="_blank"
+            rel="noreferrer"
+            className="text-[#8fcfc4] hover:underline"
+          >
+            Source and full attribution ↗
+          </a>
+        </details>
       </section>
     </div>
   );
