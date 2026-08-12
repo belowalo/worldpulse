@@ -44,6 +44,7 @@ select {
 
 button:not(.source-button):not(.icon-button),
 .app-control-select,
+.app-control-input,
 .app-control-link {
   color: #ffffff;
   font-family: var(--font-geist-mono), monospace;
@@ -56,6 +57,7 @@ button:not(.source-button):not(.icon-button),
 
 button:not(.source-button):not(.colored-button):not(.icon-button),
 .app-control-select,
+.app-control-input,
 .app-control-link {
   border: 1px solid #46566d;
   border-radius: 0.65rem;
@@ -65,6 +67,7 @@ button:not(.source-button):not(.colored-button):not(.icon-button),
 
 button:not(.source-button):not(.colored-button):not(.icon-button):hover,
 .app-control-select:hover,
+.app-control-input:hover,
 .app-control-link:hover {
   border-color: #73e2cc;
   background: rgba(18, 40, 51, 0.98);
@@ -72,6 +75,33 @@ button:not(.source-button):not(.colored-button):not(.icon-button):hover,
 
 .app-control-select option {
   text-transform: uppercase;
+}
+
+.app-control-input::placeholder {
+  color: #a9b7c9;
+  text-transform: uppercase;
+}
+
+#country-news-panel {
+  background: #081321;
+}
+
+#country-news-panel .country-news-panel__header {
+  background: rgba(8, 19, 33, 0.96);
+}
+
+#country-news-panel button:not(.source-button):not(.colored-button):not(.icon-button),
+#country-news-panel .app-control-select,
+#country-news-panel .app-control-input {
+  border-color: #5b6f88;
+  background: #18283d;
+}
+
+#country-news-panel button:not(.source-button):not(.colored-button):not(.icon-button):hover,
+#country-news-panel .app-control-select:hover,
+#country-news-panel .app-control-input:hover {
+  border-color: #8ba2bd;
+  background: #223650;
 }
 
 button,

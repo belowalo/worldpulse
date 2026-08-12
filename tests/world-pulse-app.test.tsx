@@ -409,6 +409,9 @@ describe("WorldPulse interactions", () => {
     expect(
       await screen.findByRole("combobox", { name: "Filter by category" }),
     ).toHaveClass("app-control-select");
+    expect(screen.getByRole("searchbox", { name: "Search news" })).toHaveClass(
+      "app-control-input",
+    );
     const topStoriesButton = await screen.findByRole("button", {
       name: "Top Stories",
     });

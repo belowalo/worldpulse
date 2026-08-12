@@ -2545,7 +2545,7 @@ export function WorldPulseApp({
             className="flex min-h-[620px] flex-col bg-[#101722] lg:h-[calc(100vh-4rem)] lg:min-h-0"
             aria-label={globalView ? "Global events" : "Country news panel"}
           >
-          <div className="sticky top-16 z-20 border-b border-[#273246] bg-[#101722]/95 px-5 pb-4 pt-5 backdrop-blur lg:static">
+          <div className="country-news-panel__header sticky top-16 z-20 border-b border-[#273246] bg-[#101722]/95 px-5 pb-4 pt-5 backdrop-blur lg:static">
             <div className="flex items-start justify-between gap-4">
               <div>
                 <div className="flex items-center gap-2">
@@ -2645,7 +2645,7 @@ export function WorldPulseApp({
                   setConnectionEventId(null);
                 }}
                 placeholder="Search headlines, summaries, sources…"
-                className="h-9 w-full rounded-lg border border-[#303d51] bg-[#111a29] px-3 text-xs text-white placeholder:text-[#657286]"
+                className="app-control-input h-9 w-full rounded-lg border border-[#303d51] bg-[#111a29] px-3 text-xs text-white placeholder:text-[#657286]"
               />
             </label>
           </div>
