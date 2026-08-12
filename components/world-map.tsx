@@ -397,13 +397,25 @@ export function updatePoints(scene: CesiumGlobeScene, points: GlobePoint[]) {
         point.lat,
         CAPITAL_MARKER_HEIGHT_METERS,
       ),
-      point: {
-        color: scene.runtime.Color.fromCssColorString(point.color),
+      label: {
         disableDepthTestDistance: 0,
+        fillColor: scene.runtime.Color.fromCssColorString(point.color),
+        font: point.country.topEvent
+          ? "700 22px Arial, sans-serif"
+          : "700 18px Arial, sans-serif",
         heightReference: scene.runtime.HeightReference.NONE,
+        horizontalOrigin: scene.runtime.HorizontalOrigin.CENTER,
         outlineColor: scene.runtime.Color.WHITE.withAlpha(0.92),
-        outlineWidth: 1.2,
-        pixelSize: point.country.topEvent ? 6 : 4,
+        outlineWidth: 2,
+        scaleByDistance: new scene.runtime.NearFarScalar(
+          50_000,
+          1,
+          35_000_000,
+          0.22,
+        ),
+        style: scene.runtime.LabelStyle.FILL_AND_OUTLINE,
+        text: "★",
+        verticalOrigin: scene.runtime.VerticalOrigin.CENTER,
       },
     });
   });
