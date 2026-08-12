@@ -47,7 +47,7 @@ interface GlobeArc {
   startLng: number;
 }
 
-interface GlobePoint {
+export interface GlobePoint {
   capital: string;
   color: string;
   country: MapCountry;
@@ -90,6 +90,7 @@ const ARC_LIMIT = 20;
 const TERRAIN_TILE_SAMPLES = 65;
 const TERRAIN_MAX_LEVEL = 15;
 const TERRAIN_CACHE_LIMIT = 256;
+const CAPITAL_MARKER_HEIGHT_METERS = 1_000;
 const INITIAL_LONGITUDE = 17;
 const INITIAL_LATITUDE = 12;
 const INITIAL_HEIGHT_METERS = 18_500_000;
@@ -302,7 +303,7 @@ function createSatelliteProvider(runtime: CesiumRuntime) {
   });
 }
 
-function prepareCountryGeoJson(geometry: WorldFeatureCollection) {
+export function prepareCountryGeoJson(geometry: WorldFeatureCollection) {
   return {
     type: "FeatureCollection" as const,
     features: geometry.features.map((feature, index) => ({
@@ -318,7 +319,7 @@ function prepareCountryGeoJson(geometry: WorldFeatureCollection) {
   };
 }
 
-async function createCountryDataSource(
+export async function createCountryDataSource(
   runtime: CesiumRuntime,
   geometry: WorldFeatureCollection,
 ) {
@@ -329,14 +330,19 @@ async function createCountryDataSource(
     stroke: runtime.Color.fromCssColorString("#b4cfdb").withAlpha(0.68),
     strokeWidth: 1.15,
   });
-  const countryEntities = prepared.features.flatMap((feature) => {
-    const entity = dataSource.entities.getById(feature.id);
-    if (!entity) return [];
+  const propertyTime = runtime.JulianDate.now();
+  const countryEntities = dataSource.entities.values.flatMap((entity) => {
+    if (!entity.polygon) return [];
+    const properties = entity.properties?.getValue(propertyTime) as
+      | Record<string, unknown>
+      | undefined;
+    const featureId = properties?.worldPulseFeatureId;
+    const featureName = properties?.worldPulseFeatureName;
     return [
       {
         entity,
-        featureId: feature.properties.worldPulseFeatureId,
-        featureName: feature.properties.worldPulseFeatureName,
+        featureId: featureId == null ? null : String(featureId),
+        featureName: featureName == null ? "" : String(featureName),
       },
     ];
   });
@@ -359,7 +365,7 @@ function updateCountryEntities(
       countryIndex.byName,
     );
     const selected = country?.mapId === selectedMapId;
-    const alpha = selected ? 0.58 : country?.topEvent ? 0.31 : 0.2;
+    const alpha = selected ? 0.68 : country?.topEvent ? 0.46 : 0.28;
     const fill = scene.runtime.Color.fromCssColorString(
       countryColor(country),
     ).withAlpha(alpha);
@@ -377,7 +383,7 @@ function updateCountryEntities(
   scene.viewer.scene.requestRender();
 }
 
-function updatePoints(scene: CesiumGlobeScene, points: GlobePoint[]) {
+export function updatePoints(scene: CesiumGlobeScene, points: GlobePoint[]) {
   scene.markers.entities.removeAll();
   scene.markerCountries.clear();
   points.forEach((point, index) => {
@@ -386,11 +392,15 @@ function updatePoints(scene: CesiumGlobeScene, points: GlobePoint[]) {
     scene.markers.entities.add({
       id,
       name: point.capital,
-      position: scene.runtime.Cartesian3.fromDegrees(point.lng, point.lat),
+      position: scene.runtime.Cartesian3.fromDegrees(
+        point.lng,
+        point.lat,
+        CAPITAL_MARKER_HEIGHT_METERS,
+      ),
       point: {
         color: scene.runtime.Color.fromCssColorString(point.color),
         disableDepthTestDistance: Number.POSITIVE_INFINITY,
-        heightReference: scene.runtime.HeightReference.CLAMP_TO_GROUND,
+        heightReference: scene.runtime.HeightReference.NONE,
         outlineColor: scene.runtime.Color.WHITE.withAlpha(0.92),
         outlineWidth: 1.2,
         pixelSize: point.country.topEvent ? 6 : 4,
