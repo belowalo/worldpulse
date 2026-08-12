@@ -1,17 +1,20 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import type * as Three from "three";
-import type { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
+import type {
+  CustomDataSource,
+  Entity,
+  GeoJsonDataSource,
+  Viewer,
+} from "cesium";
 import {
-  buildCountryHitIndex,
-  countryFeatureAtCoordinates,
-  polygonsForFeature,
-  type CountryHitIndex,
   type WorldFeature,
   type WorldFeatureCollection,
 } from "@/lib/country-hit-test";
-import type { globeRuntime } from "@/lib/globe-runtime";
+import {
+  loadCesiumRuntime,
+  type CesiumRuntime,
+} from "@/lib/cesium-runtime";
 import {
   buildEventLinkCollection,
   countryCentersFromGeoJson,
@@ -60,22 +63,21 @@ interface CapitalCoordinate {
   lng: number;
 }
 
-type GlobeRuntime = typeof globeRuntime;
+interface CountryEntityRecord {
+  entity: Entity;
+  featureId: string | null;
+  featureName: string;
+}
 
-interface GlobeScene {
-  arcs: Three.Group;
-  camera: Three.PerspectiveCamera;
-  controls: OrbitControls;
-  markerTexture: Three.CanvasTexture;
-  points: Three.Points | null;
-  raycaster: Three.Raycaster;
-  renderer: Three.WebGLRenderer;
-  scene: Three.Scene;
-  sphere: Three.Mesh;
-  terrainNormalTexture: Three.Texture | null;
-  terrainTexture: Three.Texture | null;
-  texture: Three.CanvasTexture;
-  textureCanvas: HTMLCanvasElement;
+interface CesiumGlobeScene {
+  arcs: CustomDataSource;
+  countries: GeoJsonDataSource;
+  countryEntities: CountryEntityRecord[];
+  countryEntityIndex: Map<string, CountryEntityRecord>;
+  markers: CustomDataSource;
+  markerCountries: Map<string, MapCountry>;
+  runtime: CesiumRuntime;
+  viewer: Viewer;
 }
 
 interface HoveredCountry {
@@ -84,15 +86,15 @@ interface HoveredCountry {
   y: number;
 }
 
-const TEXTURE_WIDTH = 4096;
-const TEXTURE_HEIGHT = 2048;
-const SPHERE_RADIUS = 1;
-const TERRAIN_DISPLACEMENT_SCALE = 0.05;
-const TERRAIN_BUMP_SCALE = 0.11;
-const TERRAIN_HEIGHTMAP_URL = "/terrain-height.png";
-const TERRAIN_NORMALMAP_URL = "/terrain-normal.png";
-const TERRAIN_NORMAL_SCALE = 0.14;
 const ARC_LIMIT = 20;
+const TERRAIN_TILE_SAMPLES = 65;
+const TERRAIN_MAX_LEVEL = 15;
+const TERRAIN_CACHE_LIMIT = 256;
+const INITIAL_LONGITUDE = 17;
+const INITIAL_LATITUDE = 12;
+const INITIAL_HEIGHT_METERS = 18_500_000;
+const SATELLITE_TILE_URL =
+  "https://tiles.maps.eox.at/wmts/1.0.0/s2cloudless_3857/default/g/{z}/{y}/{x}.jpg";
 const SMALL_ISLAND_HIT_OFFSETS = [
   [0, -3],
   [3, 0],
@@ -110,11 +112,8 @@ const SMALL_ISLAND_HIT_OFFSETS = [
 
 let geometryPromise: Promise<WorldFeatureCollection> | null = null;
 let geometryFetchIdentity: typeof fetch | null = null;
-let globeRuntimePromise: Promise<GlobeRuntime> | null =
-  typeof window === "undefined" ? null : importGlobeRuntime();
 let capitalsPromise: Promise<CapitalCoordinate[]> | null = null;
-let terrainHeightImagePromise: Promise<HTMLImageElement | null> | null = null;
-let terrainNormalImagePromise: Promise<HTMLImageElement | null> | null = null;
+const terrainTileCache = new Map<string, Promise<Float32Array>>();
 
 export function loadWorldGeometry({
   fresh = false,
@@ -147,20 +146,6 @@ export function loadWorldGeometry({
   return geometryPromise;
 }
 
-function importGlobeRuntime() {
-  return import("@/lib/globe-runtime")
-    .then(({ globeRuntime: runtime }) => runtime)
-    .catch((error) => {
-      globeRuntimePromise = null;
-      throw error;
-    });
-}
-
-function loadGlobeRuntime() {
-  if (!globeRuntimePromise) globeRuntimePromise = importGlobeRuntime();
-  return globeRuntimePromise;
-}
-
 function loadCapitalCoordinates() {
   if (!capitalsPromise) {
     capitalsPromise = fetch("/world-capitals.json", {
@@ -183,52 +168,21 @@ function loadCapitalCoordinates() {
       )
       .catch((error) => {
         capitalsPromise = null;
-        console.warn("Capital coordinates were unavailable; using country centers.", error);
+        console.warn(
+          "Capital coordinates were unavailable; using country centers.",
+          error,
+        );
         return [];
       });
   }
   return capitalsPromise;
 }
 
-function loadTerrainHeightImage() {
-  if (!terrainHeightImagePromise) {
-    terrainHeightImagePromise = new Promise<HTMLImageElement | null>((resolve) => {
-      const image = new Image();
-      image.decoding = "async";
-      image.onload = () => resolve(image);
-      image.onerror = () => {
-        console.warn("Terrain heightmap was unavailable; using the smooth globe.");
-        resolve(null);
-      };
-      image.src = TERRAIN_HEIGHTMAP_URL;
-    });
-  }
-  return terrainHeightImagePromise;
-}
-
-function loadTerrainNormalImage() {
-  if (!terrainNormalImagePromise) {
-    terrainNormalImagePromise = new Promise<HTMLImageElement | null>((resolve) => {
-      const image = new Image();
-      image.decoding = "async";
-      image.onload = () => resolve(image);
-      image.onerror = () => {
-        console.warn("Terrain normal map was unavailable; using height shading.");
-        resolve(null);
-      };
-      image.src = TERRAIN_NORMALMAP_URL;
-    });
-  }
-  return terrainNormalImagePromise;
-}
-
 export async function preloadWorldGlobe() {
   await Promise.all([
     loadWorldGeometry(),
-    loadGlobeRuntime(),
+    loadCesiumRuntime(),
     loadCapitalCoordinates(),
-    loadTerrainHeightImage(),
-    loadTerrainNormalImage(),
   ]);
 }
 
@@ -236,10 +190,19 @@ function featureName(feature: WorldFeature) {
   return feature.properties?.name?.trim() ?? "";
 }
 
+function countryForFeature(
+  featureId: string | null,
+  name: string,
+  byId: Map<string, MapCountry>,
+  byName: Map<string, MapCountry>,
+) {
+  return (featureId ? byId.get(featureId) : undefined) ?? byName.get(name);
+}
+
 function countryColor(country?: MapCountry) {
-  if (!country) return "#213749";
+  if (!country) return "#33495a";
   if (!country.topEvent) {
-    return country.signalReady === false ? "#3a5064" : "#31566d";
+    return country.signalReady === false ? "#5b6b78" : "#42657a";
   }
   return mapStyleForEvent(
     country.topEvent.category,
@@ -247,284 +210,256 @@ function countryColor(country?: MapCountry) {
   ).fillColor;
 }
 
-function normalizeLongitude(longitude: number) {
-  return ((((longitude + 180) % 360) + 360) % 360) - 180;
+function flatTerrainTile() {
+  return new Float32Array(TERRAIN_TILE_SAMPLES * TERRAIN_TILE_SAMPLES);
 }
 
-function traceRing(
-  context: CanvasRenderingContext2D,
-  ring: number[][],
-  horizontalShift: number,
-) {
-  if (!ring.length) return;
-  let previousLongitude = ring[0][0];
-  let unwrappedLongitude = previousLongitude;
-
-  ring.forEach((position, index) => {
-    const longitude = position[0];
-    const latitude = Math.max(-90, Math.min(90, position[1]));
-    if (index) {
-      let delta = longitude - previousLongitude;
-      if (delta > 180) delta -= 360;
-      if (delta < -180) delta += 360;
-      unwrappedLongitude += delta;
-    }
-    const x =
-      ((unwrappedLongitude + 180) / 360) * TEXTURE_WIDTH + horizontalShift;
-    const y = ((90 - latitude) / 180) * TEXTURE_HEIGHT;
-    if (index === 0) context.moveTo(x, y);
-    else context.lineTo(x, y);
-    previousLongitude = longitude;
-  });
-  context.closePath();
-}
-
-function traceFeature(
-  context: CanvasRenderingContext2D,
-  feature: WorldFeature,
-) {
-  context.beginPath();
-  for (const polygon of polygonsForFeature(feature)) {
-    for (const ring of polygon) {
-      traceRing(context, ring, 0);
-      const crossesAntimeridian = ring.some((position, index) => {
-        const previous = ring[index - 1];
-        return previous ? Math.abs(position[0] - previous[0]) > 180 : false;
-      });
-      if (crossesAntimeridian) {
-        traceRing(context, ring, -TEXTURE_WIDTH);
-        traceRing(context, ring, TEXTURE_WIDTH);
+async function decodeTerrainTile(response: Response) {
+  const blob = await response.blob();
+  const bitmap = await createImageBitmap(blob);
+  try {
+    const canvas = document.createElement("canvas");
+    canvas.width = bitmap.width;
+    canvas.height = bitmap.height;
+    const context = canvas.getContext("2d", { willReadFrequently: true });
+    if (!context) return flatTerrainTile();
+    context.drawImage(bitmap, 0, 0);
+    const pixels = context.getImageData(0, 0, bitmap.width, bitmap.height).data;
+    const elevations = new Float32Array(
+      TERRAIN_TILE_SAMPLES * TERRAIN_TILE_SAMPLES,
+    );
+    for (let row = 0; row < TERRAIN_TILE_SAMPLES; row += 1) {
+      const sourceY = Math.round(
+        (row / (TERRAIN_TILE_SAMPLES - 1)) * (bitmap.height - 1),
+      );
+      for (let column = 0; column < TERRAIN_TILE_SAMPLES; column += 1) {
+        const sourceX = Math.round(
+          (column / (TERRAIN_TILE_SAMPLES - 1)) * (bitmap.width - 1),
+        );
+        const pixel = (sourceY * bitmap.width + sourceX) * 4;
+        const elevation =
+          pixels[pixel] * 256 +
+          pixels[pixel + 1] +
+          pixels[pixel + 2] / 256 -
+          32_768;
+        elevations[row * TERRAIN_TILE_SAMPLES + column] = Math.max(
+          0,
+          elevation,
+        );
       }
     }
+    return elevations;
+  } finally {
+    bitmap.close();
   }
 }
 
-function countryForFeature(
-  feature: WorldFeature,
-  byId: Map<string, MapCountry>,
-  byName: Map<string, MapCountry>,
-) {
-  return (
-    (feature.id != null ? byId.get(String(feature.id)) : undefined) ??
-    byName.get(featureName(feature))
-  );
-}
+function requestTerrainTile(x: number, y: number, level: number) {
+  if (level > TERRAIN_MAX_LEVEL) return undefined;
+  const cacheKey = `${level}/${x}/${y}`;
+  const cached = terrainTileCache.get(cacheKey);
+  if (cached) return cached;
 
-function drawWorldTexture({
-  scene,
-  geometry,
-  byId,
-  byName,
-}: {
-  scene: GlobeScene;
-  geometry: WorldFeatureCollection;
-  byId: Map<string, MapCountry>;
-  byName: Map<string, MapCountry>;
-}) {
-  const context = scene.textureCanvas.getContext("2d");
-  if (!context) return;
-
-  context.clearRect(0, 0, TEXTURE_WIDTH, TEXTURE_HEIGHT);
-  context.imageSmoothingEnabled = true;
-  context.imageSmoothingQuality = "high";
-  const ocean = context.createLinearGradient(0, 0, 0, TEXTURE_HEIGHT);
-  ocean.addColorStop(0, "#0b1d2d");
-  ocean.addColorStop(0.48, "#071522");
-  ocean.addColorStop(1, "#040c15");
-  context.fillStyle = ocean;
-  context.fillRect(0, 0, TEXTURE_WIDTH, TEXTURE_HEIGHT);
-  context.beginPath();
-  for (let longitude = -165; longitude <= 165; longitude += 15) {
-    const x = ((longitude + 180) / 360) * TEXTURE_WIDTH;
-    context.moveTo(x, 0);
-    context.lineTo(x, TEXTURE_HEIGHT);
+  const tile = fetch(`/api/terrain/${level}/${x}/${y}`, {
+    signal: AbortSignal.timeout(20_000),
+  })
+    .then((response) =>
+      response.ok ? decodeTerrainTile(response) : flatTerrainTile(),
+    )
+    .catch(() => flatTerrainTile());
+  terrainTileCache.set(cacheKey, tile);
+  if (terrainTileCache.size > TERRAIN_CACHE_LIMIT) {
+    const oldestKey = terrainTileCache.keys().next().value;
+    if (oldestKey) terrainTileCache.delete(oldestKey);
   }
-  for (let latitude = -75; latitude <= 75; latitude += 15) {
-    const y = ((90 - latitude) / 180) * TEXTURE_HEIGHT;
-    context.moveTo(0, y);
-    context.lineTo(TEXTURE_WIDTH, y);
-  }
-  context.strokeStyle = "rgba(109, 156, 181, 0.1)";
-  context.lineWidth = 1;
-  context.stroke();
-  geometry.features.forEach((feature) => {
-    const country = countryForFeature(feature, byId, byName);
-    traceFeature(context, feature);
-    context.fillStyle = countryColor(country);
-    context.fill("evenodd");
-    context.strokeStyle = "rgba(147, 193, 216, 0.68)";
-    context.lineWidth = 1.25;
-    context.stroke();
-  });
-  scene.texture.needsUpdate = true;
+  return tile;
 }
 
-function vectorForLatLng(
-  THREE: GlobeRuntime["THREE"],
-  latitude: number,
-  longitude: number,
-  radius = SPHERE_RADIUS,
-) {
-  const lat = (latitude * Math.PI) / 180;
-  const lng = (longitude * Math.PI) / 180;
-  const cosine = Math.cos(lat);
-  return new THREE.Vector3(
-    radius * cosine * Math.sin(lng),
-    radius * Math.sin(lat),
-    radius * cosine * Math.cos(lng),
-  );
-}
-
-function disposeObject(object: Three.Object3D) {
-  object.traverse((child) => {
-    const renderable = child as Three.Mesh;
-    renderable.geometry?.dispose();
-    const materials = Array.isArray(renderable.material)
-      ? renderable.material
-      : renderable.material
-        ? [renderable.material]
-        : [];
-    for (const material of materials) material.dispose();
+function createTerrainProvider(runtime: CesiumRuntime) {
+  return new runtime.CustomHeightmapTerrainProvider({
+    width: TERRAIN_TILE_SAMPLES,
+    height: TERRAIN_TILE_SAMPLES,
+    tilingScheme: new runtime.WebMercatorTilingScheme(),
+    callback: requestTerrainTile,
+    credit: new runtime.Credit(
+      '<a href="https://registry.opendata.aws/terrain-tiles/" target="_blank" rel="noreferrer">Mapzen terrain via AWS Open Data</a>',
+    ),
   });
 }
 
-function createCapitalMarkerCanvas() {
-  const canvas = document.createElement("canvas");
-  canvas.width = 192;
-  canvas.height = 192;
-  const context = canvas.getContext("2d");
-  if (!context) return canvas;
-  const glow = context.createRadialGradient(96, 96, 6, 96, 96, 86);
-  glow.addColorStop(0, "rgba(255,255,255,1)");
-  glow.addColorStop(0.16, "rgba(255,255,255,0.95)");
-  glow.addColorStop(0.36, "rgba(255,255,255,0.3)");
-  glow.addColorStop(1, "rgba(255,255,255,0)");
-  context.fillStyle = glow;
-  context.fillRect(0, 0, 192, 192);
-  context.strokeStyle = "rgba(255,255,255,0.92)";
-  context.lineWidth = 5;
-  context.beginPath();
-  context.arc(96, 96, 34, 0, Math.PI * 2);
-  context.stroke();
-  context.save();
-  context.translate(96, 96);
-  context.rotate(Math.PI / 4);
-  context.fillStyle = "rgba(255,255,255,0.96)";
-  context.fillRect(-9, -9, 18, 18);
-  context.restore();
-  return canvas;
+function createSatelliteProvider(runtime: CesiumRuntime) {
+  return new runtime.UrlTemplateImageryProvider({
+    url: SATELLITE_TILE_URL,
+    tilingScheme: new runtime.WebMercatorTilingScheme(),
+    minimumLevel: 0,
+    maximumLevel: 13,
+    tileWidth: 256,
+    tileHeight: 256,
+    hasAlphaChannel: false,
+    credit: new runtime.Credit(
+      '<a href="https://cloudless.eox.at/" target="_blank" rel="noreferrer">Sentinel-2 cloudless by EOX (modified Copernicus Sentinel data 2016)</a>',
+    ),
+  });
 }
 
-function updatePoints(
-  runtime: GlobeRuntime,
-  globeScene: GlobeScene,
-  points: GlobePoint[],
-) {
-  if (globeScene.points) {
-    globeScene.scene.remove(globeScene.points);
-    disposeObject(globeScene.points);
-    globeScene.points = null;
-  }
-  if (!points.length) return;
+function prepareCountryGeoJson(geometry: WorldFeatureCollection) {
+  return {
+    type: "FeatureCollection" as const,
+    features: geometry.features.map((feature, index) => ({
+      ...feature,
+      id: `worldpulse-country-${index}`,
+      properties: {
+        ...feature.properties,
+        worldPulseFeatureId:
+          feature.id == null ? null : String(feature.id),
+        worldPulseFeatureName: featureName(feature),
+      },
+    })),
+  };
+}
 
-  const positions = new Float32Array(points.length * 3);
-  const colors = new Float32Array(points.length * 3);
-  points.forEach((point, index) => {
-    const position = vectorForLatLng(
-      runtime.THREE,
-      point.lat,
-      point.lng,
-      1.04,
+async function createCountryDataSource(
+  runtime: CesiumRuntime,
+  geometry: WorldFeatureCollection,
+) {
+  const prepared = prepareCountryGeoJson(geometry);
+  const dataSource = await runtime.GeoJsonDataSource.load(prepared, {
+    clampToGround: true,
+    fill: runtime.Color.WHITE.withAlpha(0.24),
+    stroke: runtime.Color.fromCssColorString("#b4cfdb").withAlpha(0.68),
+    strokeWidth: 1.15,
+  });
+  const countryEntities = prepared.features.flatMap((feature) => {
+    const entity = dataSource.entities.getById(feature.id);
+    if (!entity) return [];
+    return [
+      {
+        entity,
+        featureId: feature.properties.worldPulseFeatureId,
+        featureName: feature.properties.worldPulseFeatureName,
+      },
+    ];
+  });
+  return { countryEntities, dataSource };
+}
+
+function updateCountryEntities(
+  scene: CesiumGlobeScene,
+  countryIndex: {
+    byId: Map<string, MapCountry>;
+    byName: Map<string, MapCountry>;
+  },
+  selectedMapId: string | null,
+) {
+  for (const record of scene.countryEntities) {
+    const country = countryForFeature(
+      record.featureId,
+      record.featureName,
+      countryIndex.byId,
+      countryIndex.byName,
     );
-    const color = new runtime.THREE.Color(point.color);
-    position.toArray(positions, index * 3);
-    color.toArray(colors, index * 3);
-  });
-  const geometry = new runtime.THREE.BufferGeometry();
-  geometry.setAttribute(
-    "position",
-    new runtime.THREE.BufferAttribute(positions, 3),
-  );
-  geometry.setAttribute("color", new runtime.THREE.BufferAttribute(colors, 3));
-  const material = new runtime.THREE.PointsMaterial({
-    size: 0.05,
-    sizeAttenuation: true,
-    transparent: true,
-    opacity: 0.95,
-    vertexColors: true,
-    map: globeScene.markerTexture,
-    alphaTest: 0.025,
-    depthWrite: false,
-    blending: runtime.THREE.AdditiveBlending,
-  });
-  globeScene.points = new runtime.THREE.Points(geometry, material);
-  globeScene.points.renderOrder = 3;
-  globeScene.scene.add(globeScene.points);
-}
-
-function updateArcs(
-  runtime: GlobeRuntime,
-  globeScene: GlobeScene,
-  arcs: GlobeArc[],
-) {
-  globeScene.scene.remove(globeScene.arcs);
-  disposeObject(globeScene.arcs);
-  globeScene.arcs = new runtime.THREE.Group();
-
-  for (const arc of arcs.slice(0, ARC_LIMIT)) {
-    const start = vectorForLatLng(
-      runtime.THREE,
-      arc.startLat,
-      arc.startLng,
-    ).normalize();
-    const end = vectorForLatLng(
-      runtime.THREE,
-      arc.endLat,
-      arc.endLng,
-    ).normalize();
-    const peak = Math.max(
-      0.1,
-      Math.min(0.3, arc.importanceScore / 300),
-    );
-    const vertices: Three.Vector3[] = [];
-    for (let index = 0; index <= 24; index += 1) {
-      const progress = index / 24;
-      const position = start
-        .clone()
-        .lerp(end, progress)
-        .normalize()
-        .multiplyScalar(1.045 + Math.sin(Math.PI * progress) * peak);
-      vertices.push(position);
+    const selected = country?.mapId === selectedMapId;
+    const alpha = selected ? 0.58 : country?.topEvent ? 0.31 : 0.2;
+    const fill = scene.runtime.Color.fromCssColorString(
+      countryColor(country),
+    ).withAlpha(alpha);
+    if (record.entity.polygon) {
+      record.entity.polygon.material =
+        new scene.runtime.ColorMaterialProperty(fill);
+      record.entity.polygon.outline = new scene.runtime.ConstantProperty(true);
+      record.entity.polygon.outlineColor = new scene.runtime.ConstantProperty(
+        selected
+          ? scene.runtime.Color.WHITE.withAlpha(0.92)
+          : scene.runtime.Color.fromCssColorString("#a7c8d8").withAlpha(0.62),
+      );
     }
-    const curve = new runtime.THREE.CatmullRomCurve3(vertices);
-    const geometry = new runtime.THREE.TubeGeometry(
-      curve,
-      64,
-      0.0027,
-      6,
-      false,
-    );
-    const material = new runtime.THREE.MeshBasicMaterial({
-      color: arc.color,
-      transparent: true,
-      opacity: 0.74,
-      blending: runtime.THREE.AdditiveBlending,
-      depthWrite: false,
-    });
-    globeScene.arcs.add(new runtime.THREE.Mesh(geometry, material));
   }
-  globeScene.scene.add(globeScene.arcs);
+  scene.viewer.scene.requestRender();
 }
 
-function coordinatesAtPoint(
-  point: Three.Vector3,
-) {
-  const normalized = point.clone().normalize();
-  const latitude = (Math.asin(normalized.y) * 180) / Math.PI;
-  const longitude = normalizeLongitude(
-    (Math.atan2(normalized.x, normalized.z) * 180) / Math.PI,
+function updatePoints(scene: CesiumGlobeScene, points: GlobePoint[]) {
+  scene.markers.entities.removeAll();
+  scene.markerCountries.clear();
+  points.forEach((point, index) => {
+    const id = `worldpulse-marker-${point.country.mapId}-${index}`;
+    scene.markerCountries.set(id, point.country);
+    scene.markers.entities.add({
+      id,
+      name: point.capital,
+      position: scene.runtime.Cartesian3.fromDegrees(point.lng, point.lat),
+      point: {
+        color: scene.runtime.Color.fromCssColorString(point.color),
+        disableDepthTestDistance: Number.POSITIVE_INFINITY,
+        heightReference: scene.runtime.HeightReference.CLAMP_TO_GROUND,
+        outlineColor: scene.runtime.Color.WHITE.withAlpha(0.92),
+        outlineWidth: 1.2,
+        pixelSize: point.country.topEvent ? 6 : 4,
+      },
+    });
+  });
+  scene.viewer.scene.requestRender();
+}
+
+function positionsForArc(runtime: CesiumRuntime, arc: GlobeArc) {
+  const geodesic = new runtime.EllipsoidGeodesic(
+    runtime.Cartographic.fromDegrees(arc.startLng, arc.startLat),
+    runtime.Cartographic.fromDegrees(arc.endLng, arc.endLat),
   );
-  return { latitude, longitude };
+  const peakHeight = Math.max(
+    120_000,
+    Math.min(850_000, arc.importanceScore * 8_000),
+  );
+  return Array.from({ length: 49 }, (_, index) => {
+    const progress = index / 48;
+    const position = geodesic.interpolateUsingFraction(progress);
+    return runtime.Cartesian3.fromRadians(
+      position.longitude,
+      position.latitude,
+      Math.sin(Math.PI * progress) * peakHeight,
+    );
+  });
+}
+
+function updateArcs(scene: CesiumGlobeScene, arcs: GlobeArc[]) {
+  scene.arcs.entities.removeAll();
+  for (const [index, arc] of arcs.slice(0, ARC_LIMIT).entries()) {
+    const color = scene.runtime.Color.fromCssColorString(arc.color);
+    scene.arcs.entities.add({
+      id: `worldpulse-arc-${index}`,
+      polyline: {
+        arcType: scene.runtime.ArcType.NONE,
+        material: new scene.runtime.PolylineGlowMaterialProperty({
+          color: color.withAlpha(0.82),
+          glowPower: 0.17,
+          taperPower: 0.7,
+        }),
+        positions: positionsForArc(scene.runtime, arc),
+        width: 2,
+      },
+    });
+  }
+  scene.viewer.scene.requestRender();
+}
+
+function countryFromEntity(
+  scene: CesiumGlobeScene,
+  entity: Entity,
+  countryIndex: {
+    byId: Map<string, MapCountry>;
+    byName: Map<string, MapCountry>;
+  },
+) {
+  const markerCountry = scene.markerCountries.get(entity.id);
+  if (markerCountry) return markerCountry;
+  const record = scene.countryEntityIndex.get(entity.id);
+  return record
+    ? countryForFeature(
+        record.featureId,
+        record.featureName,
+        countryIndex.byId,
+        countryIndex.byName,
+      )
+    : undefined;
 }
 
 export function WorldMap({
@@ -537,13 +472,10 @@ export function WorldMap({
   linkEvents = [],
 }: WorldMapProps) {
   const containerRef = useRef<HTMLDivElement>(null);
-  const runtimeRef = useRef<GlobeRuntime | null>(null);
-  const globeSceneRef = useRef<GlobeScene | null>(null);
-  const geometryRef = useRef<WorldFeatureCollection | null>(null);
+  const globeSceneRef = useRef<CesiumGlobeScene | null>(null);
   const onSelectRef = useRef(onSelect);
   const onReadyRef = useRef(onReady);
   const readyNotifiedRef = useRef(false);
-  const readyForRenderRef = useRef(false);
   const hoverFrameRef = useRef<number | null>(null);
   const pointerStartRef = useRef({ x: 0, y: 0 });
   const [hovered, setHovered] = useState<HoveredCountry | null>(null);
@@ -573,10 +505,6 @@ export function WorldMap({
         : ({} as Record<string, MapPosition>),
     [worldGeometry],
   );
-  const countryHitIndex = useMemo<CountryHitIndex | null>(
-    () => (worldGeometry ? buildCountryHitIndex(worldGeometry) : null),
-    [worldGeometry],
-  );
   const capitalIndex = useMemo(() => {
     const byIso2 = new Map<string, CapitalCoordinate[]>();
     const byIso3 = new Map<string, CapitalCoordinate[]>();
@@ -600,8 +528,12 @@ export function WorldMap({
     const centers = { ...countryCenters };
     for (const country of countries) {
       const capital =
-        (country.iso2 ? capitalIndex.byIso2.get(country.iso2)?.[0] : undefined) ??
-        (country.iso3 ? capitalIndex.byIso3.get(country.iso3)?.[0] : undefined);
+        (country.iso2
+          ? capitalIndex.byIso2.get(country.iso2)?.[0]
+          : undefined) ??
+        (country.iso3
+          ? capitalIndex.byIso3.get(country.iso3)?.[0]
+          : undefined);
       if (!capital) continue;
       const position: MapPosition = [capital.lng, capital.lat];
       centers[country.name] = position;
@@ -646,8 +578,12 @@ export function WorldMap({
         )
         .flatMap((country) => {
           const capitals =
-            (country.iso2 ? capitalIndex.byIso2.get(country.iso2) : undefined) ??
-            (country.iso3 ? capitalIndex.byIso3.get(country.iso3) : undefined) ??
+            (country.iso2
+              ? capitalIndex.byIso2.get(country.iso2)
+              : undefined) ??
+            (country.iso3
+              ? capitalIndex.byIso3.get(country.iso3)
+              : undefined) ??
             [];
           const fallback =
             countryCenters[country.name] ?? countryCenters[country.mapId];
@@ -700,192 +636,100 @@ export function WorldMap({
     const container = containerRef.current;
     if (!container || globeSceneRef.current) return;
     let cancelled = false;
-    let animationFrame = 0;
-    let resizeObserver: ResizeObserver | null = null;
 
     void Promise.all([
       loadWorldGeometry(),
-      loadGlobeRuntime(),
+      loadCesiumRuntime(),
       loadCapitalCoordinates(),
-      loadTerrainHeightImage(),
-      loadTerrainNormalImage(),
     ])
-      .then(([
-        geometry,
-        runtime,
-        capitals,
-        terrainHeightImage,
-        terrainNormalImage,
-      ]) => {
+      .then(async ([geometry, runtime, capitals]) => {
         if (cancelled || !containerRef.current) return;
-        runtimeRef.current = runtime;
-        geometryRef.current = geometry;
+        const terrainProvider = createTerrainProvider(runtime);
+        const viewer = new runtime.Viewer(containerRef.current, {
+          animation: false,
+          baseLayer: false,
+          baseLayerPicker: false,
+          fullscreenButton: false,
+          geocoder: false,
+          homeButton: false,
+          infoBox: false,
+          navigationHelpButton: false,
+          scene3DOnly: true,
+          sceneModePicker: false,
+          selectionIndicator: false,
+          shouldAnimate: false,
+          terrainProvider,
+          timeline: false,
+          useBrowserRecommendedResolution: true,
+        });
+        if (cancelled) {
+          viewer.destroy();
+          return;
+        }
+
+        viewer.imageryLayers.addImageryProvider(
+          createSatelliteProvider(runtime),
+        );
+        const { countryEntities, dataSource: countryDataSource } =
+          await createCountryDataSource(runtime, geometry);
+        if (cancelled) {
+          viewer.destroy();
+          return;
+        }
+        const markers = new runtime.CustomDataSource("WorldPulse markers");
+        const arcs = new runtime.CustomDataSource("WorldPulse connections");
+        await Promise.all([
+          viewer.dataSources.add(countryDataSource),
+          viewer.dataSources.add(markers),
+          viewer.dataSources.add(arcs),
+        ]);
+
+        viewer.scene.backgroundColor = runtime.Color.fromCssColorString("#050a11");
+        viewer.scene.globe.baseColor = runtime.Color.fromCssColorString("#071522");
+        viewer.scene.globe.depthTestAgainstTerrain = false;
+        viewer.scene.globe.enableLighting = false;
+        viewer.scene.globe.maximumScreenSpaceError = 2;
+        viewer.scene.globe.tileCacheSize = 280;
+        viewer.scene.verticalExaggeration = 1.65;
+        if (viewer.scene.skyBox) viewer.scene.skyBox.show = false;
+        if (viewer.scene.sun) viewer.scene.sun.show = false;
+        if (viewer.scene.moon) viewer.scene.moon.show = false;
+        viewer.scene.fog.enabled = true;
+        viewer.scene.screenSpaceCameraController.minimumZoomDistance = 30;
+        viewer.scene.screenSpaceCameraController.maximumZoomDistance =
+          55_000_000;
+        viewer.camera.setView({
+          destination: runtime.Cartesian3.fromDegrees(
+            INITIAL_LONGITUDE,
+            INITIAL_LATITUDE,
+            INITIAL_HEIGHT_METERS,
+          ),
+          orientation: {
+            heading: 0,
+            pitch: runtime.Math.toRadians(-90),
+            roll: 0,
+          },
+        });
+
+        globeSceneRef.current = {
+          arcs,
+          countries: countryDataSource,
+          countryEntities,
+          countryEntityIndex: new Map(
+            countryEntities.map((record) => [record.entity.id, record]),
+          ),
+          markers,
+          markerCountries: new Map(),
+          runtime,
+          viewer,
+        };
         setWorldGeometry(geometry);
         setCapitalCoordinates(capitals);
-
-        const scene = new runtime.THREE.Scene();
-        const camera = new runtime.THREE.PerspectiveCamera(42, 1, 0.1, 100);
-        camera.position.set(0, 0.2, 2.55);
-        const renderer = new runtime.THREE.WebGLRenderer({
-          alpha: true,
-          antialias: true,
-          powerPreference: "high-performance",
-        });
-        renderer.setClearColor(0x000000, 0);
-        renderer.outputColorSpace = runtime.THREE.SRGBColorSpace;
-        renderer.toneMapping = runtime.THREE.ACESFilmicToneMapping;
-        renderer.toneMappingExposure = 1.08;
-        renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2.5));
-        containerRef.current.replaceChildren(renderer.domElement);
-
-        const textureCanvas = document.createElement("canvas");
-        textureCanvas.width = TEXTURE_WIDTH;
-        textureCanvas.height = TEXTURE_HEIGHT;
-        const texture = new runtime.THREE.CanvasTexture(textureCanvas);
-        texture.colorSpace = runtime.THREE.SRGBColorSpace;
-        texture.minFilter = runtime.THREE.LinearMipmapLinearFilter;
-        texture.magFilter = runtime.THREE.LinearFilter;
-        texture.generateMipmaps = true;
-        texture.anisotropy = Math.min(
-          8,
-          renderer.capabilities.getMaxAnisotropy(),
-        );
-
-        const terrainTexture = terrainHeightImage
-          ? new runtime.THREE.Texture(terrainHeightImage)
-          : null;
-        if (terrainTexture) {
-          terrainTexture.colorSpace = runtime.THREE.NoColorSpace;
-          terrainTexture.minFilter = runtime.THREE.LinearMipmapLinearFilter;
-          terrainTexture.magFilter = runtime.THREE.LinearFilter;
-          terrainTexture.generateMipmaps = true;
-          terrainTexture.wrapS = runtime.THREE.RepeatWrapping;
-          terrainTexture.anisotropy = Math.min(
-            8,
-            renderer.capabilities.getMaxAnisotropy(),
-          );
-          terrainTexture.needsUpdate = true;
-        }
-
-        const terrainNormalTexture = terrainNormalImage
-          ? new runtime.THREE.Texture(terrainNormalImage)
-          : null;
-        if (terrainNormalTexture) {
-          terrainNormalTexture.colorSpace = runtime.THREE.NoColorSpace;
-          terrainNormalTexture.minFilter =
-            runtime.THREE.LinearMipmapLinearFilter;
-          terrainNormalTexture.magFilter = runtime.THREE.LinearFilter;
-          terrainNormalTexture.generateMipmaps = true;
-          terrainNormalTexture.wrapS = runtime.THREE.RepeatWrapping;
-          terrainNormalTexture.anisotropy = Math.min(
-            8,
-            renderer.capabilities.getMaxAnisotropy(),
-          );
-          terrainNormalTexture.needsUpdate = true;
-        }
-
-        const sphere = new runtime.THREE.Mesh(
-          new runtime.THREE.SphereGeometry(SPHERE_RADIUS, 256, 160),
-          new runtime.THREE.MeshStandardMaterial({
-            map: texture,
-            displacementMap: terrainTexture ?? undefined,
-            displacementScale: terrainTexture
-              ? TERRAIN_DISPLACEMENT_SCALE
-              : 0,
-            bumpMap: terrainNormalTexture
-              ? undefined
-              : (terrainTexture ?? undefined),
-            bumpScale:
-              terrainTexture && !terrainNormalTexture ? TERRAIN_BUMP_SCALE : 0,
-            normalMap: terrainNormalTexture ?? undefined,
-            normalScale: new runtime.THREE.Vector2(
-              TERRAIN_NORMAL_SCALE,
-              TERRAIN_NORMAL_SCALE,
-            ),
-            color: 0xffffff,
-            emissive: 0x02070d,
-            emissiveIntensity: 0.22,
-            roughness: 0.72,
-            metalness: 0.08,
-          }),
-        );
-        sphere.rotation.y = -Math.PI / 2;
-        scene.add(sphere);
-
-        const atmosphere = new runtime.THREE.Mesh(
-          new runtime.THREE.SphereGeometry(1.075, 192, 128),
-          new runtime.THREE.MeshBasicMaterial({
-            color: 0x5b9dbe,
-            transparent: true,
-            opacity: 0.11,
-            side: runtime.THREE.BackSide,
-          }),
-        );
-        scene.add(atmosphere);
-        scene.add(new runtime.THREE.HemisphereLight(0xbdeeff, 0x06101a, 1.9));
-        const light = new runtime.THREE.DirectionalLight(0xe8fbff, 2.2);
-        light.position.set(-3, 4, 5);
-        scene.add(light);
-        const rimLight = new runtime.THREE.DirectionalLight(0x4f9dba, 1.25);
-        rimLight.position.set(4, -2, -3);
-        scene.add(rimLight);
-
-        const controls = new runtime.OrbitControls(
-          camera,
-          renderer.domElement,
-        );
-        controls.enableDamping = true;
-        controls.dampingFactor = 0.06;
-        controls.enablePan = false;
-        controls.minDistance = 1.55;
-        controls.maxDistance = 4;
-        controls.autoRotate = false;
-
-        const globeScene: GlobeScene = {
-          arcs: new runtime.THREE.Group(),
-          camera,
-          controls,
-          markerTexture: new runtime.THREE.CanvasTexture(
-            createCapitalMarkerCanvas(),
-          ),
-          points: null,
-          raycaster: new runtime.THREE.Raycaster(),
-          renderer,
-          scene,
-          sphere,
-          terrainNormalTexture,
-          terrainTexture,
-          texture,
-          textureCanvas,
-        };
-        globeSceneRef.current = globeScene;
-
-        const resize = () => {
-          const current = containerRef.current;
-          if (!current) return;
-          const width = Math.max(1, current.clientWidth);
-          const height = Math.max(1, current.clientHeight);
-          camera.aspect = width / height;
-          camera.updateProjectionMatrix();
-          renderer.setSize(width, height, false);
-        };
-        resizeObserver = new ResizeObserver(resize);
-        resizeObserver.observe(containerRef.current);
-        resize();
-
-        const render = () => {
-          if (cancelled) return;
-          if (!document.hidden && readyForRenderRef.current) {
-            controls.update();
-            renderer.render(scene, camera);
-          }
-          animationFrame = window.requestAnimationFrame(render);
-        };
-        render();
         setGlobeSceneReady(true);
         setMapError(null);
       })
-      .catch(() => {
+      .catch((error) => {
+        console.error("Cesium globe initialization failed.", error);
         if (!cancelled) {
           setMapError("The interactive globe could not start on this device.");
           readyNotifiedRef.current = true;
@@ -895,113 +739,62 @@ export function WorldMap({
 
     return () => {
       cancelled = true;
-      window.cancelAnimationFrame(animationFrame);
-      resizeObserver?.disconnect();
       if (hoverFrameRef.current != null) {
         window.cancelAnimationFrame(hoverFrameRef.current);
       }
       const globeScene = globeSceneRef.current;
-      if (globeScene) {
-        globeScene.controls.dispose();
-        disposeObject(globeScene.scene);
-        globeScene.markerTexture.dispose();
-        globeScene.terrainNormalTexture?.dispose();
-        globeScene.terrainTexture?.dispose();
-        globeScene.texture.dispose();
-        globeScene.renderer.dispose();
+      if (globeScene && !globeScene.viewer.isDestroyed()) {
+        globeScene.viewer.destroy();
       }
       globeSceneRef.current = null;
-      geometryRef.current = null;
-      runtimeRef.current = null;
-      readyForRenderRef.current = false;
       container.replaceChildren();
     };
   }, []);
 
   useEffect(() => {
-    const globeScene = globeSceneRef.current;
-    const geometry = geometryRef.current;
-    if (!globeScene || !geometry || !readyForDisplay || !globeSceneReady) {
-      return;
-    }
+    const scene = globeSceneRef.current;
+    if (!scene || !readyForDisplay || !globeSceneReady) return;
     const timeout = window.setTimeout(() => {
-      drawWorldTexture({
-        scene: globeScene,
-        geometry,
-        byId: countryIndex.byId,
-        byName: countryIndex.byName,
-      });
-      if (readyForDisplay && !readyNotifiedRef.current) {
+      updateCountryEntities(scene, countryIndex, selectedMapId);
+      if (!readyNotifiedRef.current) {
         readyNotifiedRef.current = true;
-        readyForRenderRef.current = true;
-        globeScene.renderer.render(globeScene.scene, globeScene.camera);
         onReadyRef.current?.();
       }
     }, 120);
     return () => window.clearTimeout(timeout);
-  }, [countryIndex, globeSceneReady, readyForDisplay, worldGeometry]);
+  }, [countryIndex, globeSceneReady, readyForDisplay, selectedMapId]);
 
   useEffect(() => {
-    const runtime = runtimeRef.current;
-    const globeScene = globeSceneRef.current;
-    if (!runtime || !globeScene) return;
-    updatePoints(runtime, globeScene, signalPoints);
+    const scene = globeSceneRef.current;
+    if (scene) updatePoints(scene, signalPoints);
   }, [signalPoints, worldGeometry]);
 
   useEffect(() => {
-    const runtime = runtimeRef.current;
-    const globeScene = globeSceneRef.current;
-    if (!runtime || !globeScene) return;
-    updateArcs(runtime, globeScene, eventArcs);
+    const scene = globeSceneRef.current;
+    if (scene) updateArcs(scene, eventArcs);
   }, [eventArcs, worldGeometry]);
 
-  const locateCountryExactly = (
-    clientX: number,
-    clientY: number,
-    canvasBounds?: DOMRect,
-  ) => {
-    const globeScene = globeSceneRef.current;
-    const runtime = runtimeRef.current;
-    const canvas = globeScene?.renderer.domElement;
-    if (!globeScene || !runtime || !canvas || !countryHitIndex) return undefined;
-    const bounds = canvasBounds ?? canvas.getBoundingClientRect();
-    const pointer = new runtime.THREE.Vector2(
-      ((clientX - bounds.left) / bounds.width) * 2 - 1,
-      -((clientY - bounds.top) / bounds.height) * 2 + 1,
+  const locateCountryExactly = (clientX: number, clientY: number) => {
+    const scene = globeSceneRef.current;
+    if (!scene) return undefined;
+    const bounds = scene.viewer.canvas.getBoundingClientRect();
+    const position = new scene.runtime.Cartesian2(
+      clientX - bounds.left,
+      clientY - bounds.top,
     );
-    globeScene.raycaster.setFromCamera(pointer, globeScene.camera);
-    const intersection = globeScene.raycaster.intersectObject(
-      globeScene.sphere,
-      false,
-    )[0];
-    if (!intersection) return undefined;
-    const { latitude, longitude } = coordinatesAtPoint(intersection.point);
-    const feature = countryFeatureAtCoordinates(
-      countryHitIndex,
-      longitude,
-      latitude,
-    );
-    if (!feature) return undefined;
-    return (
-      (feature.id ? countryIndex.byId.get(feature.id) : undefined) ??
-      countryIndex.byName.get(feature.name)
-    );
+    const picked = scene.viewer.scene.pick(position);
+    const entity = picked?.id instanceof scene.runtime.Entity ? picked.id : null;
+    return entity
+      ? countryFromEntity(scene, entity, countryIndex)
+      : undefined;
   };
 
   const locateCountry = (clientX: number, clientY: number) => {
-    const canvasBounds =
-      globeSceneRef.current?.renderer.domElement.getBoundingClientRect();
-    if (!canvasBounds) return undefined;
-    const exactCountry = locateCountryExactly(clientX, clientY, canvasBounds);
+    const exactCountry = locateCountryExactly(clientX, clientY);
     if (exactCountry) return exactCountry;
-
     const nearbyCountries = new Map<string, MapCountry>();
     for (const [offsetX, offsetY] of SMALL_ISLAND_HIT_OFFSETS) {
-      const country = locateCountryExactly(
-        clientX + offsetX,
-        clientY + offsetY,
-        canvasBounds,
-      );
+      const country = locateCountryExactly(clientX + offsetX, clientY + offsetY);
       if (country) nearbyCountries.set(country.mapId, country);
     }
     return nearbyCountries.size === 1
@@ -1026,11 +819,8 @@ export function WorldMap({
             }
           : null,
       );
-      if (globeSceneRef.current) {
-        globeSceneRef.current.renderer.domElement.style.cursor = country
-          ? "pointer"
-          : "grab";
-      }
+      const canvas = globeSceneRef.current?.viewer.canvas;
+      if (canvas) canvas.style.cursor = country ? "pointer" : "grab";
     });
   };
 
@@ -1044,38 +834,46 @@ export function WorldMap({
     if (country) onSelectRef.current(country);
   };
 
-  const changeZoom = (amount: number) => {
-    const globeScene = globeSceneRef.current;
-    if (!globeScene) return;
-    const offset = globeScene.camera.position
-      .clone()
-      .sub(globeScene.controls.target);
-    const distance = Math.min(
-      globeScene.controls.maxDistance,
-      Math.max(globeScene.controls.minDistance, offset.length() + amount),
+  const changeZoom = (zoomIn: boolean) => {
+    const scene = globeSceneRef.current;
+    if (!scene) return;
+    const height = Math.max(
+      250,
+      scene.viewer.camera.positionCartographic.height,
     );
-    offset.setLength(distance);
-    globeScene.camera.position.copy(globeScene.controls.target).add(offset);
-    globeScene.controls.update();
-    setViewAnnouncement(amount < 0 ? "Globe zoomed in" : "Globe zoomed out");
+    const distance = Math.max(125, height * 0.34);
+    if (zoomIn) scene.viewer.camera.zoomIn(distance);
+    else scene.viewer.camera.zoomOut(distance);
+    scene.viewer.scene.requestRender();
+    setViewAnnouncement(zoomIn ? "Globe zoomed in" : "Globe zoomed out");
   };
 
   const resetView = () => {
-    const globeScene = globeSceneRef.current;
-    if (!globeScene) return;
-    globeScene.camera.position.set(0, 0.2, 2.55);
-    globeScene.controls.target.set(0, 0, 0);
-    globeScene.controls.update();
+    const scene = globeSceneRef.current;
+    if (!scene) return;
+    scene.viewer.camera.flyTo({
+      destination: scene.runtime.Cartesian3.fromDegrees(
+        INITIAL_LONGITUDE,
+        INITIAL_LATITUDE,
+        INITIAL_HEIGHT_METERS,
+      ),
+      duration: 0.65,
+      orientation: {
+        heading: 0,
+        pitch: scene.runtime.Math.toRadians(-90),
+        roll: 0,
+      },
+    });
     setViewAnnouncement("Globe view reset");
   };
 
   const handleGlobeKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
     if (event.key === "+" || event.key === "=") {
       event.preventDefault();
-      changeZoom(-0.3);
+      changeZoom(true);
     } else if (event.key === "-") {
       event.preventDefault();
-      changeZoom(0.3);
+      changeZoom(false);
     } else if (event.key === "0" || event.key === "Home") {
       event.preventDefault();
       resetView();
@@ -1090,8 +888,9 @@ export function WorldMap({
       }
       data-capital-marker-count={signalPoints.length}
       data-globe-auto-rotate="false"
-      data-globe-texture={`${TEXTURE_WIDTH}x${TEXTURE_HEIGHT}`}
-      aria-label="Interactive 3D world news globe. Drag to rotate, scroll to zoom, and click or tap a country to open its news panel."
+      data-globe-engine="cesiumjs"
+      data-globe-imagery="sentinel-2-cloudless-2016"
+      aria-label="Interactive 3D satellite world news globe. Drag to rotate, scroll to zoom from space to terrain, and click or tap a country to open its news panel."
       aria-describedby="world-globe-instructions"
       role="region"
       tabIndex={0}
@@ -1104,24 +903,28 @@ export function WorldMap({
       onPointerUp={handlePointerUp}
     >
       <div ref={containerRef} className="absolute inset-0" />
-      <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_50%_46%,transparent_0%,transparent_32%,rgba(2,5,9,0.2)_58%,rgba(2,5,9,0.72)_100%)]" />
-      <div className="pointer-events-none absolute inset-x-0 top-0 h-28 bg-gradient-to-b from-[#050a11]/80 to-transparent" />
+      <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_50%_46%,transparent_0%,transparent_38%,rgba(2,5,9,0.12)_66%,rgba(2,5,9,0.48)_100%)]" />
+      <div className="pointer-events-none absolute inset-x-0 top-0 h-28 bg-gradient-to-b from-[#050a11]/70 to-transparent" />
       <div className="pointer-events-none absolute left-5 top-5 z-10 max-w-[260px]">
         <div className="font-mono text-[10px] uppercase tracking-[0.24em] text-[#73e2cc]">
-          Live world map
+          Live satellite world map
         </div>
         <h1 className="mt-2 text-2xl font-semibold tracking-[-0.04em] text-white sm:text-3xl">
           The world, in context.
         </h1>
         <p className="mt-2 text-xs leading-relaxed text-[#aab5c5]">
-          Drag to rotate. Pinch, scroll, or use the controls to zoom.
+          Drag to rotate. Scroll or use the controls to zoom into terrain.
         </p>
       </div>
       <p id="world-globe-instructions" className="sr-only">
-        Drag or swipe to rotate the globe. Use plus and minus to zoom, or press
-        zero to reset the view. Tap or click a country to open its news.
+        Drag or swipe to rotate the globe. Use plus and minus to zoom from space
+        into terrain, or press zero to reset the view. Tap or click a country to
+        open its news.
       </p>
-      <div className="world-globe-controls absolute bottom-4 left-4 z-20 flex gap-2" aria-label="Globe view controls">
+      <div
+        className="world-globe-controls absolute bottom-4 left-4 z-20 flex gap-2"
+        aria-label="Globe view controls"
+      >
         <button
           type="button"
           className="icon-button"
@@ -1129,7 +932,7 @@ export function WorldMap({
           title="Zoom in"
           onPointerDown={(event) => event.stopPropagation()}
           onPointerUp={(event) => event.stopPropagation()}
-          onClick={() => changeZoom(-0.3)}
+          onClick={() => changeZoom(true)}
         >
           <span aria-hidden="true">+</span>
         </button>
@@ -1140,7 +943,7 @@ export function WorldMap({
           title="Zoom out"
           onPointerDown={(event) => event.stopPropagation()}
           onPointerUp={(event) => event.stopPropagation()}
-          onClick={() => changeZoom(0.3)}
+          onClick={() => changeZoom(false)}
         >
           <span aria-hidden="true">−</span>
         </button>
@@ -1156,7 +959,9 @@ export function WorldMap({
           Reset
         </button>
       </div>
-      <span className="sr-only" role="status" aria-live="polite">{viewAnnouncement}</span>
+      <span className="sr-only" role="status" aria-live="polite">
+        {viewAnnouncement}
+      </span>
       {statusLabel !== "Live" ? (
         <div
           className="pointer-events-none absolute left-5 top-28 z-10 max-w-[calc(100%-2.5rem)] truncate rounded-full border border-[#354258] bg-[#0a121d]/90 px-3 py-1.5 font-mono text-[10px] uppercase tracking-[0.16em] text-[#aab5c5] sm:left-auto sm:right-4 sm:top-4 sm:max-w-[420px]"

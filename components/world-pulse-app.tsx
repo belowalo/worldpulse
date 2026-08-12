@@ -778,8 +778,13 @@ function TopicsModal({ onClose }: { onClose: () => void }) {
         </div>
         <details className="mt-4 text-[9px] leading-4 text-[#68778a]">
           <summary className="cursor-pointer text-[#8fcfc4] hover:underline">
-            Terrain data credits
+            Satellite and terrain credits
           </summary>
+          <p className="mt-2">
+            Satellite imagery: Sentinel-2 cloudless by EOX IT Services GmbH
+            (contains modified Copernicus Sentinel data 2016), licensed under
+            CC BY 4.0. The interactive globe is rendered with CesiumJS.
+          </p>
           <p className="mt-2">
             Mapzen terrain data includes ArcticDEM (DigitalGlobe imagery and
             NSF awards 1043681, 1559691, and 1542736); © Commonwealth of
@@ -791,6 +796,14 @@ function TopicsModal({ onClose }: { onClose: () => void }) {
             © Kartverket; © Environment Agency copyright and/or database right
             2015; and USGS 3DEP, GMTED2010, and SRTM data.
           </p>
+          <a
+            href="https://cloudless.eox.at/"
+            target="_blank"
+            rel="noreferrer"
+            className="mr-3 text-[#8fcfc4] hover:underline"
+          >
+            Satellite source ↗
+          </a>
           <a
             href="https://registry.opendata.aws/terrain-tiles/"
             target="_blank"

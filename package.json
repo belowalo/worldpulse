@@ -16,10 +16,10 @@
     "lint": "eslint . --ignore-pattern dist --ignore-pattern outputs --ignore-pattern .next --ignore-pattern apps/api/.venv"
   },
   "dependencies": {
+    "cesium": "^1.143.0",
     "next": "16.2.6",
     "react": "19.2.6",
-    "react-dom": "19.2.6",
-    "three": "^0.185.0"
+    "react-dom": "19.2.6"
   },
   "devDependencies": {
     "@cloudflare/vite-plugin": "1.37.1",
@@ -31,7 +31,6 @@
     "@types/node": "22.19.19",
     "@types/react": "19.2.14",
     "@types/react-dom": "19.2.3",
-    "@types/three": "^0.185.1",
     "@vitejs/plugin-react": "6.0.2",
     "@vitejs/plugin-rsc": "0.5.26",
     "eslint": "9.39.4",
