@@ -34,9 +34,13 @@ type TestLiveArticle = {
 
 function liveArticleFor(countryName: string): TestLiveArticle {
   const slug = countryName.toLowerCase().replace(/[^a-z0-9]+/g, "-");
+  const title =
+    countryName === "Georgia"
+      ? "Tbilisi government announces a current Georgian national update"
+      : `${countryName} government announces a current national update`;
   return {
     id: `${slug}-current`,
-    title: `${countryName} government announces a current national update`,
+    title,
     url: `https://publisher.example/${slug}-current`,
     publisherName: "Test Publisher",
     publisherUrl: "https://publisher.example/",

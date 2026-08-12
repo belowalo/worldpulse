@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import {
   createCountryDataSource,
+  SATELLITE_IMAGERY_BRIGHTNESS,
   updatePoints,
   type GlobePoint,
   type WorldFeatureCollection,
@@ -8,6 +9,11 @@ import {
 import { loadCesiumRuntime } from "@/lib/cesium-runtime";
 
 describe("Cesium country overlays", () => {
+  it("renders the satellite imagery below its default brightness", () => {
+    expect(SATELLITE_IMAGERY_BRIGHTNESS).toBeGreaterThan(0.5);
+    expect(SATELLITE_IMAGERY_BRIGHTNESS).toBeLessThan(1);
+  });
+
   it("indexes every polygon entity produced from a multi-polygon country", async () => {
     const runtime = await loadCesiumRuntime();
     const geometry: WorldFeatureCollection = {

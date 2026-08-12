@@ -96,6 +96,7 @@ const INITIAL_LATITUDE = 12;
 const INITIAL_HEIGHT_METERS = 18_500_000;
 const SATELLITE_TILE_URL =
   "https://tiles.maps.eox.at/wmts/1.0.0/s2cloudless_3857/default/g/{z}/{y}/{x}.jpg";
+export const SATELLITE_IMAGERY_BRIGHTNESS = 0.66;
 const SMALL_ISLAND_HIT_OFFSETS = [
   [0, -3],
   [3, 0],
@@ -689,9 +690,12 @@ export function WorldMap({
           return;
         }
 
-        viewer.imageryLayers.addImageryProvider(
+        const satelliteLayer = viewer.imageryLayers.addImageryProvider(
           createSatelliteProvider(runtime),
         );
+        satelliteLayer.brightness = SATELLITE_IMAGERY_BRIGHTNESS;
+        satelliteLayer.contrast = 1.08;
+        satelliteLayer.saturation = 0.88;
         const { countryEntities, dataSource: countryDataSource } =
           await createCountryDataSource(runtime, geometry);
         if (cancelled) {

@@ -137,8 +137,9 @@ select:focus-visible {
 }
 
 .world-globe .cesium-viewer-bottom {
-  right: 0.5rem;
-  bottom: 0.35rem;
+  top: 4.25rem;
+  right: 0.75rem;
+  bottom: auto;
   left: auto;
   z-index: 12;
   max-width: calc(100% - 13rem);
