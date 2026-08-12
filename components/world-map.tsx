@@ -1022,6 +1022,7 @@ export function WorldMap({
       <div className="world-globe-controls absolute bottom-4 left-4 z-20 flex gap-2" aria-label="Globe view controls">
         <button
           type="button"
+          className="icon-button"
           aria-label="Zoom in"
           title="Zoom in"
           onPointerDown={(event) => event.stopPropagation()}
@@ -1032,6 +1033,7 @@ export function WorldMap({
         </button>
         <button
           type="button"
+          className="icon-button"
           aria-label="Zoom out"
           title="Zoom out"
           onPointerDown={(event) => event.stopPropagation()}

@@ -796,7 +796,7 @@ function NewsModalShell({
         onClick={onClose}
         autoFocus
         aria-label="Close"
-        className="fixed right-4 top-4 z-30 grid h-10 w-10 place-items-center rounded-full border border-[#3a4659] bg-[#0d1724]/95 text-2xl font-light leading-none text-[#d4dce7] shadow-[0_12px_32px_rgba(0,0,0,0.35)] backdrop-blur-xl transition hover:border-[#5b6c83] hover:bg-[#182335] hover:text-white sm:right-7 sm:top-7"
+        className="icon-button fixed right-4 top-4 z-30 grid h-10 w-10 place-items-center rounded-full border border-[#3a4659] bg-[#0d1724]/95 text-2xl font-light leading-none text-[#d4dce7] shadow-[0_12px_32px_rgba(0,0,0,0.35)] backdrop-blur-xl transition hover:border-[#5b6c83] hover:bg-[#182335] hover:text-white sm:right-7 sm:top-7"
       >
         <span aria-hidden="true">×</span>
       </button>
@@ -2454,7 +2454,7 @@ export function WorldPulseApp({
             type="button"
             onClick={() => setShowLiveNews(true)}
             aria-label="Live Broadcasts"
-            className="live-news-button-pulse inline-flex items-center gap-2 whitespace-nowrap rounded-full border border-[#df5b67] bg-[#701822] px-2.5 py-2 text-[10px] text-white transition hover:border-[#ff8b94] sm:px-4"
+            className="colored-button live-news-button-pulse inline-flex items-center gap-2 whitespace-nowrap rounded-full border border-[#df5b67] bg-[#701822] px-2.5 py-2 text-[10px] text-white transition hover:border-[#ff8b94] sm:px-4"
           >
             <span
               className="world-live-status__dot h-1.5 w-1.5 rounded-full bg-white"
@@ -2466,7 +2466,7 @@ export function WorldPulseApp({
             type="button"
             onClick={() => setShowLiveSituation(true)}
             aria-label="Top Stories"
-            className="whitespace-nowrap rounded-full border border-[#3978b7] bg-[#122a44] px-2.5 py-2 text-[10px] text-[#d5ebff] transition hover:border-[#65a9e8] hover:bg-[#193a5d] sm:px-4"
+            className="colored-button whitespace-nowrap rounded-full border border-[#3978b7] bg-[#122a44] px-2.5 py-2 text-[10px] text-[#d5ebff] transition hover:border-[#65a9e8] hover:bg-[#193a5d] sm:px-4"
           >
             <span className="sm:hidden">Stories</span>
             <span className="hidden sm:inline">Top Stories</span>
@@ -2512,7 +2512,7 @@ export function WorldPulseApp({
           <button
             type="button"
             onClick={() => setShowNewsPanel((current) => !current)}
-            className="absolute right-4 top-4 z-10 grid h-9 w-9 place-items-center rounded-full border border-[#334055] bg-[#0d1522]/95 text-xl leading-none text-[#d4dce7] shadow-xl backdrop-blur-sm transition hover:border-[#52667f] hover:bg-[#162235]"
+            className="icon-button absolute right-4 top-4 z-10 grid h-9 w-9 place-items-center rounded-full border border-[#334055] bg-[#0d1522]/95 text-xl leading-none text-[#d4dce7] shadow-xl backdrop-blur-sm transition hover:border-[#52667f] hover:bg-[#162235]"
             aria-label={showNewsPanel ? "Hide news panel" : "Show news panel"}
             aria-controls="country-news-panel"
             aria-expanded={showNewsPanel}

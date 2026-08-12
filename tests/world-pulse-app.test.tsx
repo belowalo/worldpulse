@@ -409,12 +409,16 @@ describe("WorldPulse interactions", () => {
     expect(
       await screen.findByRole("combobox", { name: "Filter by category" }),
     ).toHaveClass("app-control-select");
-    fireEvent.click(await screen.findByRole("button", { name: "Top Stories" }));
+    const topStoriesButton = await screen.findByRole("button", {
+      name: "Top Stories",
+    });
+    expect(topStoriesButton).toHaveClass("colored-button");
+    fireEvent.click(topStoriesButton);
     const dialog = screen.getByRole("dialog", { name: "Top Stories" });
     expect(dialog).toHaveClass("news-modal-scroll");
     expect(
       within(dialog).getByRole("button", { name: "Close" }),
-    ).toHaveClass("fixed");
+    ).toHaveClass("fixed", "icon-button");
     expect(within(dialog).getByRole("banner")).not.toHaveClass("sticky");
     expect(within(dialog).getByRole("banner")).not.toHaveClass("mr-14");
     expect(within(dialog).getByRole("heading", { name: headline })).toBeInTheDocument();
@@ -424,7 +428,11 @@ describe("WorldPulse interactions", () => {
     ).not.toBeInTheDocument();
 
     fireEvent.click(within(dialog).getByRole("button", { name: "Close" }));
-    fireEvent.click(screen.getByRole("button", { name: "Live Broadcasts" }));
+    const liveBroadcastsButton = screen.getByRole("button", {
+      name: "Live Broadcasts",
+    });
+    expect(liveBroadcastsButton).toHaveClass("colored-button");
+    fireEvent.click(liveBroadcastsButton);
     const liveNewsDialog = screen.getByRole("dialog", { name: "Live News" });
     expect(
       await within(liveNewsDialog).findByTitle(

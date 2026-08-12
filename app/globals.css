@@ -42,14 +42,32 @@ select {
   font: inherit;
 }
 
-button:not(.source-button),
+button:not(.source-button):not(.icon-button),
 .app-control-select,
 .app-control-link {
   color: #ffffff;
   font-family: var(--font-geist-mono), monospace;
+  font-size: 0.625rem;
   font-weight: 700;
   letter-spacing: 0.08em;
+  line-height: 1;
   text-transform: uppercase;
+}
+
+button:not(.source-button):not(.colored-button):not(.icon-button),
+.app-control-select,
+.app-control-link {
+  border: 1px solid #46566d;
+  border-radius: 0.65rem;
+  background: rgba(8, 17, 28, 0.94);
+  box-shadow: 0 8px 25px rgba(0, 0, 0, 0.32);
+}
+
+button:not(.source-button):not(.colored-button):not(.icon-button):hover,
+.app-control-select:hover,
+.app-control-link:hover {
+  border-color: #73e2cc;
+  background: rgba(18, 40, 51, 0.98);
 }
 
 .app-control-select option {
