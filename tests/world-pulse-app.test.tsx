@@ -435,6 +435,9 @@ describe("WorldPulse interactions", () => {
       within(liveNewsDialog).getByTitle(`Example Live: ${headline} live`)
         .parentElement?.parentElement,
     ).toHaveClass("self-start");
+    expect(within(liveNewsDialog).getByRole("complementary")).toHaveClass(
+      "xl:inset-y-0",
+    );
     expect(
       within(liveNewsDialog).getByText("Across the newsrooms"),
     ).toBeInTheDocument();

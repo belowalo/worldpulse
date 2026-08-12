@@ -1157,7 +1157,7 @@ function LiveNewsDirectory() {
         </p>
       ) : null}
 
-      <div className="mt-4 grid gap-5 xl:grid-cols-[minmax(0,1fr)_390px]">
+      <div className="relative mt-4 grid items-start gap-5 xl:grid-cols-[minmax(0,1fr)_390px]">
         <div className="self-start overflow-hidden rounded-2xl border border-[#2a394e] bg-black shadow-[0_18px_60px_rgba(0,0,0,0.3)]">
           <div className="aspect-video">
             <iframe
@@ -1199,7 +1199,7 @@ function LiveNewsDirectory() {
           </div>
         </div>
 
-        <aside className="rounded-2xl border border-[#2a394e] bg-[#0b131f] p-4 shadow-[0_18px_60px_rgba(0,0,0,0.18)]">
+        <aside className="flex min-h-0 flex-col overflow-hidden rounded-2xl border border-[#2a394e] bg-[#0b131f] p-4 shadow-[0_18px_60px_rgba(0,0,0,0.18)] xl:absolute xl:inset-y-0 xl:right-0 xl:w-[390px]">
           <div className="flex items-end justify-between gap-3">
             <div>
               <p className="font-mono text-[9px] uppercase tracking-[0.2em] text-[#718197]">
@@ -1213,7 +1213,7 @@ function LiveNewsDirectory() {
               Live
             </span>
           </div>
-          <div className="mt-3 max-h-[620px] space-y-2 overflow-y-auto pr-1">
+          <div className="mt-3 min-h-0 flex-1 space-y-2 overflow-y-auto pr-1 max-xl:max-h-[620px]">
             {coverage.videos.map((video) => (
               <button
                 type="button"
