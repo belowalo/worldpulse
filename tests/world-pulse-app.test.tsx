@@ -406,6 +406,9 @@ describe("WorldPulse interactions", () => {
     vi.stubGlobal("fetch", fetchMock);
 
     render(<WorldPulseApp MapComponent={TestMap} />);
+    expect(
+      await screen.findByRole("combobox", { name: "Filter by category" }),
+    ).toHaveClass("app-control-select");
     fireEvent.click(await screen.findByRole("button", { name: "Top Stories" }));
     const dialog = screen.getByRole("dialog", { name: "Top Stories" });
     expect(dialog).toHaveClass("news-modal-scroll");
@@ -442,6 +445,12 @@ describe("WorldPulse interactions", () => {
       within(liveNewsDialog).getByText("Across the newsrooms").parentElement
         ?.parentElement?.nextElementSibling,
     ).toHaveClass("scrollbar-thin");
+    expect(
+      within(liveNewsDialog).getByRole("link", { name: "Open feed" }),
+    ).toHaveClass("app-control-link");
+    expect(
+      within(liveNewsDialog).getByRole("button", { name: /Watch Example Live:/ }),
+    ).toHaveClass("source-button");
     expect(
       within(liveNewsDialog).getByText("Across the newsrooms"),
     ).toBeInTheDocument();

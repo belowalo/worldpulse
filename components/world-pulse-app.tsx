@@ -580,7 +580,7 @@ function FilterSelect({
       <select
         value={value}
         onChange={(event) => onChange(event.target.value)}
-        className="h-9 w-full rounded-lg border border-[#303d51] bg-[#111a29] px-2.5 text-[10px] text-[#d6deea]"
+        className="app-control-select h-9 w-full rounded-lg border border-[#303d51] bg-[#111a29] px-2.5 text-[10px] text-[#d6deea]"
         aria-label={label}
       >
         {children}
@@ -1191,7 +1191,7 @@ function LiveNewsDirectory() {
                 href={selectedVideo.watchUrl}
                 target="_blank"
                 rel="noreferrer"
-                className="rounded-full border border-[#3a4659] px-3 py-2 text-[10px] text-[#cad2dd] transition hover:bg-[#182335]"
+                className="app-control-link rounded-full border border-[#3a4659] px-3 py-2 text-[10px] text-[#cad2dd] transition hover:bg-[#182335]"
               >
                 Open feed
               </a>
@@ -1226,7 +1226,7 @@ function LiveNewsDirectory() {
                     selectedVideoId: video.id,
                   }))
                 }
-                className={`w-full overflow-hidden rounded-xl border text-left transition ${
+                className={`source-button w-full overflow-hidden rounded-xl border text-left transition ${
                   video.id === selectedVideo.id
                     ? "border-[#b94552] bg-[#32151d] text-white"
                     : "border-[#253247] bg-[#0d1724] text-[#b8c2cf] hover:border-[#4b5c73]"
