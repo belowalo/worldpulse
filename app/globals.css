@@ -355,7 +355,7 @@ select:focus-visible {
 .loading-orbit__ring--inner {
   inset: 1.15rem;
   border-color: rgba(105, 139, 255, 0.34);
-  transform: rotateX(66deg) rotateZ(18deg);
+  transform: rotate(18deg);
   animation: loading-orbit-reverse 5s linear infinite;
 }
 
@@ -418,7 +418,7 @@ select:focus-visible {
 
 @keyframes loading-orbit-reverse {
   to {
-    transform: rotateX(66deg) rotateZ(-342deg);
+    transform: rotate(-342deg);
   }
 }
 
