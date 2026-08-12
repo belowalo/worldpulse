@@ -589,6 +589,18 @@ function FilterSelect({
   );
 }
 
+function RefreshGlyph({ active = false }: { active?: boolean }) {
+  return (
+    <span
+      aria-hidden="true"
+      data-refresh-icon
+      className={`inline-block text-[1.1em] leading-none ${active ? "animate-spin" : ""}`}
+    >
+      ↻
+    </span>
+  );
+}
+
 function MethodologyModal({ onClose }: { onClose: () => void }) {
   useEffect(() => {
     const closeOnEscape = (event: KeyboardEvent) => {
@@ -1111,8 +1123,9 @@ function LiveNewsDirectory() {
           <button
             type="button"
             onClick={() => void loadNewsrooms(false)}
-            className="mt-5 rounded-full border border-[#3a4659] px-4 py-2 text-[10px] text-[#cad2dd] transition hover:bg-[#182335]"
+            className="mt-5 inline-flex items-center gap-1.5 rounded-full border border-[#3a4659] px-4 py-2 text-[10px] text-[#cad2dd] transition hover:bg-[#182335]"
           >
+            <RefreshGlyph />
             Refresh live directory
           </button>
         </div>
@@ -1145,8 +1158,9 @@ function LiveNewsDirectory() {
           type="button"
           onClick={() => void loadNewsrooms(false)}
           disabled={coverage.refreshing}
-          className="rounded-full border border-[#3a4659] bg-[#0d1724] px-4 py-2 text-xs font-medium text-[#cad2dd] transition hover:border-[#5b6c83] hover:bg-[#182335] hover:text-white disabled:cursor-wait disabled:opacity-60"
+          className="inline-flex items-center gap-1.5 rounded-full border border-[#3a4659] bg-[#0d1724] px-4 py-2 text-xs font-medium text-[#cad2dd] transition hover:border-[#5b6c83] hover:bg-[#182335] hover:text-white disabled:cursor-wait disabled:opacity-60"
         >
+          <RefreshGlyph active={coverage.refreshing} />
           {coverage.refreshing ? "Refreshing" : "Refresh"}
         </button>
       </div>
@@ -2582,8 +2596,9 @@ export function WorldPulseApp({
                 type="button"
                 onClick={refreshActiveFeed}
                 disabled={activeFeed.loading || !liveUpdates}
-                className="rounded-md border border-[#354359] px-2.5 py-1.5 text-[9px] text-[#aeb9c7] transition hover:border-[#64748b] hover:text-white disabled:cursor-wait disabled:opacity-50"
+                className="inline-flex items-center gap-1.5 rounded-md border border-[#354359] px-2.5 py-1.5 text-[9px] text-[#aeb9c7] transition hover:border-[#64748b] hover:text-white disabled:cursor-wait disabled:opacity-50"
               >
+                <RefreshGlyph active={activeFeed.loading} />
                 Refresh
               </button>
             </div>

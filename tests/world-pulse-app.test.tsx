@@ -412,6 +412,11 @@ describe("WorldPulse interactions", () => {
     expect(screen.getByRole("searchbox", { name: "Search news" })).toHaveClass(
       "app-control-input",
     );
+    expect(
+      screen.getByRole("button", { name: "Refresh" }).querySelector(
+        "[data-refresh-icon]",
+      ),
+    ).toBeInTheDocument();
     const topStoriesButton = await screen.findByRole("button", {
       name: "Top Stories",
     });
@@ -459,6 +464,11 @@ describe("WorldPulse interactions", () => {
     expect(
       within(liveNewsDialog).getByRole("link", { name: "Open feed" }),
     ).toHaveClass("app-control-link");
+    expect(
+      within(liveNewsDialog)
+        .getByRole("button", { name: "Refresh" })
+        .querySelector("[data-refresh-icon]"),
+    ).toBeInTheDocument();
     expect(
       within(liveNewsDialog).getByRole("button", { name: /Watch Example Live:/ }),
     ).toHaveClass("source-button");
