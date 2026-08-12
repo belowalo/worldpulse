@@ -195,6 +195,12 @@ describe("multi-country map links", () => {
         terms,
       ),
     ).toBe(false);
+    expect(
+      textMatchesCountry(
+        "30 rounds tear into Georgia election official's house",
+        terms,
+      ),
+    ).toBe(false);
   });
 
   it("builds a curved link only when at least two countries are involved", () => {
