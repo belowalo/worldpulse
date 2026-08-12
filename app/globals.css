@@ -63,7 +63,7 @@ button.icon-button {
 }
 
 .event-score-label {
-  border-radius: 0.25rem;
+  border-radius: var(--control-radius);
 }
 
 button:not(.source-button):not(.colored-button):not(.icon-button),
