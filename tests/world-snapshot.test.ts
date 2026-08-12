@@ -196,6 +196,67 @@ describe("prepared minute world state", () => {
     expect(merged.Canada.updatedAt).toBe(fresh.Canada.updatedAt);
   });
 
+  it("drops stale U.S. state events from Georgia's prepared country feed", () => {
+    const generatedAt = new Date().toISOString();
+    const directory: MapCountry[] = [
+      { mapId: "268", name: "Georgia", iso2: "GE", events: [] },
+    ];
+    const prepared = prepareCompleteWorldSnapshot(
+      {
+        scope: "global",
+        countryName: null,
+        generatedAt,
+        refreshAfterSeconds: 60,
+        provider: "Live providers",
+        articles: [],
+      },
+      [
+        {
+          countryName: "Georgia",
+          generatedAt,
+          available: true,
+          articles: [
+            liveArticle("tbilisi-policy", "Tbilisi announces a Georgian policy"),
+          ],
+        },
+      ],
+      directory,
+      generatedAt,
+    ).countryFeeds;
+    const verifiedEvent = prepared.Georgia.events[0];
+    const previous = {
+      Georgia: {
+        ...prepared.Georgia,
+        events: [
+          {
+            ...verifiedEvent,
+            headline: "Georgia Bulldogs release their SEC football schedule",
+            summary: "University of Georgia athletics announces the season.",
+            articles: verifiedEvent.articles.map((article) => ({
+              ...article,
+              headline: "Georgia Bulldogs release their SEC football schedule",
+            })),
+          },
+        ],
+      },
+    };
+    const fresh = {
+      Georgia: {
+        ...previous.Georgia,
+        events: [],
+        updatedAt: generatedAt,
+      },
+    };
+
+    const merged = mergePreparedCountryFeedSnapshots(
+      fresh,
+      previous,
+      ["Georgia"],
+    );
+
+    expect(merged.Georgia.events).toEqual([]);
+  });
+
   it("reapplies the verified local country when assembling stored feeds", () => {
     const generatedAt = new Date().toISOString();
     const directory: MapCountry[] = [

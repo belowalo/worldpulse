@@ -1,4 +1,8 @@
 import { isProviderErrorArticleTitle } from "../lib/news-quality";
+import {
+  countrySearchTerms,
+  textMatchesCountry,
+} from "../lib/country-terms";
 
 const ARTICLE_RETENTION_MS = 8 * 24 * 60 * 60_000;
 
@@ -20,6 +24,7 @@ function mergeCachedArticles(
   freshArticles: unknown,
   storedArticles: unknown,
   limit: number,
+  countryName?: string,
 ) {
   const merged = new Map<string, JsonRecord>();
   for (const candidate of [
@@ -27,6 +32,19 @@ function mergeCachedArticles(
     ...(Array.isArray(storedArticles) ? storedArticles : []),
   ]) {
     if (!isJsonRecord(candidate)) continue;
+    if (countryName) {
+      const title = typeof candidate.title === "string" ? candidate.title : "";
+      const description =
+        typeof candidate.description === "string" ? candidate.description : "";
+      if (
+        !textMatchesCountry(
+          `${title} ${description}`,
+          countrySearchTerms(countryName),
+        )
+      ) {
+        continue;
+      }
+    }
     if (
       typeof candidate.title === "string" &&
       isProviderErrorArticleTitle(candidate.title)
@@ -96,6 +114,7 @@ export function mergeCachedPayloads(
           current?.articles,
           previous?.articles,
           32,
+          countryName,
         );
         return {
           ...previous,
@@ -110,6 +129,14 @@ export function mergeCachedPayloads(
 
     const limit =
       fresh.scope === "global" ? 700 : fresh.scope === "event" ? 40 : 180;
+    const countryName =
+      fresh.scope === "country"
+        ? typeof fresh.countryName === "string"
+          ? fresh.countryName
+          : typeof stored.countryName === "string"
+            ? stored.countryName
+            : undefined
+        : undefined;
     return JSON.stringify({
       ...stored,
       ...fresh,
@@ -117,6 +144,7 @@ export function mergeCachedPayloads(
         fresh.articles,
         stored.articles,
         limit,
+        countryName,
       ),
     });
   } catch {

@@ -114,4 +114,48 @@ describe("live response cache merging", () => {
       "Mexico",
     ]);
   });
+
+  it("purges cached U.S. state stories from the Georgia country feed", () => {
+    const publishedAt = new Date(Date.now() - 60 * 60_000).toISOString();
+    const stored = JSON.stringify({
+      scope: "map",
+      countries: [
+        {
+          countryName: "Georgia",
+          available: true,
+          articles: [
+            {
+              ...article("georgia-bulldogs", publishedAt),
+              title: "Georgia Bulldogs release their SEC football schedule",
+            },
+            {
+              ...article("tbilisi-talks", publishedAt),
+              title: "Tbilisi hosts talks with the Georgian prime minister",
+            },
+          ],
+        },
+      ],
+    });
+    const fresh = JSON.stringify({
+      scope: "map",
+      countries: [
+        {
+          countryName: "Georgia",
+          available: false,
+          articles: [],
+        },
+      ],
+    });
+
+    const result = JSON.parse(mergeCachedPayloads(fresh, stored)) as {
+      countries: Array<{
+        countryName: string;
+        articles: Array<{ id: string }>;
+      }>;
+    };
+
+    expect(result.countries[0].articles).toEqual([
+      expect.objectContaining({ id: "tbilisi-talks" }),
+    ]);
+  });
 });

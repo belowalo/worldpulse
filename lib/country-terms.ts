@@ -214,19 +214,55 @@ const COUNTRY_RELATED_TERMS: Record<string, string[]> = {
   ],
 };
 
+// "Georgia" by itself is not reliable country evidence because it also names
+// a U.S. state and appears frequently in American local news. These terms keep
+// the country discoverable without classifying state-only reporting as GE.
+const COUNTRY_MATCH_TERM_OVERRIDES: Record<string, string[]> = {
+  Georgia: [
+    "Republic of Georgia",
+    "Georgia country",
+    "Georgian",
+    "Tbilisi",
+    "Sakartvelo",
+    "Batumi",
+    "Kutaisi",
+    "Rustavi",
+    "Adjara",
+    "Abkhazia",
+    "South Ossetia",
+    "Georgian Dream",
+    "Georgia parliament",
+    "Georgia government",
+    "Georgia president",
+    "Georgia prime minister",
+    "Georgia election",
+    "Georgia protests",
+    "Georgia Russia",
+    "Georgia EU",
+    "Georgia NATO",
+  ],
+};
+
 export function canonicalCountryName(countryName: string) {
   return COUNTRY_ALIASES[countryName] ?? countryName;
 }
 
 export function countrySearchTerms(countryName: string) {
   const canonicalName = canonicalCountryName(countryName);
+  const matchTermOverride = COUNTRY_MATCH_TERM_OVERRIDES[canonicalName];
   return [
-    countryName,
-    canonicalName,
-    ...(COUNTRY_RELATED_TERMS[canonicalName] ?? []),
+    ...(matchTermOverride ?? [
+      countryName,
+      canonicalName,
+      ...(COUNTRY_RELATED_TERMS[canonicalName] ?? []),
+    ]),
   ]
     .map((term) => term.trim())
     .filter((term, index, terms) => term && terms.indexOf(term) === index);
+}
+
+export function countryNameNeedsDisambiguation(countryName: string) {
+  return Boolean(COUNTRY_MATCH_TERM_OVERRIDES[canonicalCountryName(countryName)]);
 }
 
 function escapeRegExp(value: string) {

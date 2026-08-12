@@ -173,6 +173,30 @@ describe("multi-country map links", () => {
     });
   });
 
+  it("distinguishes the country Georgia from the U.S. state", () => {
+    const terms = countrySearchTerms("Georgia");
+
+    expect(terms).not.toContain("Georgia");
+    expect(
+      textMatchesCountry(
+        "Tbilisi hosts talks between the Georgian government and EU leaders",
+        terms,
+      ),
+    ).toBe(true);
+    expect(
+      textMatchesCountry(
+        "Georgia Bulldogs release their SEC football schedule",
+        terms,
+      ),
+    ).toBe(false);
+    expect(
+      textMatchesCountry(
+        "ICE announces more than 1,200 arrests across Atlanta and Georgia",
+        terms,
+      ),
+    ).toBe(false);
+  });
+
   it("builds a curved link only when at least two countries are involved", () => {
     const centers = {
       China: [104, 35] as [number, number],

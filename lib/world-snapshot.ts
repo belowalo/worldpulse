@@ -4,6 +4,11 @@ import {
   mergeEventFeeds,
 } from "@/lib/live-news";
 import { countriesMentionedByEvent } from "@/lib/map-links";
+import {
+  countryNameNeedsDisambiguation,
+  countrySearchTerms,
+  textMatchesCountry,
+} from "@/lib/country-terms";
 import { calculateImportance } from "@/lib/scoring";
 import type {
   Event,
@@ -51,7 +56,17 @@ export function mergePreparedCountryFeedSnapshots(
         previous?.events ?? [],
       ).filter((event) => {
         const updatedAt = Date.parse(event.lastUpdatedAt);
-        return Number.isFinite(updatedAt) && updatedAt >= cutoff;
+        if (!Number.isFinite(updatedAt) || updatedAt < cutoff) return false;
+        if (!countryNameNeedsDisambiguation(countryName)) return true;
+        const searchableText = [
+          event.headline,
+          event.summary,
+          ...event.articles.map((article) => article.headline),
+        ].join(" ");
+        return textMatchesCountry(
+          searchableText,
+          countrySearchTerms(countryName),
+        );
       }),
       loading: false,
       error: null,

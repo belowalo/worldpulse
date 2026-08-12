@@ -115,6 +115,7 @@ const COUNTRY_NEWS_QUERY_OVERRIDES: Record<string, string> = {
   Comoros: "Comoros Moroni",
   Dominica: "Dominica Roseau Caribbean",
   "French Polynesia": "Tahiti French Polynesia",
+  Georgia: "Georgia country Tbilisi Georgian",
   Grenada: "Grenada St George's Caribbean",
   Kiribati: "Tarawa",
   "Marshall Islands": "Marshall Islands Majuro",
@@ -187,7 +188,13 @@ function newsSearchTerms(countryName: string, requestedRegion = "") {
     const localName = new Intl.DisplayNames([locale.language], {
       type: "region",
     }).of(locale.region);
-    if (localName) terms.push(localName);
+    if (
+      localName &&
+      (canonicalCountryName(countryName) !== "Georgia" ||
+        localName.toLocaleLowerCase("en") !== "georgia")
+    ) {
+      terms.push(localName);
+    }
   } catch {
     // The canonical and known alias terms remain sufficient as a fallback.
   }
@@ -804,21 +811,21 @@ const BING_WORLD_PROVIDER = bingNewsProvider(
 );
 
 function countryBingProviders(countryName: string) {
+  const currentTerm = COUNTRY_NEWS_QUERY_OVERRIDES[countryName] ?? countryName;
   const alternateTerm =
-    COUNTRY_NEWS_QUERY_OVERRIDES[countryName] ??
     countrySearchTerms(countryName)
-      .filter((term) => term !== countryName)
+      .filter((term) => term !== countryName && term !== currentTerm)
       .sort((left, right) => right.length - left.length)[0] ??
-    countryName;
+    currentTerm;
   return [
     bingNewsProvider(
       "Bing News · Current country search",
-      `${countryName} news`,
+      `${currentTerm} news`,
       6_500,
     ),
     bingNewsProvider(
       "Bing News · Latest country search",
-      `${countryName} latest`,
+      `${currentTerm} latest`,
       6_500,
     ),
     bingNewsProvider(
