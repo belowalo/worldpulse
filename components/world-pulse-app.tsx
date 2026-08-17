@@ -123,7 +123,7 @@ function mergeLiveFeedRecords(
 const INITIAL_VISIBLE_EVENT_LIMIT = 40;
 const LIVE_REQUEST_TIMEOUT_MS = 30_000;
 const INITIAL_LIVE_SYNC_BUDGET_MS = 8_000;
-const MAP_START_DELAY_MS = 1_250;
+const MAP_START_DELAY_MS = 250;
 const WORLD_BATCH_REQUEST_TIMEOUT_MS = 60_000;
 const WORLD_BATCH_SIZE = 12;
 const WORLD_BATCH_CONCURRENCY = 6;
@@ -131,6 +131,47 @@ let worldSnapshotPromise: Promise<MapNewsPayload> | null = null;
 let worldSnapshotFetchIdentity: typeof fetch | null = null;
 let preparedWorldPromise: Promise<PreparedWorldNewsPayload> | null = null;
 let preparedWorldFetchIdentity: typeof fetch | null = null;
+
+async function decodePreparedWorldResponse(
+  responseBytes: Uint8Array,
+): Promise<PreparedWorldNewsPayload> {
+  if (typeof Worker === "undefined") {
+    const responsePayload = await parsePreparedWorldResponseBytes(responseBytes);
+    return decodePreparedWorldPayload(
+      isPreparedWorldNewsWire(responsePayload)
+        ? responsePayload
+        : (responsePayload as PreparedWorldNewsPayload),
+    );
+  }
+  const transferable = responseBytes.slice().buffer;
+  return new Promise((resolve, reject) => {
+    const snapshotWorker = new Worker(
+      new URL("../lib/prepared-world.worker.ts", import.meta.url),
+      { type: "module" },
+    );
+    const timeout = window.setTimeout(() => {
+      snapshotWorker.terminate();
+      reject(new Error("Prepared world decoding timed out."));
+    }, WORLD_BATCH_REQUEST_TIMEOUT_MS);
+    snapshotWorker.onmessage = (
+      event: MessageEvent<
+        | { ok: true; payload: PreparedWorldNewsPayload }
+        | { ok: false; message: string }
+      >,
+    ) => {
+      window.clearTimeout(timeout);
+      snapshotWorker.terminate();
+      if (event.data.ok) resolve(event.data.payload);
+      else reject(new Error(event.data.message));
+    };
+    snapshotWorker.onerror = () => {
+      window.clearTimeout(timeout);
+      snapshotWorker.terminate();
+      reject(new Error("Prepared world decoding failed."));
+    };
+    snapshotWorker.postMessage(transferable, [transferable]);
+  });
+}
 
 function loadPreparedWorld({ fresh = false }: { fresh?: boolean } = {}) {
   if (preparedWorldFetchIdentity !== fetch) {
@@ -1692,14 +1733,7 @@ export function WorldPulseApp({
           }
           responseBytes = new Uint8Array(await response.arrayBuffer());
         }
-        const responsePayload = await parsePreparedWorldResponseBytes(
-          responseBytes,
-        );
-        const prepared = decodePreparedWorldPayload(
-          isPreparedWorldNewsWire(responsePayload)
-            ? responsePayload
-            : (responsePayload as PreparedWorldNewsPayload),
-        );
+        const prepared = await decodePreparedWorldResponse(responseBytes);
         if (!cancelled) setInitialWorld(prepared);
       } catch {
         if (!cancelled) setInitialWorldDecodeFailed(true);
@@ -1833,32 +1867,60 @@ export function WorldPulseApp({
   useEffect(() => {
     if (!liveUpdates) return;
     let cancelled = false;
-    loadWorldGeometry({ fresh: MapComponent !== WorldMap })
-      .then((value) => {
-        const geojson = value as {
-          features?: Array<{
-            id?: string | number;
-            properties?: { name?: string };
-          }>;
-        };
-        if (cancelled || !geojson.features) return;
-        const metadataById = new Map(
-          countryMetadata.map((country) => [country.mapId, country]),
-        );
-        const directory = geojson.features.flatMap((feature) => {
-          const mapId = String(feature.id ?? "");
-          const name = feature.properties?.name?.trim();
-          if (!mapId || !name) return [];
-          const metadata = metadataById.get(mapId);
-          return [
-            metadata ?? {
-              mapId,
-              name,
-              iso2: countryCodeForName(name) ?? undefined,
-              events: [],
-            },
-          ];
-        });
+    const metadataById = new Map(
+      countryMetadata.map((country) => [country.mapId, country]),
+    );
+    const normalizeDirectory = (
+      entries: Array<{ mapId: string; name: string; iso2?: string }>,
+    ) =>
+      entries.flatMap((entry) => {
+        const mapId = String(entry.mapId ?? "");
+        const name = entry.name?.trim();
+        if (!mapId || !name) return [];
+        return [
+          metadataById.get(mapId) ?? {
+            mapId,
+            name,
+            iso2: entry.iso2 ?? countryCodeForName(name) ?? undefined,
+            events: [],
+          },
+        ];
+      });
+    const loadDirectory = async () => {
+      if (MapComponent === WorldMap) {
+        try {
+          const response = await fetch("/api/world-directory", {
+            signal: AbortSignal.timeout(10_000),
+          });
+          if (!response.ok) throw new Error("World directory is unavailable.");
+          const payload = (await response.json()) as {
+            countries?: Array<{ mapId: string; name: string; iso2?: string }>;
+          };
+          const directory = normalizeDirectory(payload.countries ?? []);
+          if (!directory.length) throw new Error("World directory is empty.");
+          return directory;
+        } catch {
+          // Development and tests can fall back to the full local geometry.
+        }
+      }
+      const geojson = (await loadWorldGeometry({
+        fresh: MapComponent !== WorldMap,
+      })) as {
+        features?: Array<{
+          id?: string | number;
+          properties?: { name?: string };
+        }>;
+      };
+      return normalizeDirectory(
+        (geojson.features ?? []).map((feature) => ({
+          mapId: String(feature.id ?? ""),
+          name: feature.properties?.name ?? "",
+        })),
+      );
+    };
+    void loadDirectory()
+      .then((directory) => {
+        if (cancelled) return;
         setCountryDirectory(directory);
         setCountryDirectoryReady(true);
       })

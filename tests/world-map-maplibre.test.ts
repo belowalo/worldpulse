@@ -15,9 +15,9 @@ describe("optimized MapLibre globe", () => {
     expect(source).toContain('data-globe-engine="maplibre-gl"');
     expect(GLOBE_PERFORMANCE_PROFILE).toMatchObject({
       antialias: false,
-      maxTileCacheSize: 96,
-      pixelRatioLimit: 1.25,
-      terrainMaxLevel: 13,
+      maxTileCacheSize: 32,
+      pixelRatioLimit: 1,
+      terrainMaxLevel: 11,
     });
   });
 

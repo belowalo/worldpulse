@@ -62,6 +62,7 @@ const PREPARED_COUNTRY_REFRESH_BATCH_SIZE = 4;
 
 let preparedWorldRefresh: Promise<void> | null = null;
 let preparedCountryRefresh: Promise<void> | null = null;
+let worldDirectoryCache: MapCountry[] | null = null;
 
 interface WorldGeometry {
   features?: Array<{
@@ -71,6 +72,7 @@ interface WorldGeometry {
 }
 
 function loadWorldDirectory() {
+  if (worldDirectoryCache) return worldDirectoryCache;
   const geometry = JSON.parse(worldGeometrySource) as WorldGeometry;
   const directory = (geometry.features ?? []).flatMap((feature) => {
     const mapId = String(feature.id ?? "");
@@ -84,7 +86,8 @@ function loadWorldDirectory() {
     } satisfies MapCountry];
   });
   if (!directory.length) throw new Error("World geometry has no countries.");
-  return directory;
+  worldDirectoryCache = directory;
+  return worldDirectoryCache;
 }
 
 interface PreparedCountryChunk {
@@ -950,6 +953,23 @@ const worker = {
 
     if (url.pathname === "/api/diagnostics/world") {
       return handleWorldDiagnostics(env);
+    }
+
+    if (url.pathname === "/api/world-directory") {
+      return Response.json(
+        {
+          countries: loadWorldDirectory().map(({ mapId, name, iso2 }) => ({
+            mapId,
+            name,
+            iso2,
+          })),
+        },
+        {
+          headers: {
+            "Cache-Control": "public, max-age=86400, stale-while-revalidate=604800",
+          },
+        },
+      );
     }
 
     if (url.pathname === "/api/live-video") {
