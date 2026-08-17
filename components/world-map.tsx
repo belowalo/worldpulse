@@ -86,10 +86,27 @@ interface HoveredCountry {
   y: number;
 }
 
-const ARC_LIMIT = 20;
-const TERRAIN_TILE_SAMPLES = 65;
-const TERRAIN_MAX_LEVEL = 15;
-const TERRAIN_CACHE_LIMIT = 256;
+export const GLOBE_PERFORMANCE_PROFILE = {
+  arcLimit: 12,
+  demandRendering: true,
+  imageryMaxLevel: 12,
+  maximumScreenSpaceError: 4,
+  msaaSamples: 1,
+  resolutionScale: 0.85,
+  targetFrameRate: 30,
+  terrainCacheLimit: 96,
+  terrainDecodeConcurrency: 4,
+  terrainMaxLevel: 13,
+  terrainTileSamples: 33,
+  tileCacheSize: 96,
+} as const;
+const ARC_LIMIT = GLOBE_PERFORMANCE_PROFILE.arcLimit;
+const TERRAIN_TILE_SAMPLES =
+  GLOBE_PERFORMANCE_PROFILE.terrainTileSamples;
+const TERRAIN_MAX_LEVEL = GLOBE_PERFORMANCE_PROFILE.terrainMaxLevel;
+const TERRAIN_CACHE_LIMIT = GLOBE_PERFORMANCE_PROFILE.terrainCacheLimit;
+const TERRAIN_DECODE_CONCURRENCY =
+  GLOBE_PERFORMANCE_PROFILE.terrainDecodeConcurrency;
 const CAPITAL_MARKER_HEIGHT_METERS = 8_000;
 const INITIAL_LONGITUDE = 17;
 const INITIAL_LATITUDE = 12;
@@ -116,6 +133,25 @@ let geometryPromise: Promise<WorldFeatureCollection> | null = null;
 let geometryFetchIdentity: typeof fetch | null = null;
 let capitalsPromise: Promise<CapitalCoordinate[]> | null = null;
 const terrainTileCache = new Map<string, Promise<Float32Array>>();
+const terrainDecodeQueue: Array<() => void> = [];
+let activeTerrainDecodes = 0;
+
+function scheduleTerrainDecode(task: () => Promise<Float32Array>) {
+  return new Promise<Float32Array>((resolve) => {
+    const run = () => {
+      activeTerrainDecodes += 1;
+      void task()
+        .then(resolve)
+        .catch(() => resolve(flatTerrainTile()))
+        .finally(() => {
+          activeTerrainDecodes -= 1;
+          terrainDecodeQueue.shift()?.();
+        });
+    };
+    if (activeTerrainDecodes < TERRAIN_DECODE_CONCURRENCY) run();
+    else terrainDecodeQueue.push(run);
+  });
+}
 
 export function loadWorldGeometry({
   fresh = false,
@@ -262,13 +298,13 @@ function requestTerrainTile(x: number, y: number, level: number) {
   const cached = terrainTileCache.get(cacheKey);
   if (cached) return cached;
 
-  const tile = fetch(`/api/terrain/${level}/${x}/${y}`, {
-    signal: AbortSignal.timeout(20_000),
-  })
-    .then((response) =>
+  const tile = scheduleTerrainDecode(() =>
+    fetch(`/api/terrain/${level}/${x}/${y}`, {
+      signal: AbortSignal.timeout(12_000),
+    }).then((response) =>
       response.ok ? decodeTerrainTile(response) : flatTerrainTile(),
-    )
-    .catch(() => flatTerrainTile());
+    ),
+  );
   terrainTileCache.set(cacheKey, tile);
   if (terrainTileCache.size > TERRAIN_CACHE_LIMIT) {
     const oldestKey = terrainTileCache.keys().next().value;
@@ -294,7 +330,7 @@ function createSatelliteProvider(runtime: CesiumRuntime) {
     url: SATELLITE_TILE_URL,
     tilingScheme: new runtime.WebMercatorTilingScheme(),
     minimumLevel: 0,
-    maximumLevel: 13,
+    maximumLevel: GLOBE_PERFORMANCE_PROFILE.imageryMaxLevel,
     tileWidth: 256,
     tileHeight: 256,
     hasAlphaChannel: false,
@@ -328,8 +364,6 @@ export async function createCountryDataSource(
   const dataSource = await runtime.GeoJsonDataSource.load(prepared, {
     clampToGround: true,
     fill: runtime.Color.WHITE.withAlpha(0.24),
-    stroke: runtime.Color.fromCssColorString("#b4cfdb").withAlpha(0.68),
-    strokeWidth: 1.15,
   });
   const propertyTime = runtime.JulianDate.now();
   const countryEntities = dataSource.entities.values.flatMap((entity) => {
@@ -373,12 +407,6 @@ function updateCountryEntities(
     if (record.entity.polygon) {
       record.entity.polygon.material =
         new scene.runtime.ColorMaterialProperty(fill);
-      record.entity.polygon.outline = new scene.runtime.ConstantProperty(true);
-      record.entity.polygon.outlineColor = new scene.runtime.ConstantProperty(
-        selected
-          ? scene.runtime.Color.WHITE.withAlpha(0.92)
-          : scene.runtime.Color.fromCssColorString("#a7c8d8").withAlpha(0.62),
-      );
     }
   }
   scene.viewer.scene.requestRender();
@@ -659,32 +687,171 @@ export function WorldMap({
     const container = containerRef.current;
     if (!container || globeSceneRef.current) return;
     let cancelled = false;
+    let createdViewer: Viewer | null = null;
+    let visibilityWaitListener: (() => void) | null = null;
+    let viewerVisibilityListener: (() => void) | null = null;
+    let contextLostListener: EventListener | null = null;
+    let contextRestoredListener: EventListener | null = null;
+    let removeRenderErrorListener: (() => void) | null = null;
 
-    void Promise.all([
-      loadWorldGeometry(),
-      loadCesiumRuntime(),
-      loadCapitalCoordinates(),
-    ])
-      .then(async ([geometry, runtime, capitals]) => {
+    const detachViewerListeners = () => {
+      if (viewerVisibilityListener) {
+        document.removeEventListener(
+          "visibilitychange",
+          viewerVisibilityListener,
+        );
+        viewerVisibilityListener = null;
+      }
+      if (createdViewer && !createdViewer.isDestroyed()) {
+        if (contextLostListener) {
+          createdViewer.canvas.removeEventListener(
+            "webglcontextlost",
+            contextLostListener,
+          );
+        }
+        if (contextRestoredListener) {
+          createdViewer.canvas.removeEventListener(
+            "webglcontextrestored",
+            contextRestoredListener,
+          );
+        }
+      }
+      contextLostListener = null;
+      contextRestoredListener = null;
+      removeRenderErrorListener?.();
+      removeRenderErrorListener = null;
+    };
+
+    const reportGlobeFailure = (error: unknown) => {
+      console.error("Cesium globe initialization failed.", error);
+      detachViewerListeners();
+      if (createdViewer && !createdViewer.isDestroyed()) {
+        createdViewer.destroy();
+      }
+      createdViewer = null;
+      if (!cancelled) {
+        setMapError("The interactive globe could not start on this device.");
+        readyNotifiedRef.current = true;
+        onReadyRef.current?.();
+      }
+    };
+
+    const waitUntilVisible = () =>
+      new Promise<void>((resolve) => {
+        if (!document.hidden) {
+          resolve();
+          return;
+        }
+        visibilityWaitListener = () => {
+          if (document.hidden) return;
+          if (visibilityWaitListener) {
+            document.removeEventListener(
+              "visibilitychange",
+              visibilityWaitListener,
+            );
+            visibilityWaitListener = null;
+          }
+          resolve();
+        };
+        document.addEventListener(
+          "visibilitychange",
+          visibilityWaitListener,
+        );
+      });
+
+    const initializeGlobe = async () => {
+      await waitUntilVisible();
+      if (cancelled) return;
+      const [geometry, runtime, capitals] = await Promise.all([
+        loadWorldGeometry(),
+        loadCesiumRuntime(),
+        loadCapitalCoordinates(),
+      ]);
+      await waitUntilVisible();
+      if (cancelled || !containerRef.current) return;
+      try {
         if (cancelled || !containerRef.current) return;
         const terrainProvider = createTerrainProvider(runtime);
         const viewer = new runtime.Viewer(containerRef.current, {
           animation: false,
+          automaticallyTrackDataSourceClocks: false,
           baseLayer: false,
           baseLayerPicker: false,
+          contextOptions: {
+            allowTextureFilterAnisotropic: false,
+            webgl: {
+              alpha: false,
+              antialias: false,
+              preserveDrawingBuffer: false,
+            },
+          },
           fullscreenButton: false,
           geocoder: false,
           homeButton: false,
           infoBox: false,
+          maximumRenderTimeChange: Number.POSITIVE_INFINITY,
+          msaaSamples: GLOBE_PERFORMANCE_PROFILE.msaaSamples,
           navigationHelpButton: false,
+          orderIndependentTranslucency: false,
+          requestRenderMode: GLOBE_PERFORMANCE_PROFILE.demandRendering,
           scene3DOnly: true,
           sceneModePicker: false,
           selectionIndicator: false,
           shouldAnimate: false,
+          showRenderLoopErrors: false,
+          skyAtmosphere: false,
+          skyBox: false,
+          targetFrameRate: GLOBE_PERFORMANCE_PROFILE.targetFrameRate,
           terrainProvider,
           timeline: false,
           useBrowserRecommendedResolution: true,
         });
+        createdViewer = viewer;
+        viewer.resolutionScale = GLOBE_PERFORMANCE_PROFILE.resolutionScale;
+        const syncViewerVisibility = () => {
+          if (viewer.isDestroyed()) return;
+          viewer.useDefaultRenderLoop = !document.hidden;
+          if (!document.hidden) viewer.scene.requestRender();
+        };
+        viewerVisibilityListener = syncViewerVisibility;
+        document.addEventListener(
+          "visibilitychange",
+          viewerVisibilityListener,
+        );
+        syncViewerVisibility();
+
+        contextLostListener = (event) => {
+          event.preventDefault();
+          console.error("Cesium WebGL context was lost.");
+          setMapError("The interactive globe paused to protect this device.");
+          if (!readyNotifiedRef.current) {
+            readyNotifiedRef.current = true;
+            onReadyRef.current?.();
+          }
+        };
+        contextRestoredListener = () => {
+          setMapError(null);
+          syncViewerVisibility();
+        };
+        viewer.canvas.addEventListener(
+          "webglcontextlost",
+          contextLostListener,
+        );
+        viewer.canvas.addEventListener(
+          "webglcontextrestored",
+          contextRestoredListener,
+        );
+        removeRenderErrorListener = viewer.scene.renderError.addEventListener(
+          (_scene, error) => {
+            console.error("Cesium render loop failed.", error);
+            viewer.useDefaultRenderLoop = false;
+            setMapError("The interactive globe could not render on this device.");
+            if (!readyNotifiedRef.current) {
+              readyNotifiedRef.current = true;
+              onReadyRef.current?.();
+            }
+          },
+        );
         if (cancelled) {
           viewer.destroy();
           return;
@@ -714,9 +881,17 @@ export function WorldMap({
         viewer.scene.globe.baseColor = runtime.Color.fromCssColorString("#071522");
         viewer.scene.globe.depthTestAgainstTerrain = false;
         viewer.scene.globe.enableLighting = false;
-        viewer.scene.globe.maximumScreenSpaceError = 2;
-        viewer.scene.globe.tileCacheSize = 280;
+        viewer.scene.globe.loadingDescendantLimit = 10;
+        viewer.scene.globe.maximumScreenSpaceError =
+          GLOBE_PERFORMANCE_PROFILE.maximumScreenSpaceError;
+        viewer.scene.globe.preloadAncestors = true;
+        viewer.scene.globe.preloadSiblings = false;
+        viewer.scene.globe.showGroundAtmosphere = false;
+        viewer.scene.globe.showWaterEffect = false;
+        viewer.scene.globe.tileCacheSize =
+          GLOBE_PERFORMANCE_PROFILE.tileCacheSize;
         viewer.scene.verticalExaggeration = 1.65;
+        viewer.scene.postProcessStages.fxaa.enabled = false;
         if (viewer.scene.skyBox) viewer.scene.skyBox.show = false;
         if (viewer.scene.sun) viewer.scene.sun.show = false;
         if (viewer.scene.moon) viewer.scene.moon.show = false;
@@ -753,24 +928,31 @@ export function WorldMap({
         setCapitalCoordinates(capitals);
         setGlobeSceneReady(true);
         setMapError(null);
-      })
-      .catch((error) => {
-        console.error("Cesium globe initialization failed.", error);
-        if (!cancelled) {
-          setMapError("The interactive globe could not start on this device.");
-          readyNotifiedRef.current = true;
-          onReadyRef.current?.();
-        }
-      });
+        viewer.scene.requestRender();
+      } catch (error) {
+        reportGlobeFailure(error);
+      }
+    };
+
+    void initializeGlobe().catch(reportGlobeFailure);
 
     return () => {
       cancelled = true;
+      if (visibilityWaitListener) {
+        document.removeEventListener(
+          "visibilitychange",
+          visibilityWaitListener,
+        );
+      }
+      detachViewerListeners();
       if (hoverFrameRef.current != null) {
         window.cancelAnimationFrame(hoverFrameRef.current);
       }
       const globeScene = globeSceneRef.current;
       if (globeScene && !globeScene.viewer.isDestroyed()) {
         globeScene.viewer.destroy();
+      } else if (createdViewer && !createdViewer.isDestroyed()) {
+        createdViewer.destroy();
       }
       globeSceneRef.current = null;
       container.replaceChildren();

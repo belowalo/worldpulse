@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import {
   createCountryDataSource,
+  GLOBE_PERFORMANCE_PROFILE,
   SATELLITE_IMAGERY_BRIGHTNESS,
   updatePoints,
   type GlobePoint,
@@ -9,6 +10,18 @@ import {
 import { loadCesiumRuntime } from "@/lib/cesium-runtime";
 
 describe("Cesium country overlays", () => {
+  it("uses a bounded globe rendering and terrain profile", () => {
+    expect(GLOBE_PERFORMANCE_PROFILE.targetFrameRate).toBeLessThanOrEqual(30);
+    expect(GLOBE_PERFORMANCE_PROFILE.demandRendering).toBe(true);
+    expect(GLOBE_PERFORMANCE_PROFILE.msaaSamples).toBe(1);
+    expect(GLOBE_PERFORMANCE_PROFILE.resolutionScale).toBeLessThan(1);
+    expect(GLOBE_PERFORMANCE_PROFILE.tileCacheSize).toBeLessThanOrEqual(100);
+    expect(GLOBE_PERFORMANCE_PROFILE.terrainCacheLimit).toBeLessThanOrEqual(100);
+    expect(GLOBE_PERFORMANCE_PROFILE.terrainTileSamples).toBe(33);
+    expect(GLOBE_PERFORMANCE_PROFILE.terrainDecodeConcurrency).toBe(4);
+    expect(GLOBE_PERFORMANCE_PROFILE.arcLimit).toBeLessThanOrEqual(12);
+  });
+
   it("renders the satellite imagery below its default brightness", () => {
     expect(SATELLITE_IMAGERY_BRIGHTNESS).toBeGreaterThan(0.5);
     expect(SATELLITE_IMAGERY_BRIGHTNESS).toBeLessThan(1);

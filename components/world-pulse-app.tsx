@@ -123,7 +123,7 @@ function mergeLiveFeedRecords(
 const INITIAL_VISIBLE_EVENT_LIMIT = 40;
 const LIVE_REQUEST_TIMEOUT_MS = 30_000;
 const INITIAL_LIVE_SYNC_BUDGET_MS = 8_000;
-const MAP_START_DELAY_MS = 750;
+const MAP_START_DELAY_MS = 1_250;
 const WORLD_BATCH_REQUEST_TIMEOUT_MS = 60_000;
 const WORLD_BATCH_SIZE = 12;
 const WORLD_BATCH_CONCURRENCY = 6;
@@ -2602,10 +2602,23 @@ export function WorldPulseApp({
       initialLiveSyncComplete);
   useEffect(() => {
     if (!initialWorldReady || mapMountReady) return;
+    let mapIdleHandle: number | null = null;
     const mapStartTimer = window.setTimeout(() => {
-      setMapMountReady(true);
+      if ("requestIdleCallback" in window) {
+        mapIdleHandle = window.requestIdleCallback(
+          () => setMapMountReady(true),
+          { timeout: 1_000 },
+        );
+      } else {
+        setMapMountReady(true);
+      }
     }, MAP_START_DELAY_MS);
-    return () => window.clearTimeout(mapStartTimer);
+    return () => {
+      window.clearTimeout(mapStartTimer);
+      if (mapIdleHandle != null && "cancelIdleCallback" in window) {
+        window.cancelIdleCallback(mapIdleHandle);
+      }
+    };
   }, [initialWorldReady, mapMountReady]);
   const worldIndexComplete =
     !liveUpdates || worldScanSettled;
