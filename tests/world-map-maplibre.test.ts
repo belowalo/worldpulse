@@ -13,6 +13,7 @@ describe("optimized MapLibre globe", () => {
   it("loads the renderer on demand and keeps a bounded rendering profile", () => {
     expect(source).toContain('import("maplibre-gl")');
     expect(source).toContain('data-globe-engine="maplibre-gl"');
+    expect(source).toContain('"/api/world-geometry"');
     expect(GLOBE_PERFORMANCE_PROFILE).toMatchObject({
       antialias: false,
       maxTileCacheSize: 32,

@@ -123,25 +123,37 @@ export function loadWorldGeometry({
     geometryFetchIdentity = fetch;
   }
   if (!geometryPromise || fresh) {
-    geometryPromise = fetch("/countries.geojson", {
-      signal: AbortSignal.timeout(20_000),
-    })
-      .then(async (response) => {
-        if (!response.ok) {
-          throw new Error("Country geometry is temporarily unavailable.");
+    geometryPromise = (async () => {
+      const urls =
+        process.env.NODE_ENV === "production"
+          ? ["/api/world-geometry", "/countries.geojson"]
+          : ["/countries.geojson"];
+      let latestError: unknown;
+      for (const url of urls) {
+        try {
+          const response = await fetch(url, {
+            signal: AbortSignal.timeout(20_000),
+          });
+          if (!response.ok) {
+            throw new Error("Country geometry is temporarily unavailable.");
+          }
+          const collection = (await response.json()) as WorldFeatureCollection;
+          if (
+            !Array.isArray(collection.features) ||
+            !collection.features.length
+          ) {
+            throw new Error("Country geometry is incomplete.");
+          }
+          return { ...collection, type: "FeatureCollection" as const };
+        } catch (error) {
+          latestError = error;
         }
-        return (await response.json()) as WorldFeatureCollection;
-      })
-      .then((collection) => {
-        if (!Array.isArray(collection.features) || !collection.features.length) {
-          throw new Error("Country geometry is incomplete.");
-        }
-        return { ...collection, type: "FeatureCollection" as const };
-      })
-      .catch((error) => {
-        geometryPromise = null;
-        throw error;
-      });
+      }
+      throw latestError ?? new Error("Country geometry is unavailable.");
+    })().catch((error) => {
+      geometryPromise = null;
+      throw error;
+    });
   }
   return geometryPromise;
 }
@@ -708,6 +720,8 @@ export function WorldMap({
         attributionControl: false,
         canvasContextAttributes: {
           antialias: GLOBE_PERFORMANCE_PROFILE.antialias,
+          desynchronized: true,
+          powerPreference: "low-power",
           preserveDrawingBuffer: false,
         },
         fadeDuration: 0,

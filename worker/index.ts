@@ -972,6 +972,15 @@ const worker = {
       );
     }
 
+    if (url.pathname === "/api/world-geometry") {
+      return new Response(worldGeometrySource, {
+        headers: {
+          "Cache-Control": "public, max-age=86400, stale-while-revalidate=604800",
+          "Content-Type": "application/geo+json; charset=utf-8",
+        },
+      });
+    }
+
     if (url.pathname === "/api/live-video") {
       return handleLiveVideo(request);
     }
