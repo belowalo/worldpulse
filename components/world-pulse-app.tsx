@@ -53,7 +53,6 @@ import {
 } from "@/lib/world-snapshot";
 import {
   loadWorldGeometry,
-  preloadWorldGlobe,
   WorldMap,
   type WorldMapProps,
 } from "./world-map";
@@ -124,6 +123,7 @@ function mergeLiveFeedRecords(
 const INITIAL_VISIBLE_EVENT_LIMIT = 40;
 const LIVE_REQUEST_TIMEOUT_MS = 30_000;
 const INITIAL_LIVE_SYNC_BUDGET_MS = 8_000;
+const MAP_START_DELAY_MS = 750;
 const WORLD_BATCH_REQUEST_TIMEOUT_MS = 60_000;
 const WORLD_BATCH_SIZE = 12;
 const WORLD_BATCH_CONCURRENCY = 6;
@@ -1645,6 +1645,9 @@ export function WorldPulseApp({
     !liveUpdates || !initialWorldUrl,
   );
   const [globeReady, setGlobeReady] = useState(!liveUpdates);
+  const [mapMountReady, setMapMountReady] = useState(
+    !liveUpdates || MapComponent !== WorldMap,
+  );
   const [globalView, setGlobalView] = useState(false);
   const [connectionEventId, setConnectionEventId] = useState<string | null>(
     null,
@@ -1817,13 +1820,7 @@ export function WorldPulseApp({
 
   useEffect(() => {
     if (!liveUpdates) return;
-    if (MapComponent === WorldMap) {
-      void preloadWorldGlobe()
-        .catch(() => {
-          // A terminal preload failure is handled by the globe's own
-          // retry/error state. It must not trap the user here forever.
-        });
-    } else {
+    if (MapComponent !== WorldMap) {
       setGlobeReady(true);
     }
     if (!hasServerWorldPayload) {
@@ -2603,6 +2600,13 @@ export function WorldPulseApp({
       worldScanSettled &&
       globalFeedReady &&
       initialLiveSyncComplete);
+  useEffect(() => {
+    if (!initialWorldReady || mapMountReady) return;
+    const mapStartTimer = window.setTimeout(() => {
+      setMapMountReady(true);
+    }, MAP_START_DELAY_MS);
+    return () => window.clearTimeout(mapStartTimer);
+  }, [initialWorldReady, mapMountReady]);
   const worldIndexComplete =
     !liveUpdates || worldScanSettled;
   const worldStatusLabel = isSwitchingCountry
@@ -2694,7 +2698,7 @@ export function WorldPulseApp({
             showNewsPanel ? "lg:border-r" : ""
           }`}
         >
-          {initialWorldReady ? (
+          {mapMountReady ? (
             <MapComponent
               countries={mapCountries}
               selectedMapId={globalView ? null : selectedCountry.mapId}
@@ -2704,7 +2708,16 @@ export function WorldPulseApp({
               linkEvents={mapLinkEvents}
               statusLabel={worldStatusLabel}
             />
-          ) : null}
+          ) : (
+            <div
+              className="grid h-full min-h-[420px] place-items-center bg-[#0b121d]"
+              aria-busy="true"
+            >
+              <span className="font-mono text-[10px] uppercase tracking-[0.2em] text-[#738197]">
+                Loading world map…
+              </span>
+            </div>
+          )}
           <span className="sr-only" aria-live="polite">
             {worldIndexComplete
               ? "Live country index complete"

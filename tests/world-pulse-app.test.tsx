@@ -1644,7 +1644,7 @@ describe("WorldPulse interactions", () => {
     expect(
       screen.queryByRole("button", { name: "Top Stories" }),
     ).not.toBeInTheDocument();
-    expect(screen.queryByTestId("countries-with-news")).not.toBeInTheDocument();
+    expect(screen.getByTestId("countries-with-news")).not.toBeVisible();
 
     await act(async () => {
       finishMexico?.();
