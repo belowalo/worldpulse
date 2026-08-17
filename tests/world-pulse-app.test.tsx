@@ -453,6 +453,14 @@ describe("WorldPulse interactions", () => {
     fireEvent.click(liveBroadcastsButton);
     const liveNewsDialog = screen.getByRole("dialog", { name: "Live News" });
     expect(
+      within(liveNewsDialog).queryByTitle(`Example Live: ${headline} live`),
+    ).not.toBeInTheDocument();
+    fireEvent.click(
+      await within(liveNewsDialog).findByRole("button", {
+        name: "Play Example Live live broadcast",
+      }),
+    );
+    expect(
       await within(liveNewsDialog).findByTitle(
         `Example Live: ${headline} live`,
       ),

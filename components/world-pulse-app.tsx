@@ -1091,6 +1091,7 @@ function formatViewerCount(value: number) {
 
 function LiveNewsDirectory() {
   const requestRef = useRef<AbortController | null>(null);
+  const [playerVideoId, setPlayerVideoId] = useState("");
   const [coverage, setCoverage] = useState<LiveVideoState>({
     loading: true,
     refreshing: false,
@@ -1130,6 +1131,9 @@ function LiveNewsDirectory() {
         );
       }
       const videos = payload.videos ?? [];
+      setPlayerVideoId((current) =>
+        videos.some((video) => video.id === current) ? current : "",
+      );
       setCoverage((current) => ({
         loading: false,
         refreshing: false,
@@ -1241,6 +1245,7 @@ function LiveNewsDirectory() {
   const selectedVideo =
     coverage.videos.find((video) => video.id === coverage.selectedVideoId) ??
     coverage.videos[0];
+  const playerIsActive = playerVideoId === selectedVideo.id;
   const updatedAt = coverage.generatedAt
     ? new Date(coverage.generatedAt).toLocaleTimeString("en", {
         hour: "numeric",
@@ -1279,14 +1284,52 @@ function LiveNewsDirectory() {
       <div className="relative mt-4 grid items-start gap-5 xl:grid-cols-[minmax(0,1fr)_390px]">
         <div className="self-start overflow-hidden rounded-2xl border border-[#2a394e] bg-black shadow-[0_18px_60px_rgba(0,0,0,0.3)]">
           <div className="aspect-video">
-            <iframe
-              key={selectedVideo.id}
-              className="h-full w-full"
-              src={selectedVideo.embedUrl}
-              title={`${selectedVideo.newsroomName ?? selectedVideo.channelName}: ${selectedVideo.title}`}
-              allow="autoplay; encrypted-media; picture-in-picture"
-              allowFullScreen
-            />
+            {playerIsActive ? (
+              <iframe
+                key={selectedVideo.id}
+                className="h-full w-full"
+                src={selectedVideo.embedUrl}
+                title={`${selectedVideo.newsroomName ?? selectedVideo.channelName}: ${selectedVideo.title}`}
+                allow="autoplay; encrypted-media; picture-in-picture"
+                allowFullScreen
+                referrerPolicy="strict-origin-when-cross-origin"
+              />
+            ) : (
+              <button
+                type="button"
+                aria-label={`Play ${selectedVideo.newsroomName ?? selectedVideo.channelName} live broadcast`}
+                onClick={() => setPlayerVideoId(selectedVideo.id)}
+                className="group relative h-full w-full overflow-hidden bg-[#05080d] text-white"
+              >
+                {selectedVideo.thumbnailUrl ? (
+                  // The live directory provides already-sized remote thumbnails; native
+                  // asynchronous decoding avoids an image proxy round trip before playback.
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img
+                    aria-hidden="true"
+                    alt=""
+                    src={selectedVideo.thumbnailUrl}
+                    decoding="async"
+                    className="absolute inset-0 h-full w-full object-cover opacity-70 transition duration-300 group-hover:scale-[1.015] group-hover:opacity-80"
+                  />
+                ) : null}
+                <span
+                  aria-hidden="true"
+                  className="absolute inset-0 bg-[linear-gradient(rgba(2,6,12,0.18),rgba(2,6,12,0.62))]"
+                />
+                <span className="absolute inset-0 grid place-items-center">
+                  <span className="grid h-16 w-16 place-items-center rounded-full border border-white/35 bg-black/65 shadow-[0_12px_35px_rgba(0,0,0,0.45)] transition group-hover:scale-105 group-hover:border-white/60 group-hover:bg-black/75">
+                    <span
+                      aria-hidden="true"
+                      className="ml-1 block h-0 w-0 border-y-[10px] border-l-[16px] border-y-transparent border-l-white"
+                    />
+                  </span>
+                </span>
+                <span className="absolute inset-x-0 bottom-5 text-center font-mono text-[9px] font-semibold uppercase tracking-[0.16em] text-white/90">
+                  Play live broadcast
+                </span>
+              </button>
+            )}
           </div>
           <div className="flex flex-wrap items-center justify-between gap-3 border-t border-[#2a3445] bg-[#0a101a] px-4 py-3">
             <div className="min-w-0">
@@ -1339,12 +1382,13 @@ function LiveNewsDirectory() {
                 key={video.id}
                 aria-label={`Watch ${video.newsroomName ?? video.channelName}: ${video.title}`}
                 aria-pressed={video.id === selectedVideo.id}
-                onClick={() =>
+                onClick={() => {
+                  setPlayerVideoId(video.id);
                   setCoverage((current) => ({
                     ...current,
                     selectedVideoId: video.id,
-                  }))
-                }
+                  }));
+                }}
                 className={`source-button w-full overflow-hidden rounded-xl border text-left transition ${
                   video.id === selectedVideo.id
                     ? "border-[#b94552] bg-[#32151d] text-white"
@@ -1352,13 +1396,21 @@ function LiveNewsDirectory() {
                 }`}
               >
                 {video.thumbnailUrl ? (
-                  <div
-                    aria-hidden="true"
-                    className="h-16 w-full bg-cover bg-center opacity-65"
-                    style={{
-                      backgroundImage: `linear-gradient(90deg, rgba(7,12,20,0.08), rgba(7,12,20,0.72)), url("${video.thumbnailUrl}")`,
-                    }}
-                  />
+                  <div className="relative h-16 w-full overflow-hidden">
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img
+                      alt=""
+                      aria-hidden="true"
+                      src={video.thumbnailUrl}
+                      loading="lazy"
+                      decoding="async"
+                      className="h-full w-full object-cover opacity-65"
+                    />
+                    <span
+                      aria-hidden="true"
+                      className="absolute inset-0 bg-[linear-gradient(90deg,rgba(7,12,20,0.08),rgba(7,12,20,0.72))]"
+                    />
+                  </div>
                 ) : null}
                 <div className="px-3 py-2.5">
                   <div className="flex items-center justify-between gap-2">
