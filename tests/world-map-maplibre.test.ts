@@ -24,8 +24,9 @@ describe("optimized MapLibre globe", () => {
     expect(source).toContain("pixelRatio: window.devicePixelRatio || 1");
     expect(source).toContain("liveMap.isSourceLoaded(sourceId)");
     expect(source).toContain('liveMap.on("movestart"');
-    expect(source).toContain("event.originalEvent.buttons !== 0");
-    expect(source).toContain("pendingHoverPoint");
+    expect(source).not.toContain('liveMap.on("mousemove"');
+    expect(source).not.toContain("pendingHoverPoint");
+    expect(source).not.toContain("world-globe-tooltip");
     expect(source).not.toContain('liveMap.once("idle"');
     expect(source).not.toContain("terrainActivationZoom");
   });

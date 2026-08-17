@@ -47,12 +47,6 @@ interface GlobePoint {
   lng: number;
 }
 
-interface HoveredCountry {
-  country: MapCountry;
-  x: number;
-  y: number;
-}
-
 interface MapLibreScene {
   map: MapLibreMap;
   requestReady: () => void;
@@ -527,7 +521,6 @@ export function WorldMap({
     selectedMapId: null,
     signalPoints: [],
   });
-  const [hovered, setHovered] = useState<HoveredCountry | null>(null);
   const [mapError, setMapError] = useState<string | null>(null);
   const [worldGeometry, setWorldGeometry] =
     useState<WorldFeatureCollection | null>(null);
@@ -690,9 +683,6 @@ export function WorldMap({
     let failed = false;
     let map: MapLibreMap | null = null;
     let animationFrame: number | null = null;
-    let hoverAnimationFrame: number | null = null;
-    let pendingHoverPoint: { x: number; y: number } | null = null;
-    let interactionActive = false;
     let readyPaintFrame: number | null = null;
     let readyPollTimer: number | null = null;
     let readyCheckPending = false;
@@ -851,60 +841,12 @@ export function WorldMap({
         const message = event.error?.message ?? "";
         if (/webgl|context|shader/i.test(message)) reportFailure(event.error);
       });
-      const clearPendingHover = () => {
-        pendingHoverPoint = null;
-        if (hoverAnimationFrame != null) {
-          window.cancelAnimationFrame(hoverAnimationFrame);
-          hoverAnimationFrame = null;
-        }
-      };
-      const clearHoveredCountry = () => {
-        clearPendingHover();
-        setHovered((current) => (current ? null : current));
-      };
       liveMap.on("movestart", () => {
-        interactionActive = true;
-        clearHoveredCountry();
         liveMap.getCanvas().style.cursor = "grabbing";
       });
       liveMap.on("moveend", () => {
-        interactionActive = false;
         liveMap.getCanvas().style.cursor = "grab";
       });
-      liveMap.on("mousemove", (event: MapMouseEvent) => {
-        if (
-          interactionActive ||
-          liveMap.isMoving() ||
-          event.originalEvent.buttons !== 0
-        ) {
-          return;
-        }
-        pendingHoverPoint = { x: event.point.x, y: event.point.y };
-        if (hoverAnimationFrame != null) return;
-        hoverAnimationFrame = window.requestAnimationFrame(() => {
-          hoverAnimationFrame = null;
-          const point = pendingHoverPoint;
-          pendingHoverPoint = null;
-          if (!point || interactionActive || liveMap.isMoving()) return;
-          const mapId = locateMapId(liveMap, point);
-          const country = mapId
-            ? countryIndexRef.current.byId.get(mapId)
-            : undefined;
-          liveMap.getCanvas().style.cursor = country ? "pointer" : "grab";
-          setHovered((current) => {
-            if (!country) return current ? null : current;
-            if (
-              current?.country.mapId === country.mapId &&
-              current.x === point.x &&
-              current.y === point.y
-            ) {
-              return current;
-            }
-            return { country, x: point.x, y: point.y };
-          });
-        });
-      });
-      liveMap.on("mouseout", clearHoveredCountry);
       liveMap.on("click", (event: MapMouseEvent) => {
         const mapId = locateMapId(liveMap, event.point);
         const country = mapId
@@ -938,9 +880,6 @@ export function WorldMap({
       cancelled = true;
       if (animationFrame != null) {
         window.cancelAnimationFrame(animationFrame);
-      }
-      if (hoverAnimationFrame != null) {
-        window.cancelAnimationFrame(hoverAnimationFrame);
       }
       if (readyPaintFrame != null) {
         window.cancelAnimationFrame(readyPaintFrame);
@@ -1103,31 +1042,6 @@ export function WorldMap({
           aria-live="polite"
         >
           {statusLabel}
-        </div>
-      ) : null}
-      {hovered ? (
-        <div
-          className="world-globe-tooltip pointer-events-none absolute z-30"
-          style={{
-            left: Math.min(hovered.x + 14, 420),
-            top: Math.max(12, hovered.y - 14),
-          }}
-        >
-          <div className="world-globe-tooltip__header">
-            <strong>{hovered.country.name}</strong>
-            <span>{hovered.country.topEvent?.importanceScore ?? "—"}</span>
-          </div>
-          <div className="world-globe-tooltip__headline">
-            {hovered.country.topEvent?.headline ??
-              (hovered.country.signalReady === false
-                ? "Stories are being updated."
-                : "No recent headline is available.")}
-          </div>
-          <div className="world-globe-tooltip__meta">
-            {hovered.country.topEvent
-              ? `${hovered.country.topEvent.category} · ${hovered.country.topEvent.importanceLabel}`
-              : "Select country"}
-          </div>
         </div>
       ) : null}
       {mapError ? (
