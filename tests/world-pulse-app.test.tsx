@@ -1186,7 +1186,7 @@ describe("WorldPulse interactions", () => {
     ).toBe(false);
   });
 
-  it("opens from one complete server snapshot request without country requests", async () => {
+  it("replaces the server snapshot with a fresh selected-country feed before opening", async () => {
     const countries = [
       { mapId: "124", name: "Canada", iso2: "CA" },
       { mapId: "840", name: "United States", iso2: "US" },
@@ -1197,6 +1197,12 @@ describe("WorldPulse interactions", () => {
         "United States": [liveArticleFor("United States")],
       }),
     );
+    const currentCanadaArticle = {
+      ...liveArticleFor("Canada"),
+      id: "canada-live-refresh",
+      title: "Canada publishes a live national update",
+      publishedAt: "2026-07-26T23:55:00.000Z",
+    };
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input);
       if (url === "/countries.geojson") {
@@ -1210,6 +1216,26 @@ describe("WorldPulse interactions", () => {
       if (url === "/api/live-news?scope=prepared-world") {
         return new Response(JSON.stringify(wire));
       }
+      if (url.includes("scope=country") && url.includes("country=Canada")) {
+        return Response.json({
+          countryName: "Canada",
+          scope: "country",
+          generatedAt: "2026-07-27T00:00:00.000Z",
+          refreshAfterSeconds: 60,
+          provider: "Test live country index",
+          articles: [currentCanadaArticle],
+        });
+      }
+      if (url.includes("scope=global")) {
+        return Response.json({
+          countryName: null,
+          scope: "global",
+          generatedAt: "2026-07-27T00:00:00.000Z",
+          refreshAfterSeconds: 60,
+          provider: "Test live global index",
+          articles: [],
+        });
+      }
       return new Response("Unexpected client story request", { status: 500 });
     });
     vi.stubGlobal("fetch", fetchMock);
@@ -1222,16 +1248,23 @@ describe("WorldPulse interactions", () => {
     );
 
     expect(
-      await screen.findByRole("heading", { name: liveArticleFor("Canada").title }),
+      await screen.findByRole("heading", { name: currentCanadaArticle.title }),
     ).toBeInTheDocument();
     expect(
       fetchMock.mock.calls.filter(([input]) =>
         String(input).includes("scope=prepared-world"),
       ),
-    ).toHaveLength(1);
+    ).toHaveLength(2);
     expect(
-      fetchMock.mock.calls.some(([input]) => String(input).includes("country=")),
-    ).toBe(false);
+      fetchMock.mock.calls.some(([input]) => {
+        const url = String(input);
+        return (
+          url.includes("scope=country") &&
+          url.includes("country=Canada") &&
+          url.includes("fresh=1")
+        );
+      }),
+    ).toBe(true);
   });
 
   it("keeps the last complete snapshot when a refresh is incomplete", async () => {

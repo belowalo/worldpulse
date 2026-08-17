@@ -51,7 +51,7 @@ interface ExecutionContext {
 }
 
 const LIVE_CACHE_NAME = "worldpulse-live-v19";
-const LIVE_CACHE_FRESH_MS = 5 * 60_000;
+const LIVE_CACHE_FRESH_MS = 60_000;
 const LIVE_CACHE_RETENTION_SECONDS = 3 * 24 * 60 * 60;
 const LIVE_MAP_STALE_MS = LIVE_CACHE_RETENTION_SECONDS * 1_000;
 const PREPARED_WORLD_KEY = "world/latest.json";
@@ -59,7 +59,6 @@ const PREPARED_WORLD_HEALTH_KEY = "world/health.json";
 const PREPARED_WORLD_FRESH_MS = 60_000;
 const PREPARED_WORLD_CHUNK_SIZE = 12;
 const PREPARED_COUNTRY_REFRESH_BATCH_SIZE = 4;
-const PREPARED_GLOBAL_REFRESH_INTERVAL_MINUTES = 5;
 
 let preparedWorldRefresh: Promise<void> | null = null;
 let preparedCountryRefresh: Promise<void> | null = null;
@@ -152,7 +151,7 @@ async function refreshPreparedWorld(env: Env) {
   let globalPayload: LiveNewsPayload | null = null;
   if (
     storedGlobal &&
-    Date.now() - storedGlobal.generated_at < LIVE_CACHE_RETENTION_SECONDS * 1_000
+    Date.now() - storedGlobal.generated_at < LIVE_CACHE_FRESH_MS
   ) {
     try {
       const candidate = JSON.parse(storedGlobal.payload) as LiveNewsPayload;
@@ -471,15 +470,18 @@ async function promoteCountriesToPreparedWorldSafely(
   }
 }
 
-async function refreshMinuteWorldState(
-  env: Env,
-  refreshGlobal = false,
-) {
-  // Roll the existing complete index forward before any provider request so
-  // freshness never depends on upstream latency.
-  await refreshPreparedWorldSafely(env);
-  if (refreshGlobal) await refreshStoredGlobalFeedSafely(env);
+async function refreshMinuteWorldState(env: Env) {
+  // Refresh the underlying reporting before publishing a new version. A new
+  // snapshot timestamp must never be applied to yesterday's provider payload.
+  await refreshStoredGlobalFeedSafely(env);
   await refreshPreparedCountryBatchSafely(env);
+  await refreshPreparedWorldSafely(env);
+}
+
+async function refreshTrafficWorldState(env: Env) {
+  // Browser traffic keeps the global feed current when scheduled delivery is
+  // delayed, without starting the long multi-country scan in waitUntil().
+  await refreshStoredGlobalFeedSafely(env);
   await refreshPreparedWorldSafely(env);
 }
 
@@ -554,13 +556,7 @@ async function handlePreparedWorld(
     // Never hold the first paint behind a world rebuild. Return the last
     // complete atomic snapshot and roll it forward in the background.
     if (current) currentBytes = await current.arrayBuffer();
-    const minute = Math.floor(Date.now() / 60_000);
-    ctx.waitUntil(
-      refreshMinuteWorldState(
-        env,
-        minute % PREPARED_GLOBAL_REFRESH_INTERVAL_MINUTES === 0,
-      ),
-    );
+    ctx.waitUntil(refreshTrafficWorldState(env));
   }
   if (!current) {
     return Response.json(
@@ -839,7 +835,18 @@ async function handleCachedLiveNews(
       return responseWithCacheState(fallback, "stale-if-error");
     }
     const merged = await mergeFreshResponse(fresh, fallback);
-    ctx.waitUntil(storeAndPromote(merged.clone()));
+    // Persist the exact response before returning it. Previously this write
+    // shared one long waitUntil task with country promotion and could be
+    // cancelled before the live result reached the server-side cache.
+    await storeLiveResponse(cache, cacheKey, merged.clone(), env.DB);
+    if (requestedPreparedCountries.length) {
+      ctx.waitUntil(
+        promoteCountriesToPreparedWorldSafely(
+          env,
+          requestedPreparedCountries,
+        ),
+      );
+    }
     return responseWithCacheState(merged, "miss");
   }
 
@@ -967,13 +974,7 @@ const worker = {
     env: Env,
     ctx: ExecutionContext,
   ) {
-    const minute = Math.floor(Date.now() / 60_000);
-    ctx.waitUntil(
-      refreshMinuteWorldState(
-        env,
-        minute % PREPARED_GLOBAL_REFRESH_INTERVAL_MINUTES === 0,
-      ),
-    );
+    ctx.waitUntil(refreshMinuteWorldState(env));
   },
 };
 

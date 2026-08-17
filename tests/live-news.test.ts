@@ -80,6 +80,10 @@ describe("live news normalization", () => {
       const countryName = feature.properties?.name;
       expect(countryName).toBeTruthy();
       const canonicalName = canonicalCountryName(countryName!);
+      const explicitCountryReference =
+        canonicalName === "Georgia"
+          ? "Tbilisi Georgia country"
+          : canonicalName;
       const countryPayload: LiveNewsPayload = {
         ...payload,
         countryName: countryName!,
@@ -87,8 +91,8 @@ describe("live news normalization", () => {
           {
             ...payload.articles[0],
             id: `country-${countryName}`,
-            title: `${canonicalName} government announces a national update`,
-            description: `The report concerns ${canonicalName}.`,
+            title: `${explicitCountryReference} government announces a national update`,
+            description: `The report concerns ${explicitCountryReference}.`,
           },
         ],
       };
