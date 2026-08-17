@@ -1,6 +1,5 @@
 "use client";
 
-import dynamic from "next/dynamic";
 import {
   useCallback,
   useEffect,
@@ -55,25 +54,9 @@ import {
 import {
   loadWorldGeometry,
   preloadWorldGlobe,
+  WorldMap,
   type WorldMapProps,
 } from "./world-map";
-
-const WorldMap = dynamic(
-  () => import("./world-map").then((module) => module.WorldMap),
-  {
-    ssr: false,
-    loading: () => (
-      <div
-        className="grid h-full min-h-[420px] place-items-center bg-[#0b121d]"
-        aria-busy="true"
-      >
-        <span className="font-mono text-[10px] uppercase tracking-[0.2em] text-[#738197]">
-          Loading world map…
-        </span>
-      </div>
-    ),
-  },
-);
 
 type ImportanceFilter = "All" | "Major" | "Significant" | "Developing" | "Routine";
 type TimeFilter = "24 hours" | "3 days" | "7 days" | "All stories";
@@ -1657,6 +1640,9 @@ export function WorldPulseApp({
   const [initialLiveSyncComplete, setInitialLiveSyncComplete] = useState(
     !liveUpdates || !initialWorldUrl,
   );
+  const initialLiveSyncCompleted = useRef(
+    !liveUpdates || !initialWorldUrl,
+  );
   const [globeReady, setGlobeReady] = useState(!liveUpdates);
   const [globalView, setGlobalView] = useState(false);
   const [connectionEventId, setConnectionEventId] = useState<string | null>(
@@ -2164,24 +2150,22 @@ export function WorldPulseApp({
     ) {
       return;
     }
-    let initialSync = true;
     const synchronize = async () => {
       await Promise.allSettled([
-        refreshPreparedWorldFromServer(),
         fetchGlobalNews(true),
         refreshCountryNews(selectedCountry, true),
       ]);
-      if (initialSync) {
-        initialSync = false;
+      if (!initialLiveSyncCompleted.current) {
+        initialLiveSyncCompleted.current = true;
         setInitialLiveSyncComplete(true);
       }
+      void refreshPreparedWorldFromServer();
     };
     void synchronize();
     const refreshTimer = window.setInterval(() => {
       void synchronize();
     }, 60_000);
     return () => {
-      initialSync = false;
       window.clearInterval(refreshTimer);
     };
   }, [
@@ -2610,8 +2594,7 @@ export function WorldPulseApp({
     (countryDirectoryReady &&
       worldScanSettled &&
       globalFeedReady &&
-      initialLiveSyncComplete &&
-      globeReady);
+      initialLiveSyncComplete);
   const worldIndexComplete =
     !liveUpdates || worldScanSettled;
   const worldStatusLabel = isSwitchingCountry
@@ -2703,15 +2686,17 @@ export function WorldPulseApp({
             showNewsPanel ? "lg:border-r" : ""
           }`}
         >
-          <MapComponent
-            countries={mapCountries}
-            selectedMapId={globalView ? null : selectedCountry.mapId}
-            onSelect={handleSelect}
-            onReady={() => setGlobeReady(true)}
-            readyForDisplay={worldIndexComplete && globalFeedReady}
-            linkEvents={mapLinkEvents}
-            statusLabel={worldStatusLabel}
-          />
+          {initialWorldReady ? (
+            <MapComponent
+              countries={mapCountries}
+              selectedMapId={globalView ? null : selectedCountry.mapId}
+              onSelect={handleSelect}
+              onReady={() => setGlobeReady(true)}
+              readyForDisplay={worldIndexComplete && globalFeedReady}
+              linkEvents={mapLinkEvents}
+              statusLabel={worldStatusLabel}
+            />
+          ) : null}
           <span className="sr-only" aria-live="polite">
             {worldIndexComplete
               ? "Live country index complete"
