@@ -690,6 +690,9 @@ export function WorldMap({
     let failed = false;
     let map: MapLibreMap | null = null;
     let animationFrame: number | null = null;
+    let hoverAnimationFrame: number | null = null;
+    let pendingHoverPoint: { x: number; y: number } | null = null;
+    let interactionActive = false;
     let readyPaintFrame: number | null = null;
     let readyPollTimer: number | null = null;
     let readyCheckPending = false;
@@ -848,19 +851,60 @@ export function WorldMap({
         const message = event.error?.message ?? "";
         if (/webgl|context|shader/i.test(message)) reportFailure(event.error);
       });
-      liveMap.on("mousemove", (event: MapMouseEvent) => {
-        const mapId = locateMapId(liveMap, event.point);
-        const country = mapId
-          ? countryIndexRef.current.byId.get(mapId)
-          : undefined;
-        liveMap.getCanvas().style.cursor = country ? "pointer" : "grab";
-        setHovered(
-          country
-            ? { country, x: event.point.x, y: event.point.y }
-            : null,
-        );
+      const clearPendingHover = () => {
+        pendingHoverPoint = null;
+        if (hoverAnimationFrame != null) {
+          window.cancelAnimationFrame(hoverAnimationFrame);
+          hoverAnimationFrame = null;
+        }
+      };
+      const clearHoveredCountry = () => {
+        clearPendingHover();
+        setHovered((current) => (current ? null : current));
+      };
+      liveMap.on("movestart", () => {
+        interactionActive = true;
+        clearHoveredCountry();
+        liveMap.getCanvas().style.cursor = "grabbing";
       });
-      liveMap.on("mouseout", () => setHovered(null));
+      liveMap.on("moveend", () => {
+        interactionActive = false;
+        liveMap.getCanvas().style.cursor = "grab";
+      });
+      liveMap.on("mousemove", (event: MapMouseEvent) => {
+        if (
+          interactionActive ||
+          liveMap.isMoving() ||
+          event.originalEvent.buttons !== 0
+        ) {
+          return;
+        }
+        pendingHoverPoint = { x: event.point.x, y: event.point.y };
+        if (hoverAnimationFrame != null) return;
+        hoverAnimationFrame = window.requestAnimationFrame(() => {
+          hoverAnimationFrame = null;
+          const point = pendingHoverPoint;
+          pendingHoverPoint = null;
+          if (!point || interactionActive || liveMap.isMoving()) return;
+          const mapId = locateMapId(liveMap, point);
+          const country = mapId
+            ? countryIndexRef.current.byId.get(mapId)
+            : undefined;
+          liveMap.getCanvas().style.cursor = country ? "pointer" : "grab";
+          setHovered((current) => {
+            if (!country) return current ? null : current;
+            if (
+              current?.country.mapId === country.mapId &&
+              current.x === point.x &&
+              current.y === point.y
+            ) {
+              return current;
+            }
+            return { country, x: point.x, y: point.y };
+          });
+        });
+      });
+      liveMap.on("mouseout", clearHoveredCountry);
       liveMap.on("click", (event: MapMouseEvent) => {
         const mapId = locateMapId(liveMap, event.point);
         const country = mapId
@@ -894,6 +938,9 @@ export function WorldMap({
       cancelled = true;
       if (animationFrame != null) {
         window.cancelAnimationFrame(animationFrame);
+      }
+      if (hoverAnimationFrame != null) {
+        window.cancelAnimationFrame(hoverAnimationFrame);
       }
       if (readyPaintFrame != null) {
         window.cancelAnimationFrame(readyPaintFrame);
