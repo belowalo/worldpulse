@@ -28,6 +28,7 @@ export interface WorldMapProps {
   selectedMapId: string | null;
   onSelect: (country: MapCountry) => void;
   onReady?: () => void;
+  onError?: (message: string) => void;
   readyForDisplay?: boolean;
   statusLabel?: string;
   linkEvents?: Event[];

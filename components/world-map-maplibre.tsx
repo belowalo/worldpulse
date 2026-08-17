@@ -25,6 +25,7 @@ export interface WorldMapProps {
   selectedMapId: string | null;
   onSelect: (country: MapCountry) => void;
   onReady?: () => void;
+  onError?: (message: string) => void;
   readyForDisplay?: boolean;
   statusLabel?: string;
   linkEvents?: Event[];
@@ -54,6 +55,7 @@ interface HoveredCountry {
 
 interface MapLibreScene {
   map: MapLibreMap;
+  requestReady: () => void;
   ready: boolean;
 }
 
@@ -90,14 +92,12 @@ const SMALL_ISLAND_HIT_OFFSETS = [
 
 export const GLOBE_PERFORMANCE_PROFILE = {
   arcLimit: ARC_LIMIT,
-  antialias: false,
-  imageryMaxLevel: 10,
-  maxTileCacheSize: 32,
+  antialias: true,
+  imageryMaxLevel: 14,
+  maxTileCacheSize: 64,
   maxZoom: 13,
-  pixelRatioLimit: 1,
-  terrainActivationZoom: 3.25,
   terrainExaggeration: 1.65,
-  terrainMaxLevel: 11,
+  terrainMaxLevel: 15,
 } as const;
 
 let geometryPromise: Promise<WorldFeatureCollection> | null = null;
@@ -378,9 +378,9 @@ function installMapOverlays(
   map.addSource(COUNTRY_SOURCE_ID, {
     type: "geojson",
     data: prepareCountryGeoJson(geometry, countryIndex, selectedMapId),
-    buffer: 8,
+    buffer: 64,
     maxzoom: GLOBE_PERFORMANCE_PROFILE.maxZoom,
-    tolerance: 0.75,
+    tolerance: 0.375,
   });
   map.addLayer({
     id: COUNTRY_FILL_LAYER_ID,
@@ -445,7 +445,6 @@ function installMapOverlays(
 }
 
 function ensureTerrain(map: MapLibreMap) {
-  if (map.getZoom() < GLOBE_PERFORMANCE_PROFILE.terrainActivationZoom) return;
   if (!map.getSource("terrain")) {
     map.addSource("terrain", {
       type: "raster-dem",
@@ -501,6 +500,7 @@ export function WorldMap({
   selectedMapId,
   onSelect,
   onReady,
+  onError,
   readyForDisplay = true,
   statusLabel = "Live",
   linkEvents = [],
@@ -509,6 +509,7 @@ export function WorldMap({
   const sceneRef = useRef<MapLibreScene | null>(null);
   const onSelectRef = useRef(onSelect);
   const onReadyRef = useRef(onReady);
+  const onErrorRef = useRef(onError);
   const readyNotifiedRef = useRef(false);
   const countryIndexRef = useRef<{
     byId: Map<string, MapCountry>;
@@ -550,6 +551,10 @@ export function WorldMap({
   useEffect(() => {
     onReadyRef.current = onReady;
   }, [onReady]);
+
+  useEffect(() => {
+    onErrorRef.current = onError;
+  }, [onError]);
 
   const countryCenters = useMemo(
     () =>
@@ -681,23 +686,24 @@ export function WorldMap({
     const container = containerRef.current;
     if (!container || sceneRef.current) return;
     let cancelled = false;
+    let failed = false;
     let map: MapLibreMap | null = null;
     let animationFrame: number | null = null;
-    let overlayIdleHandle: number | null = null;
+    let readyPaintFrame: number | null = null;
+    let readyPollTimer: number | null = null;
+    let readyCheckPending = false;
     let contextLostListener: EventListener | null = null;
     let visibilityListener: (() => void) | null = null;
 
     const reportFailure = (error: unknown) => {
+      if (failed || cancelled) return;
+      failed = true;
       console.error("World globe initialization failed.", error);
       map?.remove();
       map = null;
-      if (!cancelled) {
-        setMapError("The interactive globe could not start on this device.");
-        if (!readyNotifiedRef.current) {
-          readyNotifiedRef.current = true;
-          onReadyRef.current?.();
-        }
-      }
+      const message = "The interactive globe could not start on this device.";
+      setMapError(message);
+      onErrorRef.current?.(message);
     };
 
     const initialize = async () => {
@@ -707,7 +713,12 @@ export function WorldMap({
       ]);
       const runtime = await loadMapLibreRuntime();
       if (cancelled || !containerRef.current) return;
-      runtime.setWorkerCount(1);
+      runtime.setWorkerCount(
+        Math.max(
+          2,
+          Math.min(4, Math.floor((navigator.hardwareConcurrency || 4) / 2)),
+        ),
+      );
       map = new runtime.Map({
         container: containerRef.current,
         style: createMapStyle(),
@@ -721,20 +732,76 @@ export function WorldMap({
         canvasContextAttributes: {
           antialias: GLOBE_PERFORMANCE_PROFILE.antialias,
           desynchronized: true,
-          powerPreference: "low-power",
+          powerPreference: "high-performance",
           preserveDrawingBuffer: false,
         },
         fadeDuration: 0,
         maxTileCacheSize: GLOBE_PERFORMANCE_PROFILE.maxTileCacheSize,
         cancelPendingTileRequestsWhileZooming: true,
-        pixelRatio: Math.min(
-          window.devicePixelRatio || 1,
-          GLOBE_PERFORMANCE_PROFILE.pixelRatioLimit,
-        ),
+        pixelRatio: window.devicePixelRatio || 1,
         renderWorldCopies: false,
       });
       const liveMap = map;
-      sceneRef.current = { map: liveMap, ready: false };
+      const requestReady = () => {
+        const scene = sceneRef.current;
+        if (
+          cancelled ||
+          failed ||
+          readyNotifiedRef.current ||
+          readyCheckPending ||
+          !scene?.ready ||
+          !mapInputsRef.current.readyForDisplay
+        ) {
+          return;
+        }
+        readyCheckPending = true;
+        const readyDeadline = performance.now() + 15_000;
+        const checkRequiredSources = () => {
+          if (
+            cancelled ||
+            failed ||
+            readyNotifiedRef.current ||
+            !sceneRef.current?.ready ||
+            !mapInputsRef.current.readyForDisplay
+          ) {
+            readyCheckPending = false;
+            return;
+          }
+          const sourcesReady = [
+            "satellite",
+            "terrain",
+            COUNTRY_SOURCE_ID,
+            CAPITAL_SOURCE_ID,
+            ARC_SOURCE_ID,
+          ].every(
+            (sourceId) =>
+              !liveMap.getSource(sourceId) || liveMap.isSourceLoaded(sourceId),
+          );
+          if (!liveMap.isStyleLoaded() || !sourcesReady) {
+            if (performance.now() >= readyDeadline) {
+              reportFailure(
+                new Error("The globe did not finish loading its initial tiles."),
+              );
+              return;
+            }
+            readyPollTimer = window.setTimeout(checkRequiredSources, 50);
+            return;
+          }
+          readyPaintFrame = window.requestAnimationFrame(() => {
+            liveMap.triggerRepaint();
+            readyPaintFrame = window.requestAnimationFrame(() => {
+              readyCheckPending = false;
+              if (cancelled || failed || readyNotifiedRef.current) return;
+              readyNotifiedRef.current = true;
+              container.dataset.globeReady = "true";
+              onReadyRef.current?.();
+            });
+          });
+        };
+        liveMap.triggerRepaint();
+        checkRequiredSources();
+      };
+      sceneRef.current = { map: liveMap, ready: false, requestReady };
 
       liveMap.on("styleimagemissing", (event) => {
         const encodedColor = event.id.replace("worldpulse-star-", "");
@@ -749,40 +816,29 @@ export function WorldMap({
         if (cancelled) return;
         liveMap.setProjection({ type: "globe" });
         setMapError(null);
-        if (!readyNotifiedRef.current) {
-          readyNotifiedRef.current = true;
-          onReadyRef.current?.();
-        }
         void overlayData
           .then(([geometry, capitals]) => {
             if (cancelled) return;
             setWorldGeometry(geometry);
             setCapitalCoordinates(capitals);
-            const installOverlays = () => {
-              if (cancelled) return;
-              try {
-                const latestInputs = mapInputsRef.current;
-                installMapOverlays(
-                  liveMap,
-                  geometry,
-                  countryIndexRef.current,
-                  latestInputs.selectedMapId,
-                  latestInputs.signalPoints,
-                  latestInputs.eventArcs,
-                );
-                const scene = sceneRef.current;
-                if (scene) scene.ready = true;
-                ensureTerrain(liveMap);
-              } catch (error) {
-                reportFailure(error);
+            try {
+              const latestInputs = mapInputsRef.current;
+              installMapOverlays(
+                liveMap,
+                geometry,
+                countryIndexRef.current,
+                latestInputs.selectedMapId,
+                latestInputs.signalPoints,
+                latestInputs.eventArcs,
+              );
+              ensureTerrain(liveMap);
+              const scene = sceneRef.current;
+              if (scene) {
+                scene.ready = true;
+                scene.requestReady();
               }
-            };
-            if (window.requestIdleCallback) {
-              overlayIdleHandle = window.requestIdleCallback(installOverlays, {
-                timeout: 1_500,
-              });
-            } else {
-              window.setTimeout(installOverlays, 0);
+            } catch (error) {
+              reportFailure(error);
             }
           })
           .catch(reportFailure);
@@ -811,7 +867,6 @@ export function WorldMap({
           : undefined;
         if (country) onSelectRef.current(country);
       });
-      liveMap.on("zoomend", () => ensureTerrain(liveMap));
       visibilityListener = () => {
         if (document.hidden) {
           liveMap.stop();
@@ -823,11 +878,7 @@ export function WorldMap({
       document.addEventListener("visibilitychange", visibilityListener);
       contextLostListener = (event) => {
         event.preventDefault();
-        setMapError("The interactive globe paused to protect this device.");
-        if (!readyNotifiedRef.current) {
-          readyNotifiedRef.current = true;
-          onReadyRef.current?.();
-        }
+        reportFailure(new Error("The WebGL context was lost."));
       };
       liveMap
         .getCanvas()
@@ -843,8 +894,11 @@ export function WorldMap({
       if (animationFrame != null) {
         window.cancelAnimationFrame(animationFrame);
       }
-      if (overlayIdleHandle != null && window.cancelIdleCallback) {
-        window.cancelIdleCallback(overlayIdleHandle);
+      if (readyPaintFrame != null) {
+        window.cancelAnimationFrame(readyPaintFrame);
+      }
+      if (readyPollTimer != null) {
+        window.clearTimeout(readyPollTimer);
       }
       if (map && contextLostListener) {
         map
@@ -866,10 +920,7 @@ export function WorldMap({
     sourceAsGeoJson(scene.map, COUNTRY_SOURCE_ID)?.setData(
       prepareCountryGeoJson(worldGeometry, countryIndex, selectedMapId),
     );
-    if (readyForDisplay && !readyNotifiedRef.current) {
-      readyNotifiedRef.current = true;
-      onReadyRef.current?.();
-    }
+    scene.requestReady();
   }, [countryIndex, readyForDisplay, selectedMapId, worldGeometry]);
 
   useEffect(() => {
@@ -879,12 +930,14 @@ export function WorldMap({
     sourceAsGeoJson(scene.map, CAPITAL_SOURCE_ID)?.setData(
       pointGeoJson(signalPoints),
     );
+    scene.requestReady();
   }, [signalPoints]);
 
   useEffect(() => {
     const scene = sceneRef.current;
     if (!scene?.ready) return;
     sourceAsGeoJson(scene.map, ARC_SOURCE_ID)?.setData(eventArcs);
+    scene.requestReady();
   }, [eventArcs]);
 
   const changeZoom = (zoomIn: boolean) => {

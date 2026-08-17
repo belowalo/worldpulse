@@ -10,16 +10,21 @@ describe("optimized MapLibre globe", () => {
     "utf8",
   );
 
-  it("loads the renderer on demand and keeps a bounded rendering profile", () => {
+  it("loads the renderer on demand with a full-resolution rendering profile", () => {
     expect(source).toContain('import("maplibre-gl")');
     expect(source).toContain('data-globe-engine="maplibre-gl"');
     expect(source).toContain('"/api/world-geometry"');
     expect(GLOBE_PERFORMANCE_PROFILE).toMatchObject({
-      antialias: false,
-      maxTileCacheSize: 32,
-      pixelRatioLimit: 1,
-      terrainMaxLevel: 11,
+      antialias: true,
+      imageryMaxLevel: 14,
+      maxTileCacheSize: 64,
+      terrainMaxLevel: 15,
     });
+    expect(source).toContain('powerPreference: "high-performance"');
+    expect(source).toContain("pixelRatio: window.devicePixelRatio || 1");
+    expect(source).toContain("liveMap.isSourceLoaded(sourceId)");
+    expect(source).not.toContain('liveMap.once("idle"');
+    expect(source).not.toContain("terrainActivationZoom");
   });
 
   it("uses native raster DEM terrain instead of decoding terrain on the UI thread", () => {

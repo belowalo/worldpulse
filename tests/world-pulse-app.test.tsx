@@ -6,6 +6,7 @@ import {
   waitFor,
   within,
 } from "@testing-library/react";
+import { useLayoutEffect } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
@@ -119,10 +120,15 @@ afterEach(() => {
 function TestMap({
   countries,
   onSelect,
+  onReady,
+  readyForDisplay,
   selectedMapId,
   statusLabel,
   linkEvents,
 }: WorldMapProps) {
+  useLayoutEffect(() => {
+    if (readyForDisplay) onReady?.();
+  }, [onReady, readyForDisplay]);
   const japan = countryPulses.find((country) => country.iso2 === "JP");
   const egypt = countryPulses.find((country) => country.iso2 === "EG");
   const canada = countries.find((country) => country.iso2 === "CA");
@@ -1186,7 +1192,7 @@ describe("WorldPulse interactions", () => {
     ).toBe(false);
   });
 
-  it("replaces the server snapshot with a fresh selected-country feed before opening", async () => {
+  it("opens from the minute-fresh server snapshot without a redundant launch refresh", async () => {
     const countries = [
       { mapId: "124", name: "Canada", iso2: "CA" },
       { mapId: "840", name: "United States", iso2: "US" },
@@ -1248,13 +1254,13 @@ describe("WorldPulse interactions", () => {
     );
 
     expect(
-      await screen.findByRole("heading", { name: currentCanadaArticle.title }),
+      await screen.findByRole("heading", { name: liveArticleFor("Canada").title }),
     ).toBeInTheDocument();
     expect(
       fetchMock.mock.calls.filter(([input]) =>
         String(input).includes("scope=prepared-world"),
       ),
-    ).toHaveLength(2);
+    ).toHaveLength(1);
     expect(
       fetchMock.mock.calls.some(([input]) => {
         const url = String(input);
@@ -1264,7 +1270,12 @@ describe("WorldPulse interactions", () => {
           url.includes("fresh=1")
         );
       }),
-    ).toBe(true);
+    ).toBe(false);
+    expect(
+      fetchMock.mock.calls.some(([input]) =>
+        String(input).includes("scope=global"),
+      ),
+    ).toBe(false);
   });
 
   it("keeps the last complete snapshot when a refresh is incomplete", async () => {
@@ -1644,7 +1655,9 @@ describe("WorldPulse interactions", () => {
     expect(
       screen.queryByRole("button", { name: "Top Stories" }),
     ).not.toBeInTheDocument();
-    expect(screen.getByTestId("countries-with-news")).not.toBeVisible();
+    expect(
+      screen.getByTestId("countries-with-news").closest("main"),
+    ).toHaveAttribute("aria-hidden", "true");
 
     await act(async () => {
       finishMexico?.();
@@ -1659,6 +1672,56 @@ describe("WorldPulse interactions", () => {
     ).not.toBeInTheDocument();
     expect(screen.getByTestId("countries-with-news")).toHaveTextContent("13");
     expect(screen.getByTestId("countries-syncing")).toHaveTextContent("0");
+  });
+
+  it("renders the app behind the loader and reveals it only after the globe is ready", async () => {
+    const countries = [{ mapId: "124", name: "Canada", iso2: "CA" }];
+    const initialWorld = preparedWorldPayload(countries, {
+      Canada: [liveArticleFor("Canada")],
+    });
+    function DeferredMap({ onReady, readyForDisplay }: WorldMapProps) {
+      return (
+        <button
+          type="button"
+          data-testid="deferred-globe"
+          disabled={!readyForDisplay}
+          onClick={onReady}
+        >
+          Globe canvas
+        </button>
+      );
+    }
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) => {
+        if (String(input) === "/countries.geojson") {
+          return Response.json({
+            features: [{ id: "124", properties: { name: "Canada" } }],
+          });
+        }
+        return new Response("Unexpected request", { status: 500 });
+      }),
+    );
+
+    render(
+      <WorldPulseApp MapComponent={DeferredMap} initialWorld={initialWorld} />,
+    );
+
+    expect(await screen.findByText("Rendering the globe")).toBeInTheDocument();
+    expect(screen.getByTestId("deferred-globe").closest("main")).toHaveAttribute(
+      "aria-hidden",
+      "true",
+    );
+    expect(
+      screen.queryByRole("button", { name: "Top Stories" }),
+    ).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByTestId("deferred-globe"));
+
+    expect(
+      await screen.findByRole("button", { name: "Top Stories" }),
+    ).toBeVisible();
+    expect(screen.queryByText("Rendering the globe")).not.toBeInTheDocument();
   });
 
   it("keeps the loading visualization animated for every motion setting", () => {
@@ -1762,7 +1825,7 @@ describe("WorldPulse interactions", () => {
       fallbackHeadline,
     );
     expect(
-      screen.getByRole("heading", { name: fallbackHeadline }),
+      await screen.findByRole("heading", { name: fallbackHeadline }),
     ).toBeInTheDocument();
   });
 
@@ -2138,7 +2201,7 @@ describe("WorldPulse interactions", () => {
     );
 
     fireEvent.click(
-      screen.getByRole("button", { name: "Select Australia on map" }),
+      await screen.findByRole("button", { name: "Select Australia on map" }),
     );
     expect(
       await screen.findByRole("heading", { name: mapHeadline }),

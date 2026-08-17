@@ -122,8 +122,6 @@ function mergeLiveFeedRecords(
 
 const INITIAL_VISIBLE_EVENT_LIMIT = 40;
 const LIVE_REQUEST_TIMEOUT_MS = 30_000;
-const INITIAL_LIVE_SYNC_BUDGET_MS = 8_000;
-const MAP_START_DELAY_MS = 250;
 const WORLD_BATCH_REQUEST_TIMEOUT_MS = 60_000;
 const WORLD_BATCH_SIZE = 12;
 const WORLD_BATCH_CONCURRENCY = 6;
@@ -1507,6 +1505,8 @@ function WorldLoadingScreen({
   totalCountryCount,
   globalReady,
   globeReady,
+  globeError,
+  onRetryGlobe,
   settled,
 }: {
   countryDirectoryReady: boolean;
@@ -1514,6 +1514,8 @@ function WorldLoadingScreen({
   totalCountryCount: number;
   globalReady: boolean;
   globeReady: boolean;
+  globeError: string | null;
+  onRetryGlobe: () => void;
   settled: boolean;
 }) {
   const countryProgress =
@@ -1531,7 +1533,9 @@ function WorldLoadingScreen({
     ),
   );
   const stage =
-    !globalReady
+    globeError
+      ? globeError
+      : !globalReady
       ? "Loading the latest stories"
       : !countryDirectoryReady
         ? "Loading the country index"
@@ -1557,15 +1561,17 @@ function WorldLoadingScreen({
     },
     {
       label: "Rendering the world map",
-      detail: globeReady ? "Ready" : "In progress",
+      detail: globeError ? "Needs retry" : globeReady ? "Ready" : "In progress",
       ready: globeReady,
     },
   ];
 
   return (
     <main
-      className="loading-command-center relative grid min-h-screen place-items-center overflow-hidden bg-[#040810] px-6"
+      className="loading-command-center fixed inset-0 z-[100] grid min-h-screen place-items-center overflow-hidden bg-[#040810] px-6"
       aria-busy="true"
+      aria-live="polite"
+      data-worldpulse-loading="true"
     >
       <div className="loading-grid absolute inset-0" aria-hidden="true" />
       <div className="loading-glow absolute left-1/2 top-1/2 h-[34rem] w-[34rem] -translate-x-1/2 -translate-y-1/2 rounded-full" />
@@ -1627,6 +1633,15 @@ function WorldLoadingScreen({
               style={{ width: `${progress}%` }}
             />
           </div>
+          {globeError ? (
+            <button
+              type="button"
+              onClick={onRetryGlobe}
+              className="mt-5 border border-[#4a617d] bg-[#0d1725] px-4 py-2 font-mono text-[9px] font-bold uppercase tracking-[0.12em] text-white transition hover:border-[#73e2cc] hover:bg-[#142437]"
+            >
+              Retry globe
+            </button>
+          ) : null}
         </div>
       </section>
     </main>
@@ -1679,16 +1694,9 @@ export function WorldPulseApp({
   const [globalFeedReady, setGlobalFeedReady] = useState(
     !liveUpdates || Boolean(initialWorld),
   );
-  const [initialLiveSyncComplete, setInitialLiveSyncComplete] = useState(
-    !liveUpdates || !initialWorldUrl,
-  );
-  const initialLiveSyncCompleted = useRef(
-    !liveUpdates || !initialWorldUrl,
-  );
   const [globeReady, setGlobeReady] = useState(!liveUpdates);
-  const [mapMountReady, setMapMountReady] = useState(
-    !liveUpdates || MapComponent !== WorldMap,
-  );
+  const [globeError, setGlobeError] = useState<string | null>(null);
+  const [globeAttempt, setGlobeAttempt] = useState(0);
   const [globalView, setGlobalView] = useState(false);
   const [connectionEventId, setConnectionEventId] = useState<string | null>(
     null,
@@ -1744,12 +1752,6 @@ export function WorldPulseApp({
       cancelled = true;
     };
   }, [initialWorldCompressed, initialWorldUrl]);
-
-  useEffect(() => {
-    if (!initialWorldDecodeFailed) return;
-    const reloadTimer = window.setTimeout(() => window.location.reload(), 3_000);
-    return () => window.clearTimeout(reloadTimer);
-  }, [initialWorldDecodeFailed]);
 
   const fetchGlobalNews = useCallback(async (forceFresh = false) => {
     setGlobalFeed((current) => ({
@@ -1854,9 +1856,6 @@ export function WorldPulseApp({
 
   useEffect(() => {
     if (!liveUpdates) return;
-    if (MapComponent !== WorldMap) {
-      setGlobeReady(true);
-    }
     if (!hasServerWorldPayload) {
       void loadPreparedWorld().catch(() => {
         // The legacy fallback remains available outside the server-rendered app.
@@ -1939,7 +1938,11 @@ export function WorldPulseApp({
       setWorldScanSettled(true);
       return;
     }
-    if (hasServerWorldPayload && !initialWorld) {
+    if (
+      hasServerWorldPayload &&
+      !initialWorld &&
+      !initialWorldDecodeFailed
+    ) {
       setWorldScanSettled(false);
       return;
     }
@@ -2127,6 +2130,7 @@ export function WorldPulseApp({
     fetchGlobalNews,
     hasServerWorldPayload,
     initialWorld,
+    initialWorldDecodeFailed,
     liveUpdates,
   ]);
 
@@ -2210,27 +2214,15 @@ export function WorldPulseApp({
     ) {
       return;
     }
-    const synchronize = async () => {
-      const liveSync = Promise.allSettled([
+    const synchronize = () => {
+      void Promise.allSettled([
         fetchGlobalNews(true),
         refreshCountryNews(selectedCountry, true),
       ]);
-      if (!initialLiveSyncCompleted.current) {
-        await Promise.race([
-          liveSync,
-          new Promise<void>((resolve) => {
-            window.setTimeout(resolve, INITIAL_LIVE_SYNC_BUDGET_MS);
-          }),
-        ]);
-        initialLiveSyncCompleted.current = true;
-        setInitialLiveSyncComplete(true);
-      }
-      await liveSync;
       void refreshPreparedWorldFromServer();
     };
-    void synchronize();
     const refreshTimer = window.setInterval(() => {
-      void synchronize();
+      synchronize();
     }, 60_000);
     return () => {
       window.clearInterval(refreshTimer);
@@ -2656,32 +2648,12 @@ export function WorldPulseApp({
     ]);
   };
 
-  const initialWorldReady =
+  const dataReady =
     !liveUpdates ||
     (countryDirectoryReady &&
       worldScanSettled &&
-      globalFeedReady &&
-      initialLiveSyncComplete);
-  useEffect(() => {
-    if (!initialWorldReady || mapMountReady) return;
-    let mapIdleHandle: number | null = null;
-    const mapStartTimer = window.setTimeout(() => {
-      if ("requestIdleCallback" in window) {
-        mapIdleHandle = window.requestIdleCallback(
-          () => setMapMountReady(true),
-          { timeout: 1_000 },
-        );
-      } else {
-        setMapMountReady(true);
-      }
-    }, MAP_START_DELAY_MS);
-    return () => {
-      window.clearTimeout(mapStartTimer);
-      if (mapIdleHandle != null && "cancelIdleCallback" in window) {
-        window.cancelIdleCallback(mapIdleHandle);
-      }
-    };
-  }, [initialWorldReady, mapMountReady]);
+      globalFeedReady);
+  const initialWorldReady = dataReady && globeReady;
   const worldIndexComplete =
     !liveUpdates || worldScanSettled;
   const worldStatusLabel = isSwitchingCountry
@@ -2701,13 +2673,21 @@ export function WorldPulseApp({
           }
           globalReady={globalFeedReady}
           globeReady={globeReady}
+          globeError={globeError}
+          onRetryGlobe={() => {
+            setGlobeError(null);
+            setGlobeReady(false);
+            setGlobeAttempt((current) => current + 1);
+          }}
           settled={worldScanSettled}
         />
       ) : null}
       <main
-        className="min-h-screen bg-[#080d15]"
-        hidden={!initialWorldReady}
+        className={`min-h-screen bg-[#080d15] transition-opacity duration-200 ${
+          initialWorldReady ? "opacity-100" : "pointer-events-none opacity-0"
+        }`}
         aria-hidden={!initialWorldReady || undefined}
+        data-worldpulse-ready={initialWorldReady ? "true" : "false"}
       >
       <BreakingNewsBar events={breakingEvents} />
       <header className="sticky top-9 z-40 flex h-16 items-center justify-between border-b border-[#222d3e] bg-[#080d15]/95 px-3 backdrop-blur sm:px-6">
@@ -2773,26 +2753,20 @@ export function WorldPulseApp({
             showNewsPanel ? "lg:border-r" : ""
           }`}
         >
-          {mapMountReady ? (
-            <MapComponent
-              countries={mapCountries}
-              selectedMapId={globalView ? null : selectedCountry.mapId}
-              onSelect={handleSelect}
-              onReady={() => setGlobeReady(true)}
-              readyForDisplay={worldIndexComplete && globalFeedReady}
-              linkEvents={mapLinkEvents}
-              statusLabel={worldStatusLabel}
-            />
-          ) : (
-            <div
-              className="grid h-full min-h-[420px] place-items-center bg-[#0b121d]"
-              aria-busy="true"
-            >
-              <span className="font-mono text-[10px] uppercase tracking-[0.2em] text-[#738197]">
-                Loading world map…
-              </span>
-            </div>
-          )}
+          <MapComponent
+            key={globeAttempt}
+            countries={mapCountries}
+            selectedMapId={globalView ? null : selectedCountry.mapId}
+            onSelect={handleSelect}
+            onReady={() => {
+              setGlobeError(null);
+              setGlobeReady(true);
+            }}
+            onError={setGlobeError}
+            readyForDisplay={worldIndexComplete && globalFeedReady}
+            linkEvents={mapLinkEvents}
+            statusLabel={worldStatusLabel}
+          />
           <span className="sr-only" aria-live="polite">
             {worldIndexComplete
               ? "Live country index complete"
