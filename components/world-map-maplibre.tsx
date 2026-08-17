@@ -315,16 +315,7 @@ function emptyFeatureCollection() {
   return { type: "FeatureCollection" as const, features: [] };
 }
 
-function createMapStyle(
-  geometry: WorldFeatureCollection,
-  countryIndex: {
-    byId: Map<string, MapCountry>;
-    byName: Map<string, MapCountry>;
-  },
-  selectedMapId: string | null,
-  points: GlobePoint[],
-  arcs: ReturnType<typeof buildEventLinkCollection>,
-): StyleSpecification {
+function createMapStyle(): StyleSpecification {
   return {
     version: 8,
     name: "WorldPulse satellite globe",
@@ -337,27 +328,6 @@ function createMapStyle(
         maxzoom: GLOBE_PERFORMANCE_PROFILE.imageryMaxLevel,
         attribution:
           "Sentinel-2 cloudless by EOX; modified Copernicus Sentinel data 2016",
-      },
-      terrain: {
-        type: "raster-dem",
-        tiles: [TERRAIN_TILE_URL],
-        tileSize: 256,
-        minzoom: 0,
-        maxzoom: GLOBE_PERFORMANCE_PROFILE.terrainMaxLevel,
-        encoding: "terrarium",
-        attribution: "Mapzen terrain via AWS Open Data",
-      },
-      [COUNTRY_SOURCE_ID]: {
-        type: "geojson",
-        data: prepareCountryGeoJson(geometry, countryIndex, selectedMapId),
-      },
-      [CAPITAL_SOURCE_ID]: {
-        type: "geojson",
-        data: pointGeoJson(points),
-      },
-      [ARC_SOURCE_ID]: {
-        type: "geojson",
-        data: arcs,
       },
     },
     layers: [
@@ -377,62 +347,101 @@ function createMapStyle(
           "raster-saturation": -0.12,
         },
       },
-      {
-        id: COUNTRY_FILL_LAYER_ID,
-        type: "fill",
-        source: COUNTRY_SOURCE_ID,
-        paint: {
-          "fill-color": ["get", "worldPulseColor"],
-          "fill-opacity": ["get", "worldPulseOpacity"],
-        },
-      },
-      {
-        id: COUNTRY_OUTLINE_LAYER_ID,
-        type: "line",
-        source: COUNTRY_SOURCE_ID,
-        paint: {
-          "line-color": "rgba(218,231,241,0.68)",
-          "line-opacity": 0.65,
-          "line-width": ["interpolate", ["linear"], ["zoom"], 0, 0.35, 6, 1],
-        },
-      },
-      {
-        id: ARC_LAYER_ID,
-        type: "line",
-        source: ARC_SOURCE_ID,
-        layout: { "line-cap": "round", "line-join": "round" },
-        paint: {
-          "line-blur": 0.8,
-          "line-color": ["get", "color"],
-          "line-opacity": 0.82,
-          "line-width": ["interpolate", ["linear"], ["zoom"], 0, 0.8, 7, 2.2],
-        },
-      },
-      {
-        id: CAPITAL_LAYER_ID,
-        type: "symbol",
-        source: CAPITAL_SOURCE_ID,
-        layout: {
-          "icon-allow-overlap": true,
-          "icon-ignore-placement": true,
-          "icon-image": ["get", "worldPulseIcon"],
-          "icon-size": [
-            "interpolate",
-            ["linear"],
-            ["zoom"],
-            0,
-            0.24,
-            2,
-            0.38,
-            6,
-            0.78,
-            11,
-            1.05,
-          ],
-        },
-      },
     ],
   };
+}
+
+function installMapOverlays(
+  map: MapLibreMap,
+  geometry: WorldFeatureCollection,
+  countryIndex: {
+    byId: Map<string, MapCountry>;
+    byName: Map<string, MapCountry>;
+  },
+  selectedMapId: string | null,
+  points: GlobePoint[],
+  arcs: ReturnType<typeof buildEventLinkCollection>,
+) {
+  map.addSource("terrain", {
+    type: "raster-dem",
+    tiles: [TERRAIN_TILE_URL],
+    tileSize: 256,
+    minzoom: 0,
+    maxzoom: GLOBE_PERFORMANCE_PROFILE.terrainMaxLevel,
+    encoding: "terrarium",
+    attribution: "Mapzen terrain via AWS Open Data",
+  });
+  map.addSource(COUNTRY_SOURCE_ID, {
+    type: "geojson",
+    data: prepareCountryGeoJson(geometry, countryIndex, selectedMapId),
+    buffer: 8,
+    maxzoom: GLOBE_PERFORMANCE_PROFILE.maxZoom,
+    tolerance: 0.75,
+  });
+  map.addLayer({
+    id: COUNTRY_FILL_LAYER_ID,
+    type: "fill",
+    source: COUNTRY_SOURCE_ID,
+    paint: {
+      "fill-color": ["get", "worldPulseColor"],
+      "fill-opacity": ["get", "worldPulseOpacity"],
+    },
+  });
+  map.addLayer({
+    id: COUNTRY_OUTLINE_LAYER_ID,
+    type: "line",
+    source: COUNTRY_SOURCE_ID,
+    paint: {
+      "line-color": "rgba(218,231,241,0.68)",
+      "line-opacity": 0.65,
+      "line-width": ["interpolate", ["linear"], ["zoom"], 0, 0.35, 6, 1],
+    },
+  });
+  map.addSource(ARC_SOURCE_ID, { type: "geojson", data: arcs });
+  map.addLayer({
+    id: ARC_LAYER_ID,
+    type: "line",
+    source: ARC_SOURCE_ID,
+    layout: { "line-cap": "round", "line-join": "round" },
+    paint: {
+      "line-blur": 0.8,
+      "line-color": ["get", "color"],
+      "line-opacity": 0.82,
+      "line-width": ["interpolate", ["linear"], ["zoom"], 0, 0.8, 7, 2.2],
+    },
+  });
+  ensureStarImages(map, points);
+  map.addSource(CAPITAL_SOURCE_ID, {
+    type: "geojson",
+    data: pointGeoJson(points),
+  });
+  map.addLayer({
+    id: CAPITAL_LAYER_ID,
+    type: "symbol",
+    source: CAPITAL_SOURCE_ID,
+    layout: {
+      "icon-allow-overlap": true,
+      "icon-ignore-placement": true,
+      "icon-image": ["get", "worldPulseIcon"],
+      "icon-size": [
+        "interpolate",
+        ["linear"],
+        ["zoom"],
+        0,
+        0.24,
+        2,
+        0.38,
+        6,
+        0.78,
+        11,
+        1.05,
+      ],
+    },
+  });
+  map.setTerrain({
+    source: "terrain",
+    exaggeration: GLOBE_PERFORMANCE_PROFILE.terrainExaggeration,
+  });
 }
 
 function sourceAsGeoJson(map: MapLibreMap, id: string) {
@@ -443,8 +452,12 @@ function mapIdFromFeatures(
   map: MapLibreMap,
   point: { x: number; y: number },
 ) {
+  const layers = [CAPITAL_LAYER_ID, COUNTRY_FILL_LAYER_ID].filter((layer) =>
+    map.getLayer(layer),
+  );
+  if (!layers.length) return undefined;
   const features = map.queryRenderedFeatures([point.x, point.y], {
-    layers: [CAPITAL_LAYER_ID, COUNTRY_FILL_LAYER_ID],
+    layers,
   });
   const mapId = features[0]?.properties?.worldPulseMapId;
   return typeof mapId === "string" && mapId ? mapId : undefined;
@@ -651,6 +664,7 @@ export function WorldMap({
     let cancelled = false;
     let map: MapLibreMap | null = null;
     let idleHandle: number | null = null;
+    let overlayIdleHandle: number | null = null;
     let contextLostListener: EventListener | null = null;
 
     const reportFailure = (error: unknown) => {
@@ -675,17 +689,9 @@ export function WorldMap({
       if (cancelled || !containerRef.current) return;
       setWorldGeometry(geometry);
       setCapitalCoordinates(capitals);
-      const initialCountryIndex = countryIndexRef.current;
-      const initialInputs = mapInputsRef.current;
       map = new runtime.Map({
         container: containerRef.current,
-        style: createMapStyle(
-          geometry,
-          initialCountryIndex,
-          initialInputs.selectedMapId,
-          initialInputs.signalPoints,
-          initialInputs.eventArcs,
-        ),
+        style: createMapStyle(),
         center: [INITIAL_LONGITUDE, INITIAL_LATITUDE],
         zoom: INITIAL_ZOOM,
         minZoom: 0.35,
@@ -720,21 +726,35 @@ export function WorldMap({
       liveMap.once("load", () => {
         if (cancelled) return;
         liveMap.setProjection({ type: "globe" });
-        liveMap.setTerrain({
-          source: "terrain",
-          exaggeration: GLOBE_PERFORMANCE_PROFILE.terrainExaggeration,
-        });
-        const latestInputs = mapInputsRef.current;
-        ensureStarImages(liveMap, latestInputs.signalPoints);
-        sourceAsGeoJson(liveMap, CAPITAL_SOURCE_ID)?.setData(
-          pointGeoJson(latestInputs.signalPoints),
-        );
-        const scene = sceneRef.current;
-        if (scene) scene.ready = true;
         setMapError(null);
-        if (latestInputs.readyForDisplay && !readyNotifiedRef.current) {
+        if (!readyNotifiedRef.current) {
           readyNotifiedRef.current = true;
           onReadyRef.current?.();
+        }
+        const installOverlays = () => {
+          if (cancelled) return;
+          try {
+            const latestInputs = mapInputsRef.current;
+            installMapOverlays(
+              liveMap,
+              geometry,
+              countryIndexRef.current,
+              latestInputs.selectedMapId,
+              latestInputs.signalPoints,
+              latestInputs.eventArcs,
+            );
+            const scene = sceneRef.current;
+            if (scene) scene.ready = true;
+          } catch (error) {
+            reportFailure(error);
+          }
+        };
+        if (window.requestIdleCallback) {
+          overlayIdleHandle = window.requestIdleCallback(installOverlays, {
+            timeout: 700,
+          });
+        } else {
+          window.setTimeout(installOverlays, 0);
         }
       });
       liveMap.on("error", (event) => {
@@ -787,6 +807,9 @@ export function WorldMap({
       cancelled = true;
       if (idleHandle != null && window.cancelIdleCallback) {
         window.cancelIdleCallback(idleHandle);
+      }
+      if (overlayIdleHandle != null && window.cancelIdleCallback) {
+        window.cancelIdleCallback(overlayIdleHandle);
       }
       if (map && contextLostListener) {
         map
