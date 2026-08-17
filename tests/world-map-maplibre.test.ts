@@ -30,6 +30,12 @@ describe("optimized MapLibre globe", () => {
   it("uses native raster DEM terrain instead of decoding terrain on the UI thread", () => {
     expect(source).toContain('type: "raster-dem"');
     expect(source).toContain('encoding: "terrarium"');
+    expect(source).toContain(
+      '"https://elevation-tiles-prod.s3.amazonaws.com/terrarium/{z}/{x}/{y}.png"',
+    );
+    expect(source).not.toContain(
+      'const TERRAIN_TILE_URL = "/api/terrain/{z}/{x}/{y}"',
+    );
     expect(source).not.toContain("createImageBitmap");
     expect(source).not.toContain("getImageData(0, 0, bitmap.width");
   });

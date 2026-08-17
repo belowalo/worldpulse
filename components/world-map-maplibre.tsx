@@ -73,7 +73,8 @@ const ARC_SOURCE_ID = "worldpulse-arcs";
 const ARC_LAYER_ID = "worldpulse-connection-arcs";
 const SATELLITE_TILE_URL =
   "https://tiles.maps.eox.at/wmts/1.0.0/s2cloudless_3857/default/g/{z}/{y}/{x}.jpg";
-const TERRAIN_TILE_URL = "/api/terrain/{z}/{x}/{y}";
+const TERRAIN_TILE_URL =
+  "https://elevation-tiles-prod.s3.amazonaws.com/terrarium/{z}/{x}/{y}.png";
 const ARC_LIMIT = 12;
 const SMALL_ISLAND_HIT_OFFSETS = [
   [0, -3],
