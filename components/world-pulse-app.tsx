@@ -55,7 +55,7 @@ import {
   loadWorldGeometry,
   WorldMap,
   type WorldMapProps,
-} from "./world-map";
+} from "./world-map-maplibre";
 
 type ImportanceFilter = "All" | "Major" | "Significant" | "Developing" | "Routine";
 type TimeFilter = "24 hours" | "3 days" | "7 days" | "All stories";
