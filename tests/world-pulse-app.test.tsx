@@ -223,6 +223,9 @@ describe("WorldPulse interactions", () => {
   it("opens the selected country's event panel", () => {
     render(<WorldPulseApp MapComponent={TestMap} liveUpdates={false} />);
     expect(screen.getByRole("heading", { name: "Canada" })).toBeInTheDocument();
+    expect(
+      screen.getByRole("complementary", { name: "Country news panel" }),
+    ).toHaveClass("lg:h-[calc(100vh-6.25rem)]");
     fireEvent.click(
       screen.getByRole("button", { name: "Select Japan on map" }),
     );

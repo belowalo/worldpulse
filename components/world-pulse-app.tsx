@@ -2857,7 +2857,7 @@ export function WorldPulseApp({
         {showNewsPanel ? (
           <aside
             id="country-news-panel"
-            className="flex min-h-[620px] flex-col bg-[#101722] lg:h-[calc(100vh-4rem)] lg:min-h-0"
+            className="flex min-h-[620px] flex-col bg-[#101722] lg:h-[calc(100vh-6.25rem)] lg:min-h-0"
             aria-label={globalView ? "Global events" : "Country news panel"}
           >
           <div className="country-news-panel__header sticky top-16 z-20 border-b border-[#273246] bg-[#101722]/95 px-5 pb-4 pt-5 backdrop-blur lg:static">
