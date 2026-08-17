@@ -123,6 +123,7 @@ function mergeLiveFeedRecords(
 
 const INITIAL_VISIBLE_EVENT_LIMIT = 40;
 const LIVE_REQUEST_TIMEOUT_MS = 30_000;
+const INITIAL_LIVE_SYNC_BUDGET_MS = 8_000;
 const WORLD_BATCH_REQUEST_TIMEOUT_MS = 60_000;
 const WORLD_BATCH_SIZE = 12;
 const WORLD_BATCH_CONCURRENCY = 6;
@@ -2151,14 +2152,21 @@ export function WorldPulseApp({
       return;
     }
     const synchronize = async () => {
-      await Promise.allSettled([
+      const liveSync = Promise.allSettled([
         fetchGlobalNews(true),
         refreshCountryNews(selectedCountry, true),
       ]);
       if (!initialLiveSyncCompleted.current) {
+        await Promise.race([
+          liveSync,
+          new Promise<void>((resolve) => {
+            window.setTimeout(resolve, INITIAL_LIVE_SYNC_BUDGET_MS);
+          }),
+        ]);
         initialLiveSyncCompleted.current = true;
         setInitialLiveSyncComplete(true);
       }
+      await liveSync;
       void refreshPreparedWorldFromServer();
     };
     void synchronize();
