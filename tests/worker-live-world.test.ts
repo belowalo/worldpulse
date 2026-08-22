@@ -44,7 +44,7 @@ describe("live world delivery", () => {
 
     const response = await worker.fetch(
       new Request("https://worldpulse.test/api/live-news?scope=world-live"),
-      { WORLD_PULSE_ORIGIN: "http://140.238.147.141" } as never,
+      { WORLD_PULSE_ORIGIN: "http://140-238-147-141.sslip.io" } as never,
       { waitUntil: vi.fn(), passThroughOnException: vi.fn() },
     );
 
@@ -54,7 +54,9 @@ describe("live world delivery", () => {
     );
     expect(fetchMock).toHaveBeenCalledOnce();
     expect(fetchMock).toHaveBeenCalledWith(
-      new URL("http://140.238.147.141/api/live-news?scope=world-live"),
+      new URL(
+        "http://140-238-147-141.sslip.io/api/live-news?scope=world-live",
+      ),
       expect.objectContaining({
         headers: { Accept: "application/json" },
       }),

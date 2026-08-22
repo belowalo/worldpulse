@@ -5,6 +5,6 @@
   "compatibility_date": "2026-08-21",
   "compatibility_flags": ["nodejs_compat"],
   "vars": {
-    "WORLD_PULSE_ORIGIN": "http://140.238.147.141"
+    "WORLD_PULSE_ORIGIN": "http://140-238-147-141.sslip.io"
   }
 }
