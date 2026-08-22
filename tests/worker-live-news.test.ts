@@ -205,6 +205,37 @@ describe("worker live-news providers", () => {
     ).toBe(true);
   });
 
+  it("distinguishes the countries Jordan and Lebanon from names and U.S. towns", () => {
+    expect(
+      articleMatchesCountry(
+        { searchableText: "Jordan Love throws a touchdown pass for Green Bay" },
+        countrySearchTerms("Jordan"),
+        "Jordan",
+      ),
+    ).toBe(false);
+    expect(
+      articleMatchesCountry(
+        { searchableText: "Jordan expands trade with West Bank markets" },
+        countrySearchTerms("Jordan"),
+        "Jordan",
+      ),
+    ).toBe(true);
+    expect(
+      articleMatchesCountry(
+        { searchableText: "Police investigate a crash in Lebanon County" },
+        countrySearchTerms("Lebanon"),
+        "Lebanon",
+      ),
+    ).toBe(false);
+    expect(
+      articleMatchesCountry(
+        { searchableText: "Lebanon economy contracts as regional war continues" },
+        countrySearchTerms("Lebanon"),
+        "Lebanon",
+      ),
+    ).toBe(true);
+  });
+
   it("parses Bing News publisher attribution and restores the article URL", () => {
     const originalUrl = "https://example.com/tuvalu-climate-report";
     const redirectUrl = new URL("https://www.bing.com/news/apiclick.aspx");

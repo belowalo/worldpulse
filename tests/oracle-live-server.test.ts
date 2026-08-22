@@ -80,6 +80,40 @@ describe("Oracle live server", () => {
     expect(merged.articles.map((item) => item.id)).toEqual(["gaza-aid"]);
   });
 
+  it("purges person, product, and U.S. locality collisions for nearby countries", () => {
+    const publishedAt = new Date().toISOString();
+    const jordan = mergeCountryFeed(
+      "Jordan",
+      {
+        countryName: "Jordan",
+        generatedAt: publishedAt,
+        available: true,
+        articles: [
+          { ...article("jordan-love", publishedAt), title: "Jordan Love throws a touchdown pass" },
+          { ...article("air-jordan", publishedAt), title: "Air Jordan 14 Low gets a release date" },
+          { ...article("jordan-trade", publishedAt), title: "Jordan expands trade with West Bank markets" },
+        ],
+      },
+      undefined,
+    );
+    const lebanon = mergeCountryFeed(
+      "Lebanon",
+      {
+        countryName: "Lebanon",
+        generatedAt: publishedAt,
+        available: true,
+        articles: [
+          { ...article("lebanon-county", publishedAt), title: "Police investigate crash in Lebanon County" },
+          { ...article("lebanon-economy", publishedAt), title: "Lebanon economy contracts as regional war continues" },
+        ],
+      },
+      undefined,
+    );
+
+    expect(jordan.articles.map((item) => item.id)).toEqual(["jordan-trade"]);
+    expect(lebanon.articles.map((item) => item.id)).toEqual(["lebanon-economy"]);
+  });
+
   it("retains distinct events before additional coverage of a dominant story", () => {
     const publishedAt = "2026-08-22T06:00:00.000Z";
     const tariffCoverage = Array.from({ length: 24 }, (_, index) => ({

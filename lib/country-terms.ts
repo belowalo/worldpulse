@@ -127,7 +127,7 @@ const COUNTRY_RELATED_TERMS: Record<string, string[]> = {
   Vanuatu: ["Port Vila", "Ni-Vanuatu"],
   Kuwait: ["Kuwaiti"],
   Latvia: ["Latvian"],
-  Lebanon: ["Lebanese"],
+  Lebanon: ["Lebanese", "Beirut"],
   Libya: ["Libyan"],
   Lithuania: ["Lithuanian"],
   Malaysia: ["Malaysian"],
@@ -308,6 +308,22 @@ export function textMatchesCountryName(text: string, countryName: string) {
         text,
       );
     if (hasUnrelatedLocality && !hasPalestinianContext) return false;
+  }
+
+  if (canonicalName === "Jordan") {
+    const hasJordanCountryContext =
+      /\b(?:Jordanian|Amman|West Bank|Israel(?:i)?|Palestin(?:e|ian)|Syria(?:n)?|Iraq(?:i)?|Saudi|Middle East|King|Queen|Royal|government|minister|parliament|army|military|border|refugee|diplomat(?:ic)?|embassy|ambassador|trade|market|aid|economy|economic|dinar|election|country|nation)\b/iu.test(
+        text,
+      );
+    if (!hasJordanCountryContext) return false;
+  }
+
+  if (canonicalName === "Lebanon") {
+    const hasLebanonCountryContext =
+      /\b(?:Lebanese|Beirut|Israel(?:i|'s)?|Syria(?:n)?|Iran(?:ian)?|Middle East|government|president|prime minister|parliament|army|military|economy|economic|World Bank|war|conflict|border|Hezbollah|United Nations|UN|peacekeep(?:er|ers|ing)|displaced|humanitarian|ambassador|amnesty|regional|aid|country|nation|Vatican)\b/iu.test(
+        text,
+      );
+    if (!hasLebanonCountryContext) return false;
   }
 
   return true;
