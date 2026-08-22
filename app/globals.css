@@ -37,6 +37,35 @@ body {
   font-family: var(--font-geist-sans), Arial, sans-serif;
 }
 
+@media (pointer: fine) {
+  html,
+  body {
+    cursor: url("/cursor-default.svg") 3 2, default;
+  }
+
+  a,
+  button,
+  select,
+  summary,
+  [role="button"],
+  [role="link"],
+  label[for],
+  input[type="button"],
+  input[type="checkbox"],
+  input[type="radio"],
+  input[type="range"],
+  input[type="reset"],
+  input[type="submit"] {
+    cursor: url("/cursor-active.svg") 3 2, pointer;
+  }
+
+  input:not([type="button"]):not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="reset"]):not([type="submit"]),
+  textarea,
+  [contenteditable="true"] {
+    cursor: text;
+  }
+}
+
 button,
 input,
 select {
