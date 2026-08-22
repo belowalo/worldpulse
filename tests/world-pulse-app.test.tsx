@@ -203,7 +203,7 @@ describe("WorldPulse live country delivery", () => {
     expect(worldRequests()).toBe(before);
   });
 
-  it("stops waiting after ten seconds when the live server never responds", async () => {
+  it("keeps the loading screen instead of failing on an arbitrary ten-second deadline", async () => {
     vi.useFakeTimers();
     vi.stubGlobal(
       "fetch",
@@ -219,7 +219,10 @@ describe("WorldPulse live country delivery", () => {
     });
 
     expect(
-      screen.getByRole("heading", { name: "The live world feed is unavailable" }),
+      screen.getByRole("heading", { name: "Preparing the live world" }),
     ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("heading", { name: "The live world feed is unavailable" }),
+    ).toBeNull();
   });
 });

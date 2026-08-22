@@ -26,6 +26,7 @@ import {
   type Event,
   type LiveWorldNewsPayload,
   type MapCountry,
+  type PreparedWorldNewsPayload,
 } from "@/lib/types";
 import {
   countryPulses,
@@ -95,8 +96,63 @@ function mergeLiveFeedMaps(
 }
 
 const INITIAL_VISIBLE_EVENT_LIMIT = 40;
-const STARTUP_MAX_WAIT_MS = 10_000;
 const SNAPSHOT_REQUEST_TIMEOUT_MS = 8_500;
+
+function buildLiveWorldInBackground(
+  live: LiveWorldNewsPayload,
+  countries: MapCountry[],
+  workers: Set<Worker>,
+) {
+  if (typeof Worker === "undefined") {
+    return Promise.resolve(
+      buildLiveWorldView(
+        live.global,
+        live.countries,
+        countries,
+        live.generatedAt,
+      ),
+    );
+  }
+  return new Promise<PreparedWorldNewsPayload>((resolve, reject) => {
+    const worker = new Worker(
+      new URL("../lib/world-snapshot.worker.ts", import.meta.url),
+      { type: "module" },
+    );
+    workers.add(worker);
+    const finish = () => {
+      workers.delete(worker);
+      worker.terminate();
+    };
+    worker.onmessage = (
+      event: MessageEvent<{
+        message?: string;
+        ok: boolean;
+        payload?: PreparedWorldNewsPayload;
+      }>,
+    ) => {
+      finish();
+      if (event.data.ok && event.data.payload) {
+        resolve(event.data.payload);
+      } else {
+        reject(
+          new Error(
+            event.data.message ?? "The live world feed could not be prepared.",
+          ),
+        );
+      }
+    };
+    worker.onerror = () => {
+      finish();
+      reject(new Error("The live world feed could not be prepared."));
+    };
+    worker.postMessage({
+      countries,
+      generatedAt: live.generatedAt,
+      global: live.global,
+      payloads: live.countries,
+    });
+  });
+}
 
 const countryMetadata = countryPulses.map(
   (country): MapCountry => ({
@@ -1480,8 +1536,8 @@ function WorldStartupError() {
           The live world feed is unavailable
         </h1>
         <p className="mt-3 text-sm leading-6 text-[#9aa8ba]">
-          WorldPulse stopped waiting after ten seconds. Reload to reconnect to
-          the current server feed.
+          WorldPulse could not reach or prepare the current server feed. Reload
+          to reconnect.
         </p>
         <button
           type="button"
@@ -1504,7 +1560,6 @@ export function WorldPulseApp({
     useState<ReturnType<typeof buildLiveWorldView>>();
   const [initialWorldDecodeFailed, setInitialWorldDecodeFailed] =
     useState(false);
-  const [startupTimedOut, setStartupTimedOut] = useState(false);
   const [selectedCountry, setSelectedCountry] =
     useState<MapCountry>(initialCountry);
   const [countryDirectory, setCountryDirectory] =
@@ -1558,6 +1613,7 @@ export function WorldPulseApp({
     let cancelled = false;
     let loaded = false;
     const controller = new AbortController();
+    const workers = new Set<Worker>();
     const loadLiveWorld = async () => {
       try {
         const response = await fetch(liveWorldUrl, {
@@ -1572,11 +1628,10 @@ export function WorldPulseApp({
         if (live.scope !== "world-live" || !Array.isArray(live.countries)) {
           throw new Error("The live world feed is invalid.");
         }
-        const world = buildLiveWorldView(
-          live.global,
-          live.countries,
+        const world = await buildLiveWorldInBackground(
+          live,
           countryDirectory,
-          live.generatedAt,
+          workers,
         );
         if (!cancelled) {
           loaded = true;
@@ -1592,6 +1647,8 @@ export function WorldPulseApp({
     return () => {
       cancelled = true;
       controller.abort();
+      for (const worker of workers) worker.terminate();
+      workers.clear();
       window.clearInterval(interval);
     };
   }, [
@@ -1600,15 +1657,6 @@ export function WorldPulseApp({
     liveUpdates,
     liveWorldUrl,
   ]);
-
-  useEffect(() => {
-    if (!liveUpdates) return;
-    const timeout = window.setTimeout(
-      () => setStartupTimedOut(true),
-      STARTUP_MAX_WAIT_MS,
-    );
-    return () => window.clearTimeout(timeout);
-  }, [liveUpdates]);
 
   useEffect(() => {
     if (!liveUpdates) return;
@@ -1725,9 +1773,13 @@ export function WorldPulseApp({
         const mapSignalFeed = liveCountryFeeds[country.name];
         const signalFeed = fullSignalFeed ?? mapSignalFeed;
         if (signalFeed) {
-          const synchronizedEvents = mergeEventFeeds(
-            fullSignalFeed?.events ?? [],
-            mapSignalFeed?.events ?? [],
+          const synchronizedEvents = (
+            fullSignalFeed?.events === mapSignalFeed?.events
+              ? (fullSignalFeed?.events ?? [])
+              : mergeEventFeeds(
+                  fullSignalFeed?.events ?? [],
+                  mapSignalFeed?.events ?? [],
+                )
           ).sort(
             (left, right) =>
               right.importanceScore - left.importanceScore ||
@@ -2036,8 +2088,8 @@ export function WorldPulseApp({
   const startupFailed =
     liveUpdates &&
     !dataReady &&
-    (initialWorldDecodeFailed || startupTimedOut);
-  const initialWorldReady = dataReady && (globeReady || startupTimedOut);
+    initialWorldDecodeFailed;
+  const initialWorldReady = dataReady && globeReady;
   const worldIndexComplete =
     !liveUpdates || worldScanSettled;
   const worldStatusLabel = worldIndexComplete ? "Live" : "Preparing the world";

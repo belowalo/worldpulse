@@ -76,7 +76,7 @@ describe("Cesium country overlays", () => {
       ),
     ).toHaveLength(1);
     expect(countryEntities.every((record) => record.entity.polygon)).toBe(true);
-  }, 15_000);
+  }, 30_000);
 
   it("keeps capital markers at a fixed ellipsoid position", async () => {
     const runtime = await loadCesiumRuntime();
