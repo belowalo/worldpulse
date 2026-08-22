@@ -155,6 +155,44 @@ describe("prepared minute world state", () => {
     expect(MAX_PREPARED_COUNTRY_EVENTS).toBeGreaterThanOrEqual(20);
   });
 
+  it("bounds browser-side country processing to the visible event budget", () => {
+    const generatedAt = new Date().toISOString();
+    const directory: MapCountry[] = [
+      { mapId: "124", name: "Canada", iso2: "CA", events: [] },
+    ];
+    const prepared = prepareCompleteWorldSnapshot(
+      {
+        scope: "global",
+        countryName: null,
+        generatedAt,
+        refreshAfterSeconds: 60,
+        provider: "Live providers",
+        articles: [],
+      },
+      [{
+        countryName: "Canada",
+        generatedAt,
+        available: true,
+        articles: Array.from({ length: 40 }, (_, index) =>
+          liveArticle(
+            `canada-${index}`,
+            `Canada current independent report number ${index}`,
+          ),
+        ),
+      }],
+      directory,
+      generatedAt,
+    );
+    const processedArticles = prepared.countryFeeds.Canada.events.reduce(
+      (total, event) => total + event.articles.length,
+      0,
+    );
+
+    expect(processedArticles).toBeLessThanOrEqual(
+      MAX_PREPARED_COUNTRY_EVENTS,
+    );
+  });
+
   it("keeps recent last-known-good country stories when a fresh feed is thin", () => {
     const generatedAt = new Date().toISOString();
     const directory: MapCountry[] = [

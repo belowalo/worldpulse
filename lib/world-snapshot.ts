@@ -1,5 +1,4 @@
 import {
-  articlesMentioningCountry,
   buildLiveEvents,
   mergeEventFeeds,
 } from "@/lib/live-news";
@@ -150,6 +149,32 @@ export function applyDetectedGeography(
   };
 }
 
+function anchorEventToCountry(event: Event, country: MapCountry) {
+  const identifier = country.iso2 ?? country.name;
+  const affectedCountries = [
+    ...new Set([...event.affectedCountries, identifier]),
+  ];
+  const scoringInput = {
+    ...event.scoringInput,
+    affectedCountryCount: Math.max(1, affectedCountries.length),
+  };
+  const scoring = calculateImportance(scoringInput);
+  return {
+    ...event,
+    primaryCountry:
+      event.primaryCountry === "GLOBAL" ? identifier : event.primaryCountry,
+    affectedCountries,
+    geographicScope:
+      affectedCountries.length > 1
+        ? ("International" as const)
+        : event.geographicScope,
+    importanceScore: scoring.score,
+    importanceLabel: scoring.label,
+    scoringComponents: scoring.components,
+    scoringInput,
+  };
+}
+
 export function prepareWorldSnapshotFeeds(
   payloads: MapNewsPayload["countries"],
   countryDirectory: MapCountry[],
@@ -167,19 +192,14 @@ export function prepareWorldSnapshotFeeds(
       generatedAt: countryPayload.generatedAt,
       refreshAfterSeconds: 300,
       provider: "WorldPulse",
-      articles: countryPayload.articles,
+      // The globe renders at most twenty country events. Bounding the input
+      // prevents thousands of extra similarity comparisons on every poll.
+      articles: countryPayload.articles.slice(0, MAX_PREPARED_COUNTRY_EVENTS),
     };
-    const countryArticles = articlesMentioningCountry(
-      livePayload,
-      country.name,
-    );
     feeds[country.name] = {
-      events: buildLiveEvents(
-        { ...livePayload, articles: countryArticles },
-        country,
-      ).map((event) =>
-        applyDetectedGeography(event, countryDirectory, country),
-      ),
+      // The continuous collector already verifies country relevance before
+      // publishing this record, so the browser should not filter it again.
+      events: buildLiveEvents(livePayload, country),
       updatedAt: countryPayload.generatedAt,
       provider: "WorldPulse",
       loading: false,
@@ -254,9 +274,10 @@ export function prepareCompleteWorldSnapshotFromFeeds(
   for (const country of countryDirectory) {
     const localFeed = localFeeds[country.name];
     const normalizedLocalEvents = (localFeed?.events ?? [])
-      .map((event) =>
-        applyDetectedGeography(event, countryDirectory, country),
-      )
+      // Local provider results have already been country-verified. Re-anchor
+      // them in constant time instead of scanning every event against every
+      // country name and alias again in the browser.
+      .map((event) => anchorEventToCountry(event, country))
       .filter(isRetainedStory);
     const latestLocalEvents = [...normalizedLocalEvents]
       .sort(
@@ -265,15 +286,14 @@ export function prepareCompleteWorldSnapshotFromFeeds(
           right.importanceScore - left.importanceScore,
       )
       .slice(0, MAX_PREPARED_COUNTRY_EVENTS);
+    const matchingGlobalEvents =
+      currentGlobalEventsByCountry.get(country.name) ?? [];
     countryFeeds[country.name] = {
-      events: mergeEventFeeds(
-        latestLocalEvents,
-        currentGlobalEventsByCountry.get(country.name) ?? [],
-      ).sort(
-        (left, right) =>
-          right.importanceScore - left.importanceScore ||
-          Date.parse(right.lastUpdatedAt) - Date.parse(left.lastUpdatedAt),
-      ),
+      // buildLiveEvents already returns a clustered, ranked local feed. Avoid
+      // an O(n²) similarity merge when there is no global event to add.
+      events: matchingGlobalEvents.length
+        ? mergeEventFeeds(latestLocalEvents, matchingGlobalEvents)
+        : latestLocalEvents,
       updatedAt: localFeed?.updatedAt ?? generatedAt,
       provider: "WorldPulse \u00b7 minute world state",
       loading: false,

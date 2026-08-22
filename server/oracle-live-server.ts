@@ -16,7 +16,7 @@ const REPOSITORY_DIR = resolve(SERVER_DIR, "..");
 const DEFAULT_DATA_PATH = resolve(REPOSITORY_DIR, ".runtime", "world-live.json");
 const ARTICLE_RETENTION_MS = 8 * 24 * 60 * 60_000;
 const FUTURE_TOLERANCE_MS = 6 * 60 * 60_000;
-const MAX_ARTICLES_PER_COUNTRY = 32;
+const MAX_ARTICLES_PER_COUNTRY = 20;
 const GLOBAL_REFRESH_MS = 5 * 60_000;
 const COUNTRY_RETRY_DELAY_MS = 750;
 const EXPECTED_EMPTY_COUNTRIES = new Set([
@@ -128,9 +128,15 @@ export function buildWorldPayload(
     refreshAfterSeconds: 60,
     provider: "WorldPulse continuous Oracle country index",
     global: state.global ?? emptyGlobalFeed(),
-    countries: countryNames.map(
-      (countryName) => state.countries[countryName] ?? emptyCountry(countryName),
-    ),
+    countries: countryNames.map((countryName) => {
+      const country = state.countries[countryName] ?? emptyCountry(countryName);
+      const articles = country.articles.slice(0, MAX_ARTICLES_PER_COUNTRY);
+      return {
+        ...country,
+        available: articles.length > 0,
+        articles,
+      };
+    }),
   };
 }
 

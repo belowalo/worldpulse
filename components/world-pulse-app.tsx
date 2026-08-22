@@ -79,12 +79,14 @@ function mergeLiveFeedMaps(
           (!Number.isFinite(currentAt) || latestAt >= currentAt));
       const newest = latestIsNewer ? latest : current;
       const older = latestIsNewer ? current : latest;
+      const events = !older?.events.length
+        ? (newest?.events ?? [])
+        : !newest?.events.length
+          ? older.events
+          : mergeEventFeeds(newest.events, older.events);
       return [[countryName, {
         ...(newest ?? older ?? EMPTY_FEED),
-        events: mergeEventFeeds(
-          newest?.events ?? [],
-          older?.events ?? [],
-        ),
+        events,
         loading: false,
         error: null,
       } satisfies FeedState]];
