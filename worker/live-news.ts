@@ -778,13 +778,18 @@ function bingNewsProvider(
 function googleCountryProvider(
   countryName: string,
   broaderSearch = false,
+  internationalSearch = false,
 ): NewsProvider {
   const queryTerm = COUNTRY_NEWS_QUERY_OVERRIDES[countryName] ?? countryName;
-  const locale = googleNewsLocaleForCountry(countryName);
+  const locale = internationalSearch
+    ? { language: "en", region: "US" }
+    : googleNewsLocaleForCountry(countryName);
   return {
-    name: broaderSearch
-      ? "Google News · Broader country search"
-      : "Google News · Current country search",
+    name: internationalSearch
+      ? "Google News · International country search"
+      : broaderSearch
+        ? "Google News · Broader country search"
+        : "Google News · Current country search",
     publisherUrl: "https://news.google.com/",
     timeoutMs: 7_000,
     filterByCountry: false,
@@ -792,7 +797,9 @@ function googleCountryProvider(
       const url = new URL("https://news.google.com/rss/search");
       url.searchParams.set(
         "q",
-        broaderSearch
+        internationalSearch
+          ? `"${countryName}" when:7d`
+          : broaderSearch
           ? `${queryTerm} when:7d`
           : `"${queryTerm}" when:3d`,
       );
@@ -938,6 +945,11 @@ async function fetchMapCountry(
   const terms = newsSearchTerms(requestedCountry);
   const googleProvider = googleCountryProvider(countryName);
   const broaderGoogleProvider = googleCountryProvider(countryName, true);
+  const internationalGoogleProvider = googleCountryProvider(
+    countryName,
+    false,
+    true,
+  );
   const countryProviders = countryBingProviders(countryName);
   // A country is only published after a multi-source current scan. Stopping
   // after the first non-empty RSS feed made the prepared globe much thinner
@@ -989,6 +1001,24 @@ async function fetchMapCountry(
       ...countryRelevantResults([latestCountryResult], terms),
       ...countryRelevantResults([alternateCountryResult], terms),
     ];
+    const retryArticleCount = relevantResults.reduce(
+      (total, result) => total + result.articles.length,
+      0,
+    );
+    if (!retryArticleCount) {
+      const internationalGoogleResult = await fetchProvider(
+        internationalGoogleProvider,
+        "country",
+        countryName,
+        terms,
+        fetchImpl,
+      );
+      results.push(internationalGoogleResult);
+      relevantResults = [
+        ...relevantResults,
+        ...countryRelevantResults([internationalGoogleResult], terms),
+      ];
+    }
   }
   const successful = relevantResults.filter(
     (result) => result.ok && result.articles.length,

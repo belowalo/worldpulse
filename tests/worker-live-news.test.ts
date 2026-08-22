@@ -688,6 +688,67 @@ describe("worker live-news providers", () => {
     ]);
   });
 
+  it("uses an international Google locale when a small-country locale is empty", async () => {
+    vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const requestedUrls: string[] = [];
+    const publishedAt = new Date(Date.now() - 60_000).toUTCString();
+    const fetchMock = vi.fn(async (input: URL | RequestInfo) => {
+      const url = String(input);
+      requestedUrls.push(url);
+      if (url.startsWith("https://news.google.com/rss/search")) {
+        const requestUrl = new URL(url);
+        if (
+          requestUrl.searchParams.get("gl") === "US" &&
+          requestUrl.searchParams.get("q") === '"Montserrat" when:7d'
+        ) {
+          return new Response(`
+            <rss><channel><item>
+              <title>Montserrat expands regional air connections - Caribbean Journal</title>
+              <description>Montserrat announced new regional connections.</description>
+              <link>https://publisher.example/montserrat-air</link>
+              <guid>montserrat-air</guid>
+              <pubDate>${publishedAt}</pubDate>
+              <source url="https://publisher.example">Caribbean Journal</source>
+            </item></channel></rss>
+          `);
+        }
+      }
+      return new Response("<rss><channel></channel></rss>");
+    });
+
+    const response = await handleLiveNews(
+      new Request(
+        "https://worldpulse.test/api/live-news?scope=map&countries=Montserrat",
+      ),
+      fetchMock as typeof fetch,
+    );
+    const payload = (await response.json()) as {
+      countries: Array<{
+        available: boolean;
+        articles: Array<{ title: string }>;
+      }>;
+    };
+
+    expect(payload.countries[0]).toMatchObject({
+      available: true,
+      articles: [
+        expect.objectContaining({
+          title: "Montserrat expands regional air connections",
+        }),
+      ],
+    });
+    expect(
+      requestedUrls.some((url) => {
+        if (!url.startsWith("https://news.google.com/rss/search")) return false;
+        const requestUrl = new URL(url);
+        return (
+          requestUrl.searchParams.get("gl") === "US" &&
+          requestUrl.searchParams.get("q") === '"Montserrat" when:7d'
+        );
+      }),
+    ).toBe(true);
+  });
+
   it("falls back to a latest-country search when the first has no results", async () => {
     vi.spyOn(console, "warn").mockImplementation(() => undefined);
     const requestedUrls: string[] = [];
