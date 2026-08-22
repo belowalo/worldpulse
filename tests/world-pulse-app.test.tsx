@@ -155,6 +155,30 @@ describe("Hemisphere Herald live country delivery", () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
+  it("keeps the news drawer mounted while sliding it closed and open", () => {
+    vi.stubGlobal("fetch", vi.fn());
+    render(<WorldPulseApp MapComponent={TestMap} liveUpdates={false} />);
+
+    const panel = document.getElementById("country-news-panel");
+    expect(panel).toHaveAttribute("aria-hidden", "false");
+    expect(panel).toHaveClass("translate-x-0");
+
+    fireEvent.click(screen.getByRole("button", { name: "Hide news panel" }));
+
+    expect(panel).toHaveAttribute("aria-hidden", "true");
+    expect(panel).toHaveAttribute("inert");
+    expect(panel).toHaveClass("lg:translate-x-full");
+    expect(
+      screen.getByRole("button", { name: "Show news panel" }),
+    ).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Show news panel" }));
+
+    expect(panel).toHaveAttribute("aria-hidden", "false");
+    expect(panel).not.toHaveAttribute("inert");
+    expect(panel).toHaveClass("translate-x-0");
+  });
+
   it("loads the direct live-world index and never requests a snapshot", async () => {
     const world = liveWorld({
       Canada: [articleFor("Canada")],

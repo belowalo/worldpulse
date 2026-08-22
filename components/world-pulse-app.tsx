@@ -2483,10 +2483,10 @@ export function WorldPulseApp({
       </header>
 
       <div
-        className={`grid min-h-[calc(100vh-6.25rem)] ${
+        className={`grid min-h-[calc(100vh-6.25rem)] overflow-hidden transition-[grid-template-columns] duration-500 ease-in-out ${
           showNewsPanel
             ? "lg:grid-cols-[minmax(0,1fr)_420px]"
-            : "lg:grid-cols-1"
+            : "lg:grid-cols-[minmax(0,1fr)_0px]"
         }`}
       >
         <section
@@ -2522,7 +2522,14 @@ export function WorldPulseApp({
             aria-expanded={showNewsPanel}
             title={showNewsPanel ? "Hide news panel" : "Show news panel"}
           >
-            <span aria-hidden="true">{showNewsPanel ? "›" : "‹"}</span>
+            <span
+              aria-hidden="true"
+              className={`transition-transform duration-500 ${
+                showNewsPanel ? "translate-x-0.5" : "-translate-x-0.5"
+              }`}
+            >
+              {showNewsPanel ? "›" : "‹"}
+            </span>
           </button>
           <button
             type="button"
@@ -2543,12 +2550,17 @@ export function WorldPulseApp({
           </button>
         </section>
 
-        {showNewsPanel ? (
-          <aside
-            id="country-news-panel"
-            className="flex min-h-[620px] flex-col bg-[#101722] lg:h-[calc(100vh-6.25rem)] lg:min-h-0"
-            aria-label={globalView ? "Global events" : "Country news panel"}
-          >
+        <aside
+          id="country-news-panel"
+          className={`flex min-h-0 flex-col overflow-hidden bg-[#101722] transition-[max-height,opacity,transform] duration-500 ease-in-out will-change-transform lg:h-[calc(100vh-6.25rem)] lg:w-[420px] lg:justify-self-end ${
+            showNewsPanel
+              ? "max-h-[2400px] translate-x-0 opacity-100 lg:max-h-none"
+              : "pointer-events-none max-h-0 translate-x-8 opacity-0 lg:max-h-none lg:translate-x-full"
+          }`}
+          aria-label={globalView ? "Global events" : "Country news panel"}
+          aria-hidden={!showNewsPanel}
+          inert={showNewsPanel ? undefined : true}
+        >
           <div className="country-news-panel__header sticky top-16 z-20 border-b border-[#273246] bg-[#101722]/95 px-5 pb-4 pt-5 backdrop-blur lg:static">
             <div className="flex items-start justify-between gap-4">
               <div>
@@ -2746,8 +2758,7 @@ export function WorldPulseApp({
               </div>
             )}
           </div>
-          </aside>
-        ) : null}
+        </aside>
       </div>
       {showMethodology ? (
         <MethodologyModal onClose={() => setShowMethodology(false)} />
