@@ -161,13 +161,13 @@ describe("Hemisphere Herald live country delivery", () => {
 
     const panel = document.getElementById("country-news-panel");
     expect(panel).toHaveAttribute("aria-hidden", "false");
-    expect(panel).toHaveClass("translate-x-0");
+    expect(panel?.parentElement).toHaveAttribute("data-panel-open", "true");
 
     fireEvent.click(screen.getByRole("button", { name: "Hide news panel" }));
 
     expect(panel).toHaveAttribute("aria-hidden", "true");
     expect(panel).toHaveAttribute("inert");
-    expect(panel).toHaveClass("lg:translate-x-full");
+    expect(panel?.parentElement).toHaveAttribute("data-panel-open", "false");
     expect(
       screen.getByRole("button", { name: "Show news panel" }),
     ).toBeInTheDocument();
@@ -176,7 +176,7 @@ describe("Hemisphere Herald live country delivery", () => {
 
     expect(panel).toHaveAttribute("aria-hidden", "false");
     expect(panel).not.toHaveAttribute("inert");
-    expect(panel).toHaveClass("translate-x-0");
+    expect(panel?.parentElement).toHaveAttribute("data-panel-open", "true");
   });
 
   it("loads the direct live-world index and never requests a snapshot", async () => {

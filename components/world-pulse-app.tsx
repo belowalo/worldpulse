@@ -2483,11 +2483,8 @@ export function WorldPulseApp({
       </header>
 
       <div
-        className={`grid min-h-[calc(100vh-6.25rem)] overflow-hidden transition-[grid-template-columns] duration-500 ease-in-out ${
-          showNewsPanel
-            ? "lg:grid-cols-[minmax(0,1fr)_420px]"
-            : "lg:grid-cols-[minmax(0,1fr)_0px]"
-        }`}
+        className="country-news-layout grid min-h-[calc(100vh-6.25rem)] overflow-hidden"
+        data-panel-open={showNewsPanel}
       >
         <section
           className={`relative min-h-[54vh] border-b border-[#222d3e] lg:h-[calc(100vh-6.25rem)] lg:border-b-0 ${
@@ -2552,10 +2549,8 @@ export function WorldPulseApp({
 
         <aside
           id="country-news-panel"
-          className={`flex min-h-0 flex-col overflow-hidden bg-[#101722] transition-[max-height,opacity,transform] duration-500 ease-in-out will-change-transform lg:h-[calc(100vh-6.25rem)] lg:w-[420px] lg:justify-self-end ${
-            showNewsPanel
-              ? "max-h-[2400px] translate-x-0 opacity-100 lg:max-h-none"
-              : "pointer-events-none max-h-0 translate-x-8 opacity-0 lg:max-h-none lg:translate-x-full"
+          className={`country-news-panel--drawer flex min-h-0 flex-col overflow-hidden bg-[#101722] lg:h-[calc(100vh-6.25rem)] ${
+            showNewsPanel ? "" : "pointer-events-none"
           }`}
           aria-label={globalView ? "Global events" : "Country news panel"}
           aria-hidden={!showNewsPanel}
