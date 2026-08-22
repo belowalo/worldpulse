@@ -19,6 +19,10 @@ const FUTURE_TOLERANCE_MS = 6 * 60 * 60_000;
 const MAX_ARTICLES_PER_COUNTRY = 32;
 const GLOBAL_REFRESH_MS = 5 * 60_000;
 const COUNTRY_RETRY_DELAY_MS = 750;
+const EXPECTED_EMPTY_COUNTRIES = new Set([
+  "Fr. S. Antarctic Lands",
+  "Siachen Glacier",
+]);
 
 export interface PersistedCollectorState {
   version: 1;
@@ -404,9 +408,19 @@ function handleRequest(
       (countryName) =>
         (runtime.state.countries[countryName]?.articles.length ?? 0) > 0,
     ).length;
+    const missingInhabitedCountries = runtime.countryNames.filter(
+      (countryName) =>
+        !EXPECTED_EMPTY_COUNTRIES.has(countryName) &&
+        !(runtime.state.countries[countryName]?.articles.length ?? 0),
+    );
+    const expectedEmptyCountries = runtime.countryNames.filter(
+      (countryName) => EXPECTED_EMPTY_COUNTRIES.has(countryName),
+    );
+    const inhabitedCountries =
+      runtime.countryNames.length - expectedEmptyCountries.length;
     const diagnostics = {
       status:
-        progress.ready && countriesWithNews === runtime.countryNames.length
+        progress.ready && !missingInhabitedCountries.length
           ? "healthy"
           : "degraded",
       fresh: progress.ready,
@@ -415,13 +429,10 @@ function handleRequest(
       snapshotBytes: Buffer.byteLength(payload),
       totalCountries: runtime.countryNames.length,
       countriesWithNews,
-      inhabitedCountries: runtime.countryNames.length,
+      inhabitedCountries,
       inhabitedCountriesWithNews: countriesWithNews,
-      missingInhabitedCountries: runtime.countryNames.filter(
-        (countryName) =>
-          !(runtime.state.countries[countryName]?.articles.length ?? 0),
-      ),
-      expectedEmptyCountries: [],
+      missingInhabitedCountries,
+      expectedEmptyCountries,
       globalEventCount: runtime.state.global?.articles.length ?? 0,
       providerHealth: runtime.state.global?.providers ?? [],
       bootstrap: progress,
