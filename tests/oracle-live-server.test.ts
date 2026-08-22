@@ -91,6 +91,7 @@ describe("Oracle live server", () => {
         articles: [
           { ...article("jordan-love", publishedAt), title: "Jordan Love throws a touchdown pass" },
           { ...article("air-jordan", publishedAt), title: "Air Jordan 14 Low gets a release date" },
+          { ...article("jordan-ingman", publishedAt), title: "County economic development highlights Jordan Ingman" },
           { ...article("jordan-trade", publishedAt), title: "Jordan expands trade with West Bank markets" },
         ],
       },

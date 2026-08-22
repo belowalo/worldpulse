@@ -215,6 +215,13 @@ describe("worker live-news providers", () => {
     ).toBe(false);
     expect(
       articleMatchesCountry(
+        { searchableText: "County economic development highlights Jordan Ingman" },
+        countrySearchTerms("Jordan"),
+        "Jordan",
+      ),
+    ).toBe(false);
+    expect(
+      articleMatchesCountry(
         { searchableText: "Jordan expands trade with West Bank markets" },
         countrySearchTerms("Jordan"),
         "Jordan",
