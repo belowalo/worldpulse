@@ -10,7 +10,7 @@ The deployed application is the preferred live preview. A social preview is avai
 
 ## Architecture
 
-- **Web:** Next.js 16, React 19, strict TypeScript, Tailwind CSS, an antialiased high-density Three.js globe renderer, local country geometry, and local capital coordinates.
+- **Web:** Next.js 16, React 19, strict TypeScript, Tailwind CSS, a MapLibre satellite-and-terrain globe, local country geometry, and local capital coordinates.
 - **Hosted news API:** A same-origin Cloudflare Worker streams the complete world feed from the Oracle server and continues to serve the smaller on-demand metadata endpoints.
 - **Continuous live ingestion:** A restricted `systemd` service on an Oracle Always Free VM continuously scans all countries through public headline feeds and atomically persists last-known-good records for restart recovery.
 - **Reference API:** FastAPI, Pydantic validation, SQLAlchemy 2, and PostgreSQL remain available for local full-stack development.

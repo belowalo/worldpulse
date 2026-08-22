@@ -3,7 +3,7 @@ import { useLayoutEffect } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { WorldPulseApp } from "@/components/world-pulse-app";
-import type { WorldMapProps } from "@/components/world-map";
+import type { WorldMapProps } from "@/components/world-map-maplibre";
 import type {
   LiveArticle,
   LiveWorldNewsPayload,

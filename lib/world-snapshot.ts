@@ -340,7 +340,7 @@ export function prepareCompleteWorldSnapshotFromFeeds(
   }
   const finalizedGlobalEvents = globalEvents.map(finalizeEventGeography);
   return {
-    scope: "prepared-world",
+    scope: "live-world-view",
     version: generatedAt.slice(0, 16),
     generatedAt,
     refreshAfterSeconds: 60,

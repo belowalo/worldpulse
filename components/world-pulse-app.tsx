@@ -63,7 +63,7 @@ const EMPTY_FEED: FeedState = {
 };
 
 const INITIAL_VISIBLE_EVENT_LIMIT = 40;
-const SNAPSHOT_REQUEST_TIMEOUT_MS = 8_500;
+const LIVE_WORLD_REQUEST_TIMEOUT_MS = 8_500;
 
 function buildLiveWorldInBackground(
   live: LiveWorldNewsPayload,
@@ -659,7 +659,7 @@ function TopicsModal({ onClose }: { onClose: () => void }) {
           <p className="mt-2">
             Satellite imagery: Sentinel-2 cloudless by EOX IT Services GmbH
             (contains modified Copernicus Sentinel data 2016), licensed under
-            CC BY 4.0. The interactive globe is rendered with CesiumJS.
+            CC BY 4.0. The interactive globe is rendered with MapLibre GL JS.
           </p>
           <p className="mt-2">
             Mapzen terrain data includes ArcticDEM (DigitalGlobe imagery and
@@ -1918,7 +1918,7 @@ export function WorldPulseApp({
           cache: "no-store",
           signal: AbortSignal.any([
             controller.signal,
-            AbortSignal.timeout(SNAPSHOT_REQUEST_TIMEOUT_MS),
+            AbortSignal.timeout(LIVE_WORLD_REQUEST_TIMEOUT_MS),
           ]),
         });
         if (!response.ok) throw new Error("The live world feed is unavailable.");
@@ -1996,7 +1996,7 @@ export function WorldPulseApp({
       if (MapComponent === WorldMap) {
         try {
           const response = await fetch("/api/world-directory", {
-            signal: AbortSignal.timeout(SNAPSHOT_REQUEST_TIMEOUT_MS),
+          signal: AbortSignal.timeout(LIVE_WORLD_REQUEST_TIMEOUT_MS),
           });
           if (!response.ok) throw new Error("World directory is unavailable.");
           const payload = (await response.json()) as {

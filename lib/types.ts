@@ -173,27 +173,12 @@ export interface PreparedNewsFeed {
 }
 
 export interface PreparedWorldNewsPayload {
-  scope: "prepared-world";
+  scope: "live-world-view";
   version: string;
   generatedAt: string;
   refreshAfterSeconds: number;
   globalFeed: PreparedNewsFeed;
   countryFeeds: Record<string, PreparedNewsFeed>;
-}
-
-/** Compact, normalized wire representation used only across the network. */
-export interface PreparedWorldNewsWirePayload {
-  s: "pw2";
-  v: string;
-  g: string;
-  r: number;
-  n: unknown[][];
-  a: unknown[][];
-  e: unknown[][];
-  f: {
-    g: unknown[];
-    c: unknown[][];
-  };
 }
 
 export interface WorldPulseProviderHealth {
@@ -206,8 +191,8 @@ export interface WorldPulseDiagnostics {
   status: "healthy" | "degraded";
   fresh: boolean;
   generatedAt: string;
-  snapshotGeneratedAt: string;
-  snapshotBytes: number;
+  liveIndexGeneratedAt: string;
+  liveIndexBytes: number;
   totalCountries: number;
   countriesWithNews: number;
   inhabitedCountries: number;

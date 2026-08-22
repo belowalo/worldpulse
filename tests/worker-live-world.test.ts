@@ -30,6 +30,19 @@ describe("live world delivery", () => {
     });
   });
 
+  it("does not expose a duplicate on-demand collection path", async () => {
+    const response = await worker.fetch(
+      new Request("https://worldpulse.test/api/live-news?country=Canada"),
+      {} as never,
+      { waitUntil: vi.fn(), passThroughOnException: vi.fn() },
+    );
+
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toEqual({
+      error: "Unsupported live-news scope. Use scope=world-live.",
+    });
+  });
+
   it("proxies the prepared live response from the continuous Oracle server", async () => {
     const upstream = {
       scope: "world-live",

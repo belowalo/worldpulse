@@ -2,55 +2,36 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 
-import { countryCodeForName } from "@/lib/country-locale";
-import {
-  articlesMentioningCountry,
-  buildLiveEvents,
-  mergeEventFeeds,
-} from "@/lib/live-news";
+import { buildLiveEvents } from "@/lib/live-news";
 import { mapStyleForEvent } from "@/lib/scoring";
 import type {
   LiveNewsPayload,
+  LiveWorldNewsPayload,
   MapCountry,
-  MapNewsPayload,
 } from "@/lib/types";
 
 const runLiveAudit = process.env.WORLD_PULSE_LIVE_QA === "1";
-const baseUrl = process.env.WORLD_PULSE_QA_URL ?? "http://localhost:3000";
-async function parallelMap<T, R>(
-  items: T[],
-  concurrency: number,
-  task: (item: T) => Promise<R>,
-) {
-  const results = new Array<R>(items.length);
-  let cursor = 0;
-  await Promise.all(
-    Array.from({ length: concurrency }, async () => {
-      while (cursor < items.length) {
-        const index = cursor;
-        cursor += 1;
-        results[index] = await task(items[index]);
-      }
-    }),
-  );
-  return results;
-}
+const baseUrl =
+  process.env.WORLD_PULSE_QA_URL ??
+  "https://worldpulse.belowalo2005.workers.dev";
 
-async function fetchJsonWithRetry<T>(url: string) {
+async function fetchLiveWorld() {
   for (let attempt = 1; attempt <= 3; attempt += 1) {
     try {
-      const response = await fetch(url);
-      if (response.ok) return (await response.json()) as T;
+      const response = await fetch(
+        `${baseUrl}/api/live-news?scope=world-live`,
+      );
+      if (response.ok) return (await response.json()) as LiveWorldNewsPayload;
     } catch {
-      // Retry transient local-worker and upstream failures.
+      // Retry transient edge or upstream failures.
     }
-    await new Promise((resolve) => setTimeout(resolve, attempt * 300));
+    await new Promise((resolve) => setTimeout(resolve, attempt * 500));
   }
   return null;
 }
 
 describe.skipIf(!runLiveAudit)("live country integrity", () => {
-  it("returns a current, related top event or a truthful neutral state for all 215 map areas", async () => {
+  it("serves a current, valid live feed for every inhabited map country", async () => {
     const geojson = JSON.parse(
       readFileSync(resolve("public/countries.geojson"), "utf8"),
     ) as {
@@ -59,138 +40,70 @@ describe.skipIf(!runLiveAudit)("live country integrity", () => {
     const countries: MapCountry[] = geojson.features.map((feature) => ({
       mapId: String(feature.id),
       name: feature.properties.name,
-      iso2: countryCodeForName(feature.properties.name) ?? undefined,
       events: [],
     }));
+    const world = await fetchLiveWorld();
+    expect(world).not.toBeNull();
+    if (!world) return;
 
-    const mapPayloads = await parallelMap(
-      Array.from({ length: Math.ceil(countries.length / 8) }, (_, index) =>
-        countries.slice(index * 8, index * 8 + 8),
-      ),
-      6,
-      async (batch) => {
-        const parameters = new URLSearchParams({
-          scope: "map",
-          countries: batch.map((country) => country.name).join("|"),
-          fresh: "1",
-        });
-        return fetchJsonWithRetry<MapNewsPayload>(
-          `${baseUrl}/api/live-news?${parameters.toString()}`,
-        );
-      },
+    const feedByCountry = new Map(
+      world.countries.map((country) => [country.countryName, country] as const),
     );
-    const mapArticles = new Map(
-      mapPayloads.flatMap((payload) =>
-        (payload?.countries ?? []).map(
-          (country) => [country.countryName, country.articles] as const,
-        ),
-      ),
-    );
-    const currentRelatedMapArticles = new Map(
-      countries.map((country) => {
-        const payload: LiveNewsPayload = {
-          countryName: country.name,
-          scope: "country",
-          generatedAt: new Date().toISOString(),
-          refreshAfterSeconds: 300,
-          provider: "Live world search",
-          articles: mapArticles.get(country.name) ?? [],
-        };
-        return [
-          country.name,
-          articlesMentioningCountry(payload, country.name).filter(
-            (article) =>
-              Date.now() - Date.parse(article.publishedAt) <=
-              7 * 24 * 3_600_000,
-          ),
-        ] as const;
-      }),
-    );
-    const countriesNeedingDeepSearch = countries.filter(
-      (country) => !currentRelatedMapArticles.get(country.name)?.length,
-    );
-
-    const deepPayloads = await parallelMap(
-      countriesNeedingDeepSearch,
-      8,
-      async (country) => {
-        const parameters = new URLSearchParams({
-          country: country.name,
-          fresh: "1",
-        });
-        if (country.iso2) parameters.set("iso2", country.iso2);
-        return fetchJsonWithRetry<LiveNewsPayload>(
-          `${baseUrl}/api/live-news?${parameters.toString()}`,
-        );
-      },
-    );
-    const deepPayloadByCountry = new Map(
-      countriesNeedingDeepSearch.map(
-        (country, index) => [country.name, deepPayloads[index]] as const,
-      ),
-    );
-
+    const expectedEmpty = new Set([
+      "Fr. S. Antarctic Lands",
+      "Siachen Glacier",
+    ]);
     const failures: string[] = [];
     let acceptedArticleCount = 0;
-    let truthfulNeutralCount = 0;
+
+    if (world.scope !== "world-live") failures.push("invalid world scope");
+    if (world.countries.length !== countries.length) {
+      failures.push(
+        `expected ${countries.length} country records, received ${world.countries.length}`,
+      );
+    }
+    if (Date.now() - Date.parse(world.generatedAt) > 120_000) {
+      failures.push("complete world feed is more than two minutes old");
+    }
+
     for (const country of countries) {
-      const deepPayload = deepPayloadByCountry.get(country.name);
-      if (!mapArticles.has(country.name)) {
-        failures.push(`${country.name}: missing from the complete map response`);
-      }
-      const mapPayload: LiveNewsPayload = {
-        countryName: country.name,
-        scope: "country",
-        generatedAt: new Date().toISOString(),
-        refreshAfterSeconds: 300,
-        provider: "Live world search",
-        articles: currentRelatedMapArticles.get(country.name) ?? [],
-      };
-      const relevantDeep = articlesMentioningCountry(
-        deepPayload ?? { ...mapPayload, articles: [] },
-        country.name,
-      ).filter(
-        (article) =>
-          Date.now() - Date.parse(article.publishedAt) <=
-          7 * 24 * 3_600_000,
-      );
-      const relevantMap = articlesMentioningCountry(
-        mapPayload,
-        country.name,
-      );
-      acceptedArticleCount += relevantDeep.length + relevantMap.length;
-      const events = mergeEventFeeds(
-        buildLiveEvents(
-          {
-            ...(deepPayload ?? mapPayload),
-            articles: relevantDeep,
-          },
-          country,
-        ),
-        buildLiveEvents(
-          { ...mapPayload, articles: relevantMap },
-          country,
-        ),
-      );
-      const topEvent = events[0];
-      if (!topEvent) {
-        truthfulNeutralCount += 1;
+      const feed = feedByCountry.get(country.name);
+      if (!feed) {
+        failures.push(`${country.name}: missing from complete world response`);
         continue;
       }
-      const ageHours =
-        (Date.now() - Date.parse(topEvent.lastUpdatedAt)) / 3_600_000;
-      if (!Number.isFinite(ageHours) || ageHours > 7 * 24) {
-        failures.push(`${country.name}: top event is not current`);
+      if (!feed.articles.length) {
+        if (!expectedEmpty.has(country.name)) {
+          failures.push(`${country.name}: inhabited country has no live news`);
+        }
+        continue;
+      }
+      acceptedArticleCount += feed.articles.length;
+      const payload: LiveNewsPayload = {
+        countryName: country.name,
+        scope: "country",
+        generatedAt: feed.generatedAt,
+        refreshAfterSeconds: world.refreshAfterSeconds,
+        provider: world.provider,
+        articles: feed.articles,
+      };
+      const topEvent = buildLiveEvents(payload, country)[0];
+      if (!topEvent) {
+        failures.push(`${country.name}: articles did not produce an event`);
+        continue;
+      }
+      if (Date.now() - Date.parse(topEvent.lastUpdatedAt) > 8 * 86_400_000) {
+        failures.push(`${country.name}: top event is stale`);
       }
       if (
-        !topEvent.articles.length ||
-        topEvent.articles.some(
+        feed.articles.some(
           (article) =>
-            !article.source.publisherName.trim() ||
-            !/^https?:\/\//u.test(article.originalUrl),
+            !article.publisherName.trim() ||
+            !/^https?:\/\//u.test(article.url) ||
+            !Number.isFinite(Date.parse(article.publishedAt)),
         )
       ) {
-        failures.push(`${country.name}: invalid publisher metadata`);
+        failures.push(`${country.name}: invalid article metadata`);
       }
       const style = mapStyleForEvent(
         topEvent.category,
@@ -201,9 +114,14 @@ describe.skipIf(!runLiveAudit)("live country integrity", () => {
       }
     }
 
+    const actualEmpty = world.countries
+      .filter((country) => !country.articles.length)
+      .map((country) => country.countryName)
+      .sort();
+    expect(actualEmpty).toEqual([...expectedEmpty].sort());
     process.stdout.write(
-      `\nLive country audit: ${countries.length} countries, ${acceptedArticleCount} related articles, ${truthfulNeutralCount} truthful neutral states, ${failures.length} failures.\n`,
+      `\nLive country audit: ${countries.length} countries, ${acceptedArticleCount} current articles, ${failures.length} failures.\n`,
     );
     expect(failures, failures.join("\n")).toEqual([]);
-  }, 600_000);
+  }, 60_000);
 });

@@ -1,4 +1,3 @@
-@import "cesium/Build/Cesium/Widgets/widgets.css";
 @import "tailwindcss";
 
 :root {
@@ -137,50 +136,6 @@ select:focus-visible {
   outline: none;
   touch-action: none;
   image-rendering: auto;
-}
-
-.world-globe .cesium-viewer,
-.world-globe .cesium-viewer-cesiumWidgetContainer,
-.world-globe .cesium-widget {
-  width: 100%;
-  height: 100%;
-}
-
-.world-globe .cesium-viewer-bottom {
-  top: auto;
-  right: auto;
-  bottom: 0.35rem;
-  left: 50%;
-  z-index: 12;
-  width: max-content;
-  max-width: calc(100% - 2rem);
-  transform: translateX(-50%);
-}
-
-.world-globe .cesium-widget-credits {
-  padding: 0.1rem 0.25rem;
-  border-radius: 0.25rem;
-  background: rgba(4, 10, 17, 0.72);
-  font-family: var(--font-geist-sans), Arial, sans-serif;
-  font-size: 0.45rem;
-  line-height: 1;
-  opacity: 0.62;
-  white-space: nowrap;
-  transition: opacity 150ms ease;
-}
-
-.world-globe .cesium-widget-credits:hover,
-.world-globe .cesium-widget-credits:focus-within {
-  opacity: 1;
-}
-
-.world-globe .cesium-credit-logoContainer {
-  display: none !important;
-}
-
-.world-globe .cesium-widget-credits a,
-.world-globe .cesium-widget-credits a:visited {
-  color: #aab5c5;
 }
 
 .world-globe-controls button {

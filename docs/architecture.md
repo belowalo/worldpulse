@@ -7,7 +7,7 @@ Hemisphere Herald separates presentation, domain scoring, ingestion contracts, a
 ```text
 Browser
   └─ Next.js web app
-       ├─ CesiumJS satellite terrain globe + local GeoJSON/capital coordinates
+       ├─ MapLibre satellite terrain globe + local GeoJSON/capital coordinates
        ├─ filters, country panel, methodology, Live Situation
        ├─ capital signal markers + evidence-only story connections
        └─ same-origin Cloudflare Worker endpoint
@@ -30,16 +30,15 @@ The web app is at the repository root because the deployable Sites runtime expec
 
 ## Web boundaries
 
-- `components/world-map.tsx` owns the CesiumJS lifecycle, satellite imagery and terrain providers, GeoJSON country overlays, capital signal markers, selected-story arcs, hover, and selection.
+- `components/world-map-maplibre.tsx` owns the MapLibre lifecycle, satellite imagery and terrain providers, GeoJSON country overlays, capital signal markers, selected-story arcs, hover, and selection.
 - `components/world-pulse-app.tsx` owns startup readiness, filters, country selection, the breaking-news ticker, image-backed Live Situation briefing, auto-refreshing Live News directory, event cards, and methodology.
-- `lib/cesium-runtime.ts` is the dynamically loaded CesiumJS runtime boundary and configures the public CDN asset base.
 - `lib/scoring.ts` is UI-independent and contains score labels plus reusable category/intensity globe styling.
 - `lib/live-news.ts` classifies and clusters live headline metadata into scored events.
 - `lib/seed-data.ts` contains only the initial country metadata used before the full map directory loads.
 - `public/countries.geojson` is a local, deployment-safe country dataset derived from the ISC-licensed `geojson-world-map` package.
 - `public/world-capitals.json` is the bundled ISO-to-capital coordinate index used for signal markers and selected-story connection endpoints.
 
-The globe supports pointer navigation and direct country selection across all 215 geometries in the bundled dataset. Cesium renders EOX Sentinel-2 cloudless imagery over Mapzen/AWS Terrarium elevation tiles served through the same-origin terrain cache. Translucent, ground-clamped GeoJSON polygons retain Hemisphere Herald country colors while allowing the satellite surface to remain visible. Every mapped country receives one or more capital markers when capital data exists and a geographic-center fallback otherwise. The camera never rotates automatically, and country hover/selection updates only the indexed overlay entities rather than reprocessing the complete dataset.
+The globe supports pointer navigation and direct country selection across all 215 geometries in the bundled dataset. MapLibre renders EOX Sentinel-2 cloudless imagery with AWS Terrarium elevation tiles. Translucent GeoJSON polygons retain Hemisphere Herald country colors while allowing the satellite surface to remain visible. Every mapped country receives one or more capital markers when capital data exists and a geographic-center fallback otherwise. The camera never rotates automatically, and country hover/selection updates only the indexed map sources rather than reprocessing the complete dataset.
 
 Startup keeps the staged readiness screen visible while the live Oracle country index, immutable country directory, globe runtime, geometry, and capital index load in parallel. The live endpoint is not exposed as ready until every mapped country has been attempted at least once. The client refreshes the server index every minute. Country selection uses the already-loaded server record and never calls an upstream provider. The startup gate has a hard ten-second network deadline; failure becomes a terminal retry screen instead of an indefinite loader.
 

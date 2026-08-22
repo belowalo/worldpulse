@@ -12,8 +12,8 @@ describe("world diagnostics", () => {
       status: "healthy",
       fresh: true,
       generatedAt: new Date().toISOString(),
-      snapshotGeneratedAt: new Date().toISOString(),
-      snapshotBytes: 420_000,
+      liveIndexGeneratedAt: new Date().toISOString(),
+      liveIndexBytes: 420_000,
       totalCountries: 215,
       countriesWithNews: 212,
       inhabitedCountries: 212,
@@ -29,7 +29,7 @@ describe("world diagnostics", () => {
     render(<WorldDiagnostics />);
 
     expect(await screen.findByText("212/212")).toBeInTheDocument();
-    expect(screen.getByText("Direct D1")).toBeInTheDocument();
+    expect(screen.getByText("Oracle live stream")).toBeInTheDocument();
     expect(screen.getByText("Africanews")).toBeInTheDocument();
     await userEvent.click(screen.getByRole("button", { name: "Check now" }));
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));

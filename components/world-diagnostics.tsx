@@ -65,9 +65,9 @@ export function WorldDiagnostics() {
             <section aria-label="Live index summary" className="mt-6 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
               {[
                 ["Status", health.status],
-                ["Live index age", `${ageLabel(health.snapshotGeneratedAt)}${health.fresh ? "" : " · stale"}`],
+                ["Live index age", `${ageLabel(health.liveIndexGeneratedAt)}${health.fresh ? "" : " · stale"}`],
                 ["Country coverage", `${health.inhabitedCountriesWithNews}/${health.inhabitedCountries}`],
-                ["Delivery", "Direct D1"],
+                ["Delivery", "Oracle live stream"],
               ].map(([label, value]) => (
                 <article key={label} className="rounded-xl border border-[#283447] bg-[#111927] p-4">
                   <div className="font-mono text-[10px] uppercase tracking-[0.16em] text-[#8290a3]">{label}</div>

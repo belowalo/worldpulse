@@ -47,7 +47,7 @@ Clustering must keep articles separate from events. Source count means independe
 
 ## Hosted live adapter
 
-The hosted Cloudflare Worker exposes `/api/live-news` for global, country, map-batch, and event-coverage queries. It reads current Google News, Bing News, GDELT, and publisher RSS headline metadata, retains publisher attribution and outbound article links, and stores successful responses in both the edge cache and D1. The browser clusters similar headlines, preserves each publisher as a separate article, and runs the same deterministic scoring model used elsewhere in the product.
+The Oracle collector reads current Google News, Bing News, GDELT, and publisher RSS headline metadata, retains publisher attribution and outbound article links, and maintains the complete current country index. The hosted Cloudflare Worker exposes only the complete `world-live` feed; it does not run a second collection or persistence path. The browser clusters similar headlines, preserves each publisher as a separate article, and runs the same deterministic scoring model used elsewhere in the product.
 
 The Oracle live server continuously refreshes the oldest country records from multiple current indexes and refreshes the global provider set every five minutes. The client reads the complete live index through the Cloudflare proxy, polls it every minute, and uses the already-loaded country record whenever a country is selected. Articles must explicitly reference a country before they enter its signal. A failed provider call keeps current last-known-good articles visible while the collector continues retrying. There is no prepared-world, Cloudflare Queue, D1 world index, or R2 snapshot delivery path.
 

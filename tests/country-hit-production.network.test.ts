@@ -6,7 +6,7 @@ import {
 } from "@/lib/country-hit-test";
 
 const liveTest = process.env.WORLD_PULSE_LIVE_QA === "1" ? it : it.skip;
-const GEOMETRY_URL = "https://worldpulse-news-map.belowalo.chatgpt.site/countries.geojson";
+const GEOMETRY_URL = "https://worldpulse.belowalo2005.workers.dev/api/world-geometry";
 
 describe("deployed globe country geometry", () => {
   liveTest("maps small islands to the country rendered under the pointer", async () => {
