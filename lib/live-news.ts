@@ -1,4 +1,4 @@
-import { calculateImportance } from "./scoring";
+import { calculateNewsSignal } from "./scoring";
 import {
   canonicalPublisherKey,
   publisherBiasRating,
@@ -1214,33 +1214,31 @@ export function mergeCanonicalEvents(
     duplicateEvent.scoringInput.independentSourceCount,
     allArticles.length,
   );
-  const publisherProminence =
-    allArticles.reduce(
-      (total, article) => total + article.source.prominenceScore,
-      0,
-    ) / Math.max(1, allArticles.length);
+  const reporting = reportingTiming(allArticles);
   const scoringInput = {
     independentSourceCount,
-    sourceCountryCount: Math.max(
-      canonicalEvent.scoringInput.sourceCountryCount,
-      duplicateEvent.scoringInput.sourceCountryCount,
-    ),
     affectedCountryCount: Math.max(1, affectedCountries.length),
-    countrySignificance: Math.max(
-      canonicalEvent.scoringInput.countrySignificance,
-      duplicateEvent.scoringInput.countrySignificance,
-    ),
-    publisherProminence,
     ageHours: Math.min(
       canonicalEvent.scoringInput.ageHours,
       duplicateEvent.scoringInput.ageHours,
     ),
+    articleCount: Math.max(
+      canonicalEvent.scoringInput.articleCount,
+      duplicateEvent.scoringInput.articleCount,
+      reporting.articleCount,
+    ),
+    coverageWindowHours: Math.max(
+      canonicalEvent.scoringInput.coverageWindowHours,
+      duplicateEvent.scoringInput.coverageWindowHours,
+      reporting.coverageWindowHours,
+    ),
     articlesPerHour: Math.max(
       canonicalEvent.scoringInput.articlesPerHour,
       duplicateEvent.scoringInput.articlesPerHour,
+      reporting.articlesPerHour,
     ),
   };
-  const scoring = calculateImportance(scoringInput);
+  const scoring = calculateNewsSignal(scoringInput);
   const normalizedHeadline = cleanFeedText(canonicalEvent.headline).toLowerCase();
   const summary =
     [canonicalEvent.summary, duplicateEvent.summary]
@@ -1316,6 +1314,31 @@ function articleAgeHours(article: LiveArticle, reference: number) {
   const published = Date.parse(article.publishedAt);
   if (!Number.isFinite(published)) return 72;
   return Math.max(0, (reference - published) / 3_600_000);
+}
+
+function reportingTiming(
+  articles: Array<Pick<LiveArticle, "publishedAt">>,
+) {
+  const timestamps = articles
+    .map((article) => Date.parse(article.publishedAt))
+    .filter(Number.isFinite)
+    .sort((left, right) => left - right);
+  if (timestamps.length <= 1) {
+    return {
+      articleCount: timestamps.length,
+      coverageWindowHours: 0,
+      articlesPerHour: 0,
+    };
+  }
+  const coverageWindowHours = Math.max(
+    1 / 60,
+    (timestamps.at(-1)! - timestamps[0]) / 3_600_000,
+  );
+  return {
+    articleCount: timestamps.length,
+    coverageWindowHours,
+    articlesPerHour: (timestamps.length - 1) / coverageWindowHours,
+  };
 }
 
 function createSource(article: LiveArticle): NewsSource {
@@ -1480,23 +1503,16 @@ export function buildLiveEvents(
           return [source.id, source] as const;
         }),
       );
-      const averageProminence =
-        [...sources.values()].reduce(
-          (sum, source) => sum + source.prominenceScore,
-          0,
-        ) / Math.max(1, sources.size);
       const youngestAge = Math.min(
         ...cluster.map((article) => articleAgeHours(article, reference)),
       );
-      const scoring = calculateImportance({
+      const scoringInput = {
         independentSourceCount: sources.size,
-        sourceCountryCount: sources.size ? 1 : 0,
         affectedCountryCount: 1,
-        countrySignificance: 60,
-        publisherProminence: averageProminence,
         ageHours: youngestAge,
-        articlesPerHour: Math.max(0.2, cluster.length / 6),
-      });
+        ...reportingTiming(cluster),
+      };
+      const scoring = calculateNewsSignal(scoringInput);
       const summary = conciseEventSummary(cluster, headline);
       const orderedDates = cluster
         .map((article) => article.publishedAt)
@@ -1515,15 +1531,7 @@ export function buildLiveEvents(
         firstSeenAt: orderedDates[0] ?? payload.generatedAt,
         lastUpdatedAt: orderedDates.at(-1) ?? payload.generatedAt,
         scoringComponents: scoring.components,
-        scoringInput: {
-          independentSourceCount: sources.size,
-          sourceCountryCount: sources.size ? 1 : 0,
-          affectedCountryCount: 1,
-          countrySignificance: 60,
-          publisherProminence: averageProminence,
-          ageHours: youngestAge,
-          articlesPerHour: Math.max(0.2, cluster.length / 6),
-        },
+        scoringInput,
         articles,
         generatedSummary: true,
         originalHeadline: representative?.originalTitle,
@@ -1617,6 +1625,31 @@ export function enrichEventWithCoverage(
     event.scoringInput.independentSourceCount,
     allArticles.length,
   );
+  const newestAgeHours = Math.min(
+    event.scoringInput.ageHours,
+    ...allArticles.map((article) =>
+      Math.max(0, (Date.now() - Date.parse(article.publishedAt)) / 3_600_000),
+    ),
+  );
+  const reporting = reportingTiming(allArticles);
+  const scoringInput = {
+    ...event.scoringInput,
+    independentSourceCount: matchedPublisherCount,
+    ageHours: newestAgeHours,
+    articleCount: Math.max(
+      event.scoringInput.articleCount,
+      reporting.articleCount,
+    ),
+    coverageWindowHours: Math.max(
+      event.scoringInput.coverageWindowHours,
+      reporting.coverageWindowHours,
+    ),
+    articlesPerHour: Math.max(
+      event.scoringInput.articlesPerHour,
+      reporting.articlesPerHour,
+    ),
+  };
+  const scoring = calculateNewsSignal(scoringInput);
 
   return {
     ...event,
@@ -1627,6 +1660,10 @@ export function enrichEventWithCoverage(
     ),
     matchedPublisherCount,
     articles: visibleArticles,
+    importanceScore: scoring.score,
+    importanceLabel: scoring.label,
+    scoringComponents: scoring.components,
+    scoringInput,
   };
 }
 

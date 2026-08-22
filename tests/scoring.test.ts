@@ -1,44 +1,58 @@
 import { describe, expect, it } from "vitest";
 import {
-  calculateImportance,
+  calculateNewsSignal,
   categoryColor,
-  importanceLabel,
   mapStyleForEvent,
+  signalLabel,
 } from "@/lib/scoring";
 import { CATEGORIES } from "@/lib/types";
 
-describe("impact scoring", () => {
+describe("news signal scoring", () => {
   it("handles missing values safely", () => {
-    const result = calculateImportance({});
+    const result = calculateNewsSignal({});
     expect(result.score).toBe(0);
-    expect(result.label).toBe("Routine");
+    expect(result.label).toBe("Early");
   });
 
-  it("clamps a representative high-impact event", () => {
-    const result = calculateImportance({
+  it("clamps a strongly corroborated, fast-moving international signal", () => {
+    const result = calculateNewsSignal({
       independentSourceCount: 40,
-      sourceCountryCount: 30,
       affectedCountryCount: 60,
-      countrySignificance: 100,
-      publisherProminence: 100,
       ageHours: 0,
       articlesPerHour: 20,
+      articleCount: 40,
+      coverageWindowHours: 2,
     });
     expect(result.score).toBe(100);
-    expect(result.label).toBe("Major");
+    expect(result.label).toBe("Very strong");
+  });
+
+  it("keeps a single fresh report in the early tier", () => {
+    const result = calculateNewsSignal({
+      independentSourceCount: 1,
+      affectedCountryCount: 1,
+      ageHours: 0,
+      articlesPerHour: 0,
+      articleCount: 1,
+      coverageWindowHours: 0,
+    });
+    expect(result.score).toBe(34);
+    expect(result.label).toBe("Early");
+    expect(result.components.reportingMomentum).toBe(0);
+    expect(result.components.geographicReach).toBe(0);
   });
 
   it.each([
-    [0, "Routine"],
-    [34, "Routine"],
-    [35, "Developing"],
-    [59, "Developing"],
-    [60, "Significant"],
-    [79, "Significant"],
-    [80, "Major"],
-    [100, "Major"],
+    [0, "Early"],
+    [34, "Early"],
+    [35, "Building"],
+    [54, "Building"],
+    [55, "Strong"],
+    [74, "Strong"],
+    [75, "Very strong"],
+    [100, "Very strong"],
   ])("labels score %i as %s", (score, expected) => {
-    expect(importanceLabel(score)).toBe(expected);
+    expect(signalLabel(score)).toBe(expected);
   });
 
   it("makes higher scores visually more intense", () => {

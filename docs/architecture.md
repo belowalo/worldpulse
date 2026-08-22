@@ -49,7 +49,7 @@ The Oracle server is the freshness owner. A long-running `systemd` process conti
 - `main.py` defines HTTP transport, validation, CORS, and consistent error responses.
 - `services.py` owns database queries, pagination, and response serialization.
 - `models.py` defines normalized relational entities.
-- `scoring.py` contains the deterministic impact estimate.
+- `scoring.py` contains the deterministic news-signal estimate.
 - `providers/` contains an abstract provider and a mock implementation.
 - `seed.py` creates a complete fictional demo dataset.
 
@@ -57,7 +57,7 @@ FastAPI exposes OpenAPI documentation at `/docs` and its schema at `/openapi.jso
 
 ## Persistence model
 
-Articles remain separate from events. An event can have many articles, each with one source. Events have a primary country and many affected countries through `event_countries`. This supports future clustering without inflating event importance from duplicate articles.
+Articles remain separate from events. An event can have many articles, each with one source. Events have a primary country and many affected countries through `event_countries`. This supports future clustering without inflating corroboration from duplicate articles.
 
 `/api/live-news?scope=world-live` streams the current complete Oracle response with `Cache-Control: no-store`; the removed prepared-world and snapshot routes return HTTP 410. `/api/diagnostics/world` reports collector progress and countries without matching current coverage. The `/api/live-video?mode=newsrooms` route searches several live-news surfaces in parallel, accepts only currently live results whose channel exactly matches the curated newsroom directory, retains one strongest feed per newsroom, and ranks the result by current viewers. Partial search failure is tolerated.
 

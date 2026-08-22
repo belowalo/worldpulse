@@ -1,6 +1,6 @@
 # Hemisphere Herald
 
-Hemisphere Herald is a production-quality MVP for exploring recent world news through an interactive globe. Each country's hue represents the category of its highest-impact active event, while intensity represents a deterministic 0–100 importance estimate. Clicking any mapped country opens the current server-indexed headlines, publisher links, timestamps, geographic scope, and a plain-language score explanation.
+Hemisphere Herald is a production-quality MVP for exploring recent world news through an interactive globe. Each country's hue represents the category of its strongest active news signal, while intensity represents the strength of current corroboration. Clicking any mapped country opens the current server-indexed headlines, publisher links, timestamps, geographic scope, and a plain-language signal explanation.
 
 The hosted site is driven by a continuously running Oracle Always Free news server. Two collector lanes rotate through all 215 mapped countries without waiting for site traffic, while a separate global collector refreshes every five minutes. Each country scan combines current Google News, Bing News, GDELT, and available regional feeds, and keeps last-known-good current articles through transient provider failures. The website reads the server's complete in-memory index through a thin same-origin Cloudflare proxy every minute; opening the site or selecting a country never starts provider work. There is no prepared-world object, scheduled Cloudflare Queue, D1 world index, or R2 snapshot in the delivery path.
 
@@ -100,17 +100,16 @@ Copy `.env.example` to `.env`. Never commit real credentials.
 | `POSTGRES_USER` | Compose database user | `worldpulse` |
 | `POSTGRES_PASSWORD` | Compose database password | `worldpulse` |
 
-## Impact scoring
+## News signal scoring
 
-Hemisphere Herald calculates rather than hard-codes importance labels:
+Hemisphere Herald calculates rather than hard-codes reporting-signal labels:
 
-- 25% independent source count and source-country diversity
-- 25% affected-country count and significance
-- 20% publisher prominence
-- 15% recency
-- 15% coverage velocity
+- 45% independent publisher corroboration
+- 25% measured reporting momentum
+- 20% freshness over seven days
+- 10% verified geographic reach beyond one country
 
-Scores are clamped to 0–100. Labels are `Major` (80–100), `Significant` (60–79), `Developing` (35–59), and `Routine` (0–34). Publication volume alone cannot produce a major label. Every stored event includes the component contributions shown in the interface. The score is an estimate, not an objective fact; see [impact-scoring.md](docs/impact-scoring.md).
+Scores are clamped to 0–100. Labels are `Very strong` (75–100), `Strong` (55–74), `Building` (35–54), and `Early` (0–34). A single report receives no momentum points, publisher prominence does not add points, and geographic reach begins only when more than one country is explicitly identified. The score measures reporting evidence—not severity, human impact, or objective importance; see [news-signal-scoring.md](docs/news-signal-scoring.md).
 
 ## Responsible presentation
 
@@ -129,7 +128,7 @@ Scores are clamped to 0–100. Labels are `Major` (80–100), `Significant` (60�
 - Headlines are clustered heuristically; they are not reviewed by a human editor.
 - No authentication, personalization, alerting, or editorial administration is included.
 - Event clustering and multilingual entity extraction remain heuristic rather than editorially reviewed.
-- Source prominence and country-significance inputs require editorial governance in a real deployment.
+- News-signal thresholds require periodic regional and topic-level calibration against reviewed event samples.
 
 ## Extensions requiring external services or editorial operations
 

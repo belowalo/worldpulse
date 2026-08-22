@@ -9,7 +9,7 @@ class NewsProvider(ABC):
         ...
 ```
 
-Provider output contains a stable external ID, headline, canonical URL, publisher, publication time, and a licensed body excerpt. A provider must not directly assign Hemisphere Herald event IDs or importance scores.
+Provider output contains a stable external ID, headline, canonical URL, publisher, publication time, and a licensed body excerpt. A provider must not directly assign Hemisphere Herald event IDs or news-signal scores.
 
 ## Adding an RSS provider
 

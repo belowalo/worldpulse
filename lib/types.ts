@@ -17,7 +17,7 @@ export const CATEGORIES = [
 ] as const;
 
 export type Category = (typeof CATEGORIES)[number];
-export type ImportanceLabel = "Major" | "Significant" | "Developing" | "Routine";
+export type SignalLabel = "Very strong" | "Strong" | "Building" | "Early";
 export type GeographicScope =
   | "Global"
   | "International"
@@ -57,20 +57,18 @@ export interface Article {
 
 export interface ScoringInput {
   independentSourceCount: number;
-  sourceCountryCount: number;
   affectedCountryCount: number;
-  countrySignificance: number;
-  publisherProminence: number;
   ageHours: number;
   articlesPerHour: number;
+  articleCount: number;
+  coverageWindowHours: number;
 }
 
 export interface ScoringComponents {
-  sourceDiversity: number;
-  geographicImpact: number;
-  publisherProminence: number;
-  recency: number;
-  coverageVelocity: number;
+  corroboration: number;
+  reportingMomentum: number;
+  freshness: number;
+  geographicReach: number;
 }
 
 export interface Event {
@@ -80,7 +78,7 @@ export interface Event {
   category: Category;
   matchedPublisherCount?: number;
   importanceScore: number;
-  importanceLabel: ImportanceLabel;
+  importanceLabel: SignalLabel;
   geographicScope: GeographicScope;
   primaryCountry: string;
   affectedCountries: string[];

@@ -8,7 +8,7 @@ import {
   countrySearchTerms,
   textMatchesCountry,
 } from "@/lib/country-terms";
-import { calculateImportance } from "@/lib/scoring";
+import { calculateNewsSignal } from "@/lib/scoring";
 import type {
   Event,
   LiveNewsPayload,
@@ -130,7 +130,7 @@ export function applyDetectedGeography(
     ...event.scoringInput,
     affectedCountryCount: Math.max(1, affectedCountries.length),
   };
-  const scoring = calculateImportance(scoringInput);
+  const scoring = calculateNewsSignal(scoringInput);
   return {
     ...event,
     geographicScope:
@@ -158,7 +158,7 @@ function anchorEventToCountry(event: Event, country: MapCountry) {
     ...event.scoringInput,
     affectedCountryCount: Math.max(1, affectedCountries.length),
   };
-  const scoring = calculateImportance(scoringInput);
+  const scoring = calculateNewsSignal(scoringInput);
   return {
     ...event,
     primaryCountry:
@@ -317,7 +317,7 @@ export function prepareCompleteWorldSnapshotFromFeeds(
       ...event.scoringInput,
       affectedCountryCount: Math.max(1, affectedCountries.length),
     };
-    const scoring = calculateImportance(scoringInput);
+    const scoring = calculateNewsSignal(scoringInput);
     return {
       ...event,
       affectedCountries,

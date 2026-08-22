@@ -1,16 +1,15 @@
 import type {
   Category,
-  ImportanceLabel,
+  SignalLabel,
   ScoringComponents,
   ScoringInput,
 } from "./types";
 
 const WEIGHTS = {
-  sourceDiversity: 0.25,
-  geographicImpact: 0.25,
-  publisherProminence: 0.2,
-  recency: 0.15,
-  coverageVelocity: 0.15,
+  corroboration: 0.45,
+  reportingMomentum: 0.25,
+  freshness: 0.2,
+  geographicReach: 0.1,
 } as const;
 
 const CATEGORY_COLORS: Record<Category, string> = {
@@ -34,51 +33,53 @@ const CATEGORY_COLORS: Record<Category, string> = {
 const clamp = (value: number, min = 0, max = 100) =>
   Math.min(max, Math.max(min, Number.isFinite(value) ? value : 0));
 
-export function importanceLabel(score: number): ImportanceLabel {
+export function signalLabel(score: number): SignalLabel {
   const safeScore = clamp(score);
-  if (safeScore >= 80) return "Major";
-  if (safeScore >= 60) return "Significant";
-  if (safeScore >= 35) return "Developing";
-  return "Routine";
+  if (safeScore >= 75) return "Very strong";
+  if (safeScore >= 55) return "Strong";
+  if (safeScore >= 35) return "Building";
+  return "Early";
 }
 
-export function calculateImportance(input: Partial<ScoringInput>): {
+export function calculateNewsSignal(input: Partial<ScoringInput>): {
   score: number;
-  label: ImportanceLabel;
+  label: SignalLabel;
   components: ScoringComponents;
 } {
-  const sources = clamp(
-    ((input.independentSourceCount ?? 0) / 8) * 72 +
-      ((input.sourceCountryCount ?? 0) / 5) * 28,
+  const sourceCount = Math.max(0, input.independentSourceCount ?? 0);
+  const corroboration = clamp(
+    (Math.log2(sourceCount + 1) / Math.log2(9)) * 100,
   );
-  const geography = clamp(
-    ((input.affectedCountryCount ?? 0) / 10) * 65 +
-      clamp(input.countrySignificance ?? 0) * 0.35,
+  const affectedCountryCount = Math.max(0, input.affectedCountryCount ?? 0);
+  const geographicReach =
+    affectedCountryCount <= 1
+      ? 0
+      : clamp(((affectedCountryCount - 1) / 5) * 100);
+  const freshness = clamp(100 - ((input.ageHours ?? 168) / 168) * 100);
+  const reportingMomentum = clamp(
+    ((input.articlesPerHour ?? 0) / 3) * 100,
   );
-  const prominence = clamp(input.publisherProminence ?? 0);
-  const recency = clamp(100 - ((input.ageHours ?? 168) / 168) * 100);
-  const velocity = clamp(((input.articlesPerHour ?? 0) / 4) * 100);
 
   const components: ScoringComponents = {
-    sourceDiversity: Math.round(sources * WEIGHTS.sourceDiversity * 10) / 10,
-    geographicImpact: Math.round(geography * WEIGHTS.geographicImpact * 10) / 10,
-    publisherProminence:
-      Math.round(prominence * WEIGHTS.publisherProminence * 10) / 10,
-    recency: Math.round(recency * WEIGHTS.recency * 10) / 10,
-    coverageVelocity: Math.round(velocity * WEIGHTS.coverageVelocity * 10) / 10,
+    corroboration:
+      Math.round(corroboration * WEIGHTS.corroboration * 10) / 10,
+    reportingMomentum:
+      Math.round(reportingMomentum * WEIGHTS.reportingMomentum * 10) / 10,
+    freshness: Math.round(freshness * WEIGHTS.freshness * 10) / 10,
+    geographicReach:
+      Math.round(geographicReach * WEIGHTS.geographicReach * 10) / 10,
   };
 
   const score = Math.round(
     clamp(
-      components.sourceDiversity +
-        components.geographicImpact +
-        components.publisherProminence +
-        components.recency +
-        components.coverageVelocity,
+      components.corroboration +
+        components.reportingMomentum +
+        components.freshness +
+        components.geographicReach,
     ),
   );
 
-  return { score, label: importanceLabel(score), components };
+  return { score, label: signalLabel(score), components };
 }
 
 function mixHex(foreground: string, background: string, amount: number) {

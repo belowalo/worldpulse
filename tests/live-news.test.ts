@@ -312,6 +312,9 @@ describe("live news normalization", () => {
     expect(events[0].articles).toHaveLength(2);
     expect(events[0].articles[0].source.publisherName).toBeTruthy();
     expect(events[0].importanceScore).toBeGreaterThan(0);
+    expect(events[0].scoringInput.articleCount).toBe(2);
+    expect(events[0].scoringInput.coverageWindowHours).toBe(0.5);
+    expect(events[0].scoringInput.articlesPerHour).toBe(2);
   });
 
   it("does not build an event from a cached publisher topic label", () => {
@@ -565,10 +568,10 @@ describe("live news normalization", () => {
 
     expect(expanded.articles).toHaveLength(5);
     expect(expanded.matchedPublisherCount).toBe(6);
-    expect(expanded.importanceScore).toBe(event.importanceScore);
-    expect(expanded.importanceLabel).toBe(event.importanceLabel);
-    expect(expanded.scoringComponents).toEqual(event.scoringComponents);
-    expect(expanded.scoringInput).toEqual(event.scoringInput);
+    expect(expanded.importanceScore).toBeGreaterThan(event.importanceScore);
+    expect(expanded.scoringInput.independentSourceCount).toBe(6);
+    expect(expanded.scoringInput.articleCount).toBe(6);
+    expect(expanded.scoringInput.articlesPerHour).toBeGreaterThan(0);
     expect(expanded.summary).toBe(
       "Canada wildfire response expands across western provinces.",
     );
@@ -602,7 +605,10 @@ describe("live news normalization", () => {
     });
 
     expect(expanded.matchedPublisherCount).toBe(2);
-    expect(expanded.scoringInput).toEqual(event.scoringInput);
+    expect(expanded.scoringInput.independentSourceCount).toBe(2);
+    expect(expanded.scoringInput.articleCount).toBe(2);
+    expect(expanded.scoringInput.coverageWindowHours).toBe(0.5);
+    expect(expanded.scoringInput.articlesPerHour).toBe(2);
     expect(
       expanded.articles.map((article) => article.source.publisherName),
     ).toEqual(expect.arrayContaining(["Reuters", "Associated Press"]));

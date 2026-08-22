@@ -43,13 +43,13 @@ def seed_test_data() -> None:
             summary="A concise attributed test summary.",
             category="Health",
             importance_score=64,
-            importance_label="Significant",
+            importance_label="Strong",
             geographic_scope="National",
             primary_country_code="CA",
             first_seen_at=datetime.now(UTC),
             last_updated_at=datetime.now(UTC),
-            scoring_components={"source_diversity": 12.5},
-            scoring_input={"independent_source_count": 3},
+            scoring_components={"corroboration": 22.5},
+            scoring_input={"independent_source_count": 3, "article_count": 3},
             generated_summary=True,
             active=True,
             affected_countries=[canada],
@@ -79,7 +79,7 @@ def test_health_and_country_events() -> None:
     assert response.status_code == 200
     payload = response.json()
     assert payload["total"] == 1
-    assert payload["items"][0]["importance_label"] == "Significant"
+    assert payload["items"][0]["importance_label"] == "Strong"
     assert payload["items"][0]["articles"][0]["source"]["publisher_name"] == "Test News"
 
 

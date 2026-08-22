@@ -43,7 +43,7 @@ import {
   type WorldMapProps,
 } from "./world-map-maplibre";
 
-type ImportanceFilter = "All" | "Major" | "Significant" | "Developing" | "Routine";
+type SignalFilter = "All" | "Very strong" | "Strong" | "Building" | "Early";
 type TimeFilter = "24 hours" | "3 days" | "7 days" | "All stories";
 
 interface FeedState {
@@ -140,7 +140,19 @@ const formatTime = (value: string) =>
     minute: "2-digit",
   }).format(new Date(value));
 
-function ImportancePill({ event }: { event: Event }) {
+const formatSignalWindow = (hours: number) => {
+  if (!Number.isFinite(hours) || hours <= 0) return "a single report";
+  if (hours < 1) {
+    const minutes = Math.max(1, Math.round(hours * 60));
+    return `${minutes} ${minutes === 1 ? "minute" : "minutes"}`;
+  }
+  if (hours < 2) return `${hours.toFixed(1)} hours`;
+  if (hours < 24) return `${Math.round(hours)} hours`;
+  const days = hours / 24;
+  return `${days < 2 ? days.toFixed(1) : Math.round(days)} days`;
+};
+
+function SignalPill({ event }: { event: Event }) {
   return (
     <span
       className="event-score-label border px-2 py-1 font-mono text-[9px] uppercase tracking-[0.12em]"
@@ -218,7 +230,7 @@ function EventCard({
         <span className="font-mono text-[9px] uppercase tracking-[0.15em] text-[#9ba7b8]">
           {event.category}
         </span>
-        <ImportancePill event={event} />
+        <SignalPill event={event} />
         {hasOriginal ? (
           <button
             type="button"
@@ -397,16 +409,50 @@ function EventCard({
         aria-expanded={expanded}
         onClick={() => setExpanded((value) => !value)}
       >
-        Why this score?
+        Why this signal?
         <span aria-hidden="true">{expanded ? "−" : "+"}</span>
       </button>
       {expanded ? (
         <div className="mt-2 rounded-lg border border-[#28354a] bg-[#0c1420] p-3">
           <p className="text-xs leading-5 text-[#9eabba]">
-            This estimate combines source diversity, geographic reach,
-            publisher prominence, recency, and coverage velocity. Duplicate
-            volume alone cannot make an event major.
+            This signal measures how strongly and recently the occurrence is
+            corroborated. It does not measure human impact, severity, or the
+            importance of one country relative to another.
           </p>
+          <div className="mt-3 grid gap-2 rounded-lg border border-[#233247] bg-[#101a28] p-3 text-[10px] text-[#aeb9c8] sm:grid-cols-2">
+            <span>
+              <strong className="text-white">
+                {event.scoringInput.independentSourceCount}
+              </strong>{" "}
+              independent{" "}
+              {event.scoringInput.independentSourceCount === 1
+                ? "publisher"
+                : "publishers"}
+            </span>
+            <span>
+              <strong className="text-white">
+                {event.scoringInput.articleCount}
+              </strong>{" "}
+              matched{" "}
+              {event.scoringInput.articleCount === 1 ? "report" : "reports"}
+            </span>
+            <span>
+              <strong className="text-white">
+                {event.scoringInput.affectedCountryCount}
+              </strong>{" "}
+              verified{" "}
+              {event.scoringInput.affectedCountryCount === 1
+                ? "country"
+                : "countries"}
+            </span>
+            <span>
+              <strong className="text-white">
+                {event.scoringInput.articlesPerHour.toFixed(2)}
+              </strong>{" "}
+              new reports/hour over{" "}
+              {formatSignalWindow(event.scoringInput.coverageWindowHours)}
+            </span>
+          </div>
           <div className="mt-3 grid grid-cols-2 gap-x-4 gap-y-2">
             {Object.entries(event.scoringComponents).map(([key, value]) => (
               <div key={key} className="flex justify-between text-[10px]">
@@ -516,18 +562,17 @@ function MethodologyModal({ onClose }: { onClose: () => void }) {
           </button>
         </div>
         <p className="mt-5 text-sm leading-6 text-[#b5bfcd]">
-          Hemisphere Herald groups public headline metadata into developing events and
-          estimates their relative impact on a 0–100 scale. The score is an
-          orientation tool, not an objective fact or a judgment about human
-          worth.
+          Hemisphere Herald groups public headline metadata into developing
+          events and estimates the strength of the available reporting signal
+          on a 0–100 scale. It answers “how strongly and recently is this
+          occurrence corroborated?”—not how severe or important it is.
         </p>
         <div className="mt-5 grid gap-3 sm:grid-cols-2">
           {[
-            ["25%", "Independent sources and source-country diversity"],
-            ["25%", "Countries affected and their relative significance"],
-            ["20%", "Publisher prominence"],
-            ["15%", "Recency"],
-            ["15%", "Coverage velocity"],
+            ["45%", "Independent publisher corroboration"],
+            ["25%", "Measured reporting momentum"],
+            ["20%", "Freshness over the current seven-day window"],
+            ["10%", "Verified geographic reach beyond one country"],
           ].map(([weight, text]) => (
             <div
               key={text}
@@ -556,6 +601,14 @@ function MethodologyModal({ onClose }: { onClose: () => void }) {
             when at least two countries are explicitly named in that story’s
             headline evidence. Capital markers are geographic reference points,
             not claims that an event occurred in the capital.
+          </p>
+          <p>
+            A single report receives no momentum points. Momentum is calculated
+            from additional matched reports divided by the observed time
+            between the first and latest report. Publisher size or prominence
+            does not add points. When more than five sources match, prominence
+            and recency help choose which links are displayed, not the signal
+            score itself.
           </p>
           <p>
             Publisher lean labels use a checked Ground News ratings snapshot
@@ -775,7 +828,7 @@ function LiveSituationModal({
       titleId="live-situation-title"
       eyebrow="Updated live"
       title="Top Stories"
-      description="The twelve strongest current global stories, with one primary source per story for a fast, uncluttered briefing."
+      description="The twelve strongest current global news signals, with one primary source per story for a fast, uncluttered briefing."
       onClose={onClose}
     >
         {stories.length ? (
@@ -1886,7 +1939,7 @@ export function WorldPulseApp({
     null,
   );
   const [category, setCategory] = useState<"All" | Category>("All");
-  const [importance, setImportance] = useState<ImportanceFilter>("All");
+  const [signalStrength, setSignalStrength] = useState<SignalFilter>("All");
   const [timeRange, setTimeRange] = useState<TimeFilter>("7 days");
   const [search, setSearch] = useState("");
   const [showMethodology, setShowMethodology] = useState(false);
@@ -2239,8 +2292,8 @@ export function WorldPulseApp({
     const query = search.trim().toLowerCase();
     return expandedEvents.filter((event) => {
       const matchesCategory = category === "All" || event.category === category;
-      const matchesImportance =
-        importance === "All" || event.importanceLabel === importance;
+      const matchesSignal =
+        signalStrength === "All" || event.importanceLabel === signalStrength;
       const matchesTime =
         !Number.isFinite(limitHours) ||
         reference - Date.parse(event.lastUpdatedAt) <=
@@ -2252,9 +2305,9 @@ export function WorldPulseApp({
         event.articles.some((article) =>
           article.source.publisherName.toLowerCase().includes(query),
         );
-      return matchesCategory && matchesImportance && matchesTime && matchesSearch;
+      return matchesCategory && matchesSignal && matchesTime && matchesSearch;
     });
-  }, [category, expandedEvents, importance, initialWorld, search, timeRange]);
+  }, [category, expandedEvents, initialWorld, search, signalStrength, timeRange]);
   const focusedConnectionEvent = filteredEvents.find(
     (event) => event.id === connectionEventId,
   );
@@ -2306,7 +2359,7 @@ export function WorldPulseApp({
     setVisibleEventLimit(INITIAL_VISIBLE_EVENT_LIMIT);
     setConnectionEventId(null);
     setCategory("All");
-    setImportance("All");
+    setSignalStrength("All");
     setTimeRange("7 days");
     setSearch("");
   }, [mapCountries]);
@@ -2323,7 +2376,7 @@ export function WorldPulseApp({
   };
   const hasActiveFilters =
     category !== "All" ||
-    importance !== "All" ||
+    signalStrength !== "All" ||
     timeRange !== "7 days" ||
     search.trim().length > 0;
   const noRecentEvents =
@@ -2517,7 +2570,7 @@ export function WorldPulseApp({
                   {filteredEvents[0]?.importanceScore ?? "—"}
                 </div>
                 <div className="font-mono text-[7px] uppercase tracking-[0.14em] text-[#7f8da1]">
-                  top score
+                  top signal
                 </div>
               </div>
             </div>
@@ -2559,15 +2612,15 @@ export function WorldPulseApp({
                 ))}
               </FilterSelect>
               <FilterSelect
-                label="Filter by importance"
-                value={importance}
+                label="Filter by signal strength"
+                value={signalStrength}
                 onChange={(value) => {
-                  setImportance(value as ImportanceFilter);
+                  setSignalStrength(value as SignalFilter);
                   setVisibleEventLimit(INITIAL_VISIBLE_EVENT_LIMIT);
                   setConnectionEventId(null);
                 }}
               >
-                {["All", "Major", "Significant", "Developing", "Routine"].map(
+                {["All", "Very strong", "Strong", "Building", "Early"].map(
                   (item) => (
                     <option key={item}>{item}</option>
                   ),
@@ -2678,7 +2731,7 @@ export function WorldPulseApp({
                       type="button"
                       onClick={() => {
                         setCategory("All");
-                        setImportance("All");
+                        setSignalStrength("All");
                         setTimeRange("7 days");
                         setSearch("");
                         setVisibleEventLimit(INITIAL_VISIBLE_EVENT_LIMIT);

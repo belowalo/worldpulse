@@ -4,7 +4,7 @@ from sqlalchemy import delete
 
 from .database import SessionLocal
 from .models import Article, Country, Event, Source
-from .scoring import ScoringInput, calculate_importance
+from .scoring import ScoringInput, calculate_news_signal
 
 COUNTRIES = [
     ("CA", "CAN", "Canada", "124", "North America"),
@@ -328,21 +328,20 @@ def run_seed() -> None:
                 scope,
                 age,
                 source_count,
-                source_country_count,
+                _source_country_count,
                 affected_count,
-                significance,
-                prominence,
+                _significance,
+                _prominence,
                 velocity,
             ) = spec
-            score = calculate_importance(
+            score = calculate_news_signal(
                 ScoringInput(
                     independent_source_count=source_count,
-                    source_country_count=source_country_count,
                     affected_country_count=affected_count,
-                    country_significance=significance,
-                    publisher_prominence=prominence,
                     age_hours=age,
                     articles_per_hour=velocity,
+                    article_count=source_count,
+                    coverage_window_hours=max(1, (source_count - 1) / velocity),
                 )
             )
             published = now - timedelta(hours=age)

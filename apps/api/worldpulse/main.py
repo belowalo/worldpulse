@@ -121,7 +121,7 @@ def filters() -> dict[str, list[str]]:
             "Culture and sports",
             "Other",
         ],
-        "importance_labels": ["Major", "Significant", "Developing", "Routine"],
+        "signal_labels": ["Very strong", "Strong", "Building", "Early"],
         "geographic_scopes": ["Global", "International", "National", "Regional", "Local"],
         "time_ranges": ["24 hours", "3 days", "7 days"],
     }
