@@ -1049,11 +1049,12 @@ function CityCameraModal({
               id="city-camera-title"
               className="mt-2 text-2xl font-semibold tracking-[-0.04em]"
             >
-              See {location.capital} live
+              See {location.country.name} live
             </h2>
             <p className="mt-2 max-w-2xl text-sm leading-6 text-[#9ba8ba]">
               Active public webcams showing streets, skylines, traffic, and
-              everyday city views—not news broadcasts.
+              everyday city views—not news broadcasts. {location.capital} is
+              prioritized, followed by other verified cameras in the country.
             </p>
           </div>
           <button
@@ -1074,7 +1075,7 @@ function CityCameraModal({
             <div className="text-center">
               <div className="mx-auto h-7 w-7 animate-spin rounded-full border-2 border-[#4e5e73] border-t-[#73e2cc]" />
               <p className="mt-4 font-mono text-[9px] uppercase tracking-[0.18em] text-[#8290a3]">
-                Checking active cameras in {location.capital}
+                Checking active cameras in {location.country.name}
               </p>
             </div>
           </div>

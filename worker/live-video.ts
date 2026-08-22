@@ -434,6 +434,25 @@ export function parseLiveCameraSearch(
     }));
 }
 
+function cameraLocationScore(
+  video: ReturnType<typeof parseLiveCameraSearch>[number],
+  countryName: string,
+  capitalName: string,
+) {
+  const tokens = new Set(
+    searchTokens(
+      `${video.title} ${video.channelName} ${video.coverageDescription ?? ""}`,
+    ),
+  );
+  const capitalMatches = searchTokens(capitalName).filter((token) =>
+    tokens.has(token),
+  ).length;
+  const countryMatches = searchTokens(countryName).filter((token) =>
+    tokens.has(token),
+  ).length;
+  return capitalMatches * 10 + countryMatches;
+}
+
 export function verifiedLiveNewsroomFallback() {
   return VERIFIED_LIVE_STREAMS.map((stream) => ({
     id: stream.id,
@@ -553,6 +572,8 @@ export async function discoverCountryCameras(
   return [...videosById.values()]
     .sort(
       (left, right) =>
+        cameraLocationScore(right, countryName, capitalName) -
+          cameraLocationScore(left, countryName, capitalName) ||
         right.viewerCount - left.viewerCount ||
         left.title.localeCompare(right.title),
     )

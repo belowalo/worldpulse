@@ -140,7 +140,7 @@ describe("Hemisphere Herald live country delivery", () => {
     );
 
     expect(
-      await screen.findByRole("heading", { name: "See Ottawa live" }),
+      await screen.findByRole("heading", { name: "See Canada live" }),
     ).toBeInTheDocument();
     expect(
       await screen.findByRole("heading", {
