@@ -1452,12 +1452,14 @@ function WorldLoadingScreen({
       <section className="relative z-10 w-full max-w-3xl">
         <div className="grid items-center gap-10 md:grid-cols-[230px_1fr]">
           <div className="loading-orbit mx-auto h-52 w-52" aria-hidden="true">
-            <div className="loading-orbit__ring loading-orbit__ring--outer" />
-            <div className="loading-orbit__ring loading-orbit__ring--inner" />
+            <div className="loading-orbit__path" />
+            <div className="loading-orbit__moon-carrier">
+              <div className="loading-orbit__moon" />
+            </div>
             <div className="loading-orbit__globe">
+              <div className="loading-orbit__surface" />
               <div className="loading-orbit__longitude" />
               <div className="loading-orbit__latitude" />
-              <div className="loading-orbit__scan" />
             </div>
           </div>
           <div>

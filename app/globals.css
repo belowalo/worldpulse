@@ -373,51 +373,39 @@ select:focus-visible {
   filter: drop-shadow(0 0 28px rgba(115, 226, 204, 0.16));
 }
 
-.loading-orbit__ring {
+.loading-orbit__path {
   position: absolute;
-  inset: 0;
-  border: 1px solid rgba(115, 226, 204, 0.28);
+  width: 11.8rem;
+  height: 11.8rem;
+  border: 1px solid rgba(166, 193, 211, 0.32);
   border-radius: 50%;
+  box-shadow: 0 0 18px rgba(115, 226, 204, 0.05);
 }
 
-.loading-orbit__ring::before,
-.loading-orbit__ring::after {
+.loading-orbit__moon-carrier {
   position: absolute;
-  width: 0.46rem;
-  height: 0.46rem;
-  border-radius: 999px;
-  background: #b4fff0;
-  box-shadow: 0 0 16px rgba(115, 226, 204, 0.9);
-  content: "";
+  width: 11.8rem;
+  height: 11.8rem;
+  animation: loading-moon-orbit 6.8s linear infinite;
 }
 
-.loading-orbit__ring::before {
+.loading-orbit__moon {
+  position: absolute;
+  top: -0.65rem;
   left: 50%;
-  top: 0;
+  width: 1.3rem;
+  height: 1.3rem;
+  border: 1px solid rgba(228, 237, 241, 0.65);
+  border-radius: 50%;
+  background:
+    radial-gradient(circle at 35% 31%, rgba(87, 99, 108, 0.72) 0 9%, transparent 10%),
+    radial-gradient(circle at 68% 62%, rgba(91, 103, 111, 0.55) 0 12%, transparent 13%),
+    radial-gradient(circle at 58% 35%, rgba(255, 255, 255, 0.5), transparent 42%),
+    #aab5bc;
+  box-shadow:
+    inset -0.28rem -0.25rem 0.42rem rgba(26, 34, 41, 0.58),
+    0 0 14px rgba(210, 230, 236, 0.34);
   transform: translate(-50%, -50%);
-}
-
-.loading-orbit__ring::after {
-  bottom: 0;
-  left: 50%;
-  transform: translate(-50%, 50%);
-}
-
-.loading-orbit__ring--outer {
-  animation: loading-orbit 7s linear infinite;
-}
-
-.loading-orbit__ring--inner {
-  inset: 1.15rem;
-  border-color: rgba(105, 139, 255, 0.34);
-  transform: rotate(18deg);
-  animation: loading-orbit-reverse 5s linear infinite;
-}
-
-.loading-orbit__ring--inner::before,
-.loading-orbit__ring--inner::after {
-  background: #8ba8ff;
-  box-shadow: 0 0 14px rgba(105, 139, 255, 0.9);
 }
 
 .loading-orbit__globe {
@@ -435,6 +423,32 @@ select:focus-visible {
     inset -18px -15px 35px rgba(0, 0, 0, 0.56),
     inset 8px 8px 20px rgba(121, 220, 203, 0.09),
     0 0 30px rgba(115, 226, 204, 0.18);
+}
+
+.loading-orbit__globe::after {
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background:
+    radial-gradient(circle at 31% 27%, rgba(214, 255, 247, 0.13), transparent 27%),
+    linear-gradient(112deg, transparent 42%, rgba(0, 0, 0, 0.13) 62%, rgba(0, 0, 0, 0.46) 100%);
+  content: "";
+}
+
+.loading-orbit__surface {
+  position: absolute;
+  inset: -1px;
+  background-image:
+    radial-gradient(ellipse at 16% 34%, rgba(96, 178, 128, 0.88) 0 8%, transparent 9%),
+    radial-gradient(ellipse at 28% 48%, rgba(71, 151, 112, 0.84) 0 12%, transparent 13%),
+    radial-gradient(ellipse at 45% 27%, rgba(107, 184, 131, 0.78) 0 7%, transparent 8%),
+    radial-gradient(ellipse at 67% 54%, rgba(74, 155, 116, 0.86) 0 13%, transparent 14%),
+    radial-gradient(ellipse at 84% 36%, rgba(102, 179, 127, 0.8) 0 9%, transparent 10%),
+    radial-gradient(circle at 50% 50%, rgba(31, 107, 145, 0.72), #081c2c 72%);
+  background-position: 0 0;
+  background-repeat: repeat-x;
+  background-size: 7.7rem 7.7rem;
+  animation: loading-earth-spin 8.5s linear infinite;
 }
 
 .loading-orbit__longitude,
@@ -455,37 +469,15 @@ select:focus-visible {
   bottom: 36%;
 }
 
-.loading-orbit__scan {
-  position: absolute;
-  left: -15%;
-  right: -15%;
-  height: 2px;
-  background: linear-gradient(90deg, transparent, #aaffee, transparent);
-  box-shadow: 0 0 12px rgba(115, 226, 204, 0.95);
-  animation: loading-scan 2.8s ease-in-out infinite;
-}
-
-@keyframes loading-orbit {
+@keyframes loading-moon-orbit {
   to {
     transform: rotate(360deg);
   }
 }
 
-@keyframes loading-orbit-reverse {
+@keyframes loading-earth-spin {
   to {
-    transform: rotate(-342deg);
-  }
-}
-
-@keyframes loading-scan {
-  0%,
-  100% {
-    top: 20%;
-    opacity: 0.2;
-  }
-  50% {
-    top: 80%;
-    opacity: 1;
+    background-position: 7.7rem 0;
   }
 }
 
@@ -528,16 +520,12 @@ select:focus-visible {
     animation: loading-breathe 6s ease-in-out infinite !important;
   }
 
-  .loading-orbit__ring--outer {
-    animation: loading-orbit 12s linear infinite !important;
+  .loading-orbit__moon-carrier {
+    animation: loading-moon-orbit 12s linear infinite !important;
   }
 
-  .loading-orbit__ring--inner {
-    animation: loading-orbit-reverse 9s linear infinite !important;
-  }
-
-  .loading-orbit__scan {
-    animation: loading-scan 4.8s ease-in-out infinite !important;
+  .loading-orbit__surface {
+    animation: loading-earth-spin 15s linear infinite !important;
   }
 
   .breaking-news-track {
