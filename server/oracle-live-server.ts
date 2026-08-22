@@ -141,7 +141,6 @@ export function bootstrapProgress(
     (countryName) => (state.countries[countryName]?.articles.length ?? 0) > 0,
   ).length;
   const ready =
-    Boolean(state.completedCycleAt) &&
     Boolean(state.global?.articles.length) &&
     attemptedCountries === countryNames.length;
   return {

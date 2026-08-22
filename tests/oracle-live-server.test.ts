@@ -51,7 +51,7 @@ describe("Oracle live server", () => {
     expect(merged.articles.map((item) => item.id)).toEqual(["current"]);
   });
 
-  it("does not become ready until global news and every country attempt exist", () => {
+  it("becomes ready after global news and every country attempt, including across a restart", () => {
     const current = state();
     current.global = {
       countryName: null,
@@ -61,7 +61,6 @@ describe("Oracle live server", () => {
       provider: "test",
       articles: [article("global")],
     };
-    current.completedCycleAt = current.updatedAt;
     current.lastAttemptAt = { Iran: current.updatedAt, Mauritania: current.updatedAt };
     expect(bootstrapProgress(current, ["Iran", "Mauritania"])).toMatchObject({
       ready: true,
