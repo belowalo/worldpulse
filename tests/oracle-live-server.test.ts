@@ -4,6 +4,7 @@ import {
   bootstrapProgress,
   buildWorldPayload,
   mergeCountryFeed,
+  selectDiverseCountryArticles,
   type PersistedCollectorState,
 } from "../server/oracle-live-server";
 
@@ -49,6 +50,47 @@ describe("Oracle live server", () => {
     expect(merged.generatedAt).toBe(incoming.generatedAt);
     expect(merged.available).toBe(true);
     expect(merged.articles.map((item) => item.id)).toEqual(["current"]);
+  });
+
+  it("retains distinct events before additional coverage of a dominant story", () => {
+    const publishedAt = "2026-08-22T06:00:00.000Z";
+    const tariffCoverage = Array.from({ length: 24 }, (_, index) => ({
+      ...article(`tariff-${index}`, publishedAt),
+      title:
+        index % 2
+          ? `Canada vows dollar-for-dollar tariff retaliation after U.S. trade talks fail ${index}`
+          : `U.S. and Canada trade talks collapse as new tariffs take effect ${index}`,
+      publisherName: `Tariff Publisher ${index}`,
+      publisherUrl: `https://tariff-${index}.example.com`,
+    }));
+    const distinctStories: LiveArticle[] = [
+      {
+        ...article("wnba", "2026-08-22T05:59:00.000Z"),
+        title: "WNBA games in Canada remain surreal for Olympic basketball star",
+      },
+      {
+        ...article("wildfire", "2026-08-22T05:58:00.000Z"),
+        title: "Canada wildfire crews expand evacuation zone in British Columbia",
+      },
+      {
+        ...article("health", "2026-08-22T05:57:00.000Z"),
+        title: "Canada health agency launches a national vaccination campaign",
+      },
+    ];
+
+    const selected = selectDiverseCountryArticles(
+      "Canada",
+      [...tariffCoverage, ...distinctStories],
+      20,
+    );
+
+    expect(selected).toHaveLength(8);
+    expect(selected.map((item) => item.id)).toEqual(
+      expect.arrayContaining(["wnba", "wildfire", "health"]),
+    );
+    expect(
+      selected.filter((item) => item.id.startsWith("tariff-")).length,
+    ).toBeLessThanOrEqual(5);
   });
 
   it("becomes ready after global news and every country attempt, including across a restart", () => {

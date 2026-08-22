@@ -2,6 +2,7 @@ import { createServer, type IncomingMessage, type ServerResponse } from "node:ht
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { buildLiveEvents } from "../lib/live-news";
 import type {
   LiveArticle,
   LiveNewsPayload,
@@ -71,6 +72,55 @@ function articleKey(article: LiveArticle) {
   return article.url || article.id || article.title;
 }
 
+export function selectDiverseCountryArticles(
+  countryName: string,
+  articles: LiveArticle[],
+  limit = MAX_ARTICLES_PER_COUNTRY,
+  now = Date.now(),
+) {
+  const ranked = [...articles].sort(
+    (left, right) =>
+      Date.parse(right.publishedAt) - Date.parse(left.publishedAt),
+  );
+  if (ranked.length <= limit) return ranked;
+
+  const events = buildLiveEvents(
+    {
+      countryName,
+      scope: "country",
+      generatedAt: new Date(now).toISOString(),
+      refreshAfterSeconds: 60,
+      provider: "Hemisphere Herald live collector",
+      articles: ranked,
+    },
+    { name: countryName },
+  );
+  const originalsByUrl = new Map(
+    ranked.map((article) => [article.url, article] as const),
+  );
+  const selected: LiveArticle[] = [];
+  const selectedKeys = new Set<string>();
+
+  // Take one representative from every leading event before taking a second
+  // source from any event. A single breaking story can no longer fill all of
+  // a country's retained slots, while multi-source events still keep context.
+  for (let sourceDepth = 0; sourceDepth < 5; sourceDepth += 1) {
+    for (const event of events) {
+      const visibleArticle = event.articles[sourceDepth];
+      if (!visibleArticle) continue;
+      const original = originalsByUrl.get(visibleArticle.originalUrl);
+      if (!original) continue;
+      const key = articleKey(original);
+      if (selectedKeys.has(key)) continue;
+      selected.push(original);
+      selectedKeys.add(key);
+      if (selected.length === limit) return selected;
+    }
+  }
+
+  return selected;
+}
+
 export function mergeCountryFeed(
   countryName: string,
   current: MapNewsCountryPayload | undefined,
@@ -83,12 +133,12 @@ export function mergeCountryFeed(
     const key = articleKey(article);
     if (!articles.has(key)) articles.set(key, article);
   }
-  const mergedArticles = [...articles.values()]
-    .sort(
-      (left, right) =>
-        Date.parse(right.publishedAt) - Date.parse(left.publishedAt),
-    )
-    .slice(0, MAX_ARTICLES_PER_COUNTRY);
+  const mergedArticles = selectDiverseCountryArticles(
+    countryName,
+    [...articles.values()],
+    MAX_ARTICLES_PER_COUNTRY,
+    now,
+  );
   return {
     countryName,
     generatedAt: incoming?.generatedAt ?? current?.generatedAt ?? nowIso(),
