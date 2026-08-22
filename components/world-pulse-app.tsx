@@ -2495,7 +2495,7 @@ export function WorldPulseApp({
                 </p>
               </div>
               <div className="rounded-lg bg-[#182234] px-3 py-2 text-center">
-                <div className="font-mono text-lg text-[#73e2cc]">
+                <div className="font-mono text-lg text-white">
                   {filteredEvents[0]?.importanceScore ?? "—"}
                 </div>
                 <div className="font-mono text-[7px] uppercase tracking-[0.14em] text-[#7f8da1]">
@@ -2505,7 +2505,7 @@ export function WorldPulseApp({
             </div>
             <div className="mt-3 flex items-center justify-between gap-3">
               <span className="font-mono text-[8px] uppercase tracking-[0.13em] text-[#6f7e92]">
-                Live server feed · reads server updates every minute
+                Live updates every minute
               </span>
               {!globalView ? (
                 <button
