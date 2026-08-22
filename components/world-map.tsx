@@ -27,11 +27,17 @@ export interface WorldMapProps {
   countries: MapCountry[];
   selectedMapId: string | null;
   onSelect: (country: MapCountry) => void;
+  onSelectCapital?: (selection: CapitalMarkerSelection) => void;
   onReady?: () => void;
   onError?: (message: string) => void;
   readyForDisplay?: boolean;
   statusLabel?: string;
   linkEvents?: Event[];
+}
+
+export interface CapitalMarkerSelection {
+  capital: string;
+  country: MapCountry;
 }
 
 export type {
@@ -76,6 +82,7 @@ interface CesiumGlobeScene {
   countryEntities: CountryEntityRecord[];
   countryEntityIndex: Map<string, CountryEntityRecord>;
   markers: CustomDataSource;
+  markerCapitals: Map<string, CapitalMarkerSelection>;
   markerCountries: Map<string, MapCountry>;
   runtime: CesiumRuntime;
   viewer: Viewer;
@@ -415,9 +422,14 @@ function updateCountryEntities(
 
 export function updatePoints(scene: CesiumGlobeScene, points: GlobePoint[]) {
   scene.markers.entities.removeAll();
+  scene.markerCapitals.clear();
   scene.markerCountries.clear();
   points.forEach((point, index) => {
     const id = `worldpulse-marker-${point.country.mapId}-${index}`;
+    scene.markerCapitals.set(id, {
+      capital: point.capital,
+      country: point.country,
+    });
     scene.markerCountries.set(id, point.country);
     scene.markers.entities.add({
       id,
@@ -518,6 +530,7 @@ export function WorldMap({
   countries,
   selectedMapId,
   onSelect,
+  onSelectCapital,
   onReady,
   readyForDisplay = true,
   statusLabel = "Live",
@@ -526,6 +539,7 @@ export function WorldMap({
   const containerRef = useRef<HTMLDivElement>(null);
   const globeSceneRef = useRef<CesiumGlobeScene | null>(null);
   const onSelectRef = useRef(onSelect);
+  const onSelectCapitalRef = useRef(onSelectCapital);
   const onReadyRef = useRef(onReady);
   const readyNotifiedRef = useRef(false);
   const hoverFrameRef = useRef<number | null>(null);
@@ -679,6 +693,10 @@ export function WorldMap({
   useEffect(() => {
     onSelectRef.current = onSelect;
   }, [onSelect]);
+
+  useEffect(() => {
+    onSelectCapitalRef.current = onSelectCapital;
+  }, [onSelectCapital]);
 
   useEffect(() => {
     onReadyRef.current = onReady;
@@ -921,6 +939,7 @@ export function WorldMap({
             countryEntities.map((record) => [record.entity.id, record]),
           ),
           markers,
+          markerCapitals: new Map(),
           markerCountries: new Map(),
           runtime,
           viewer,
@@ -1039,6 +1058,24 @@ export function WorldMap({
       event.clientY - pointerStartRef.current.y,
     );
     if (movement > 6) return;
+    const scene = globeSceneRef.current;
+    if (scene && onSelectCapitalRef.current) {
+      const bounds = scene.viewer.canvas.getBoundingClientRect();
+      const position = new scene.runtime.Cartesian2(
+        event.clientX - bounds.left,
+        event.clientY - bounds.top,
+      );
+      const picked = scene.viewer.scene.pick(position);
+      const entity =
+        picked?.id instanceof scene.runtime.Entity ? picked.id : null;
+      const capital = entity
+        ? scene.markerCapitals.get(entity.id)
+        : undefined;
+      if (capital) {
+        onSelectCapitalRef.current(capital);
+        return;
+      }
+    }
     const country = locateCountry(event.clientX, event.clientY);
     if (country) onSelectRef.current(country);
   };
@@ -1099,7 +1136,7 @@ export function WorldMap({
       data-globe-auto-rotate="false"
       data-globe-engine="cesiumjs"
       data-globe-imagery="sentinel-2-cloudless-2016"
-      aria-label="Interactive 3D satellite world news globe. Drag to rotate, scroll to zoom from space to terrain, and click or tap a country to open its news panel."
+      aria-label="Interactive 3D satellite world news globe. Drag to rotate, click a country for news, or select a capital star for live city cameras."
       aria-describedby="world-globe-instructions"
       role="region"
       tabIndex={0}
@@ -1122,13 +1159,14 @@ export function WorldMap({
           The world, in context.
         </h1>
         <p className="mt-2 text-xs leading-relaxed text-[#aab5c5]">
-          Drag to rotate. Scroll or use the controls to zoom into terrain.
+          Drag to rotate. Select a capital star for live city cameras.
         </p>
       </div>
       <p id="world-globe-instructions" className="sr-only">
         Drag or swipe to rotate the globe. Use plus and minus to zoom from space
         into terrain, or press zero to reset the view. Tap or click a country to
-        open its news.
+        open its news, or select a capital star to see available live city
+        cameras.
       </p>
       <div
         className="world-globe-controls absolute bottom-4 left-4 z-20 flex gap-2"

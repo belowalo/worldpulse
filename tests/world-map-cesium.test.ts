@@ -96,6 +96,7 @@ describe("Cesium country overlays", () => {
       },
     ];
     const scene = {
+      markerCapitals: new Map(),
       markerCountries: new Map(),
       markers,
       runtime,

@@ -67,6 +67,7 @@ function geometryResponse() {
 function TestMap({
   countries: mapCountries,
   onSelect,
+  onSelectCapital,
   onReady,
   readyForDisplay,
   statusLabel,
@@ -82,13 +83,25 @@ function TestMap({
         {mapCountries.filter((country) => country.topEvent).length}
       </span>
       {mapCountries.map((country) => (
-        <button
-          key={country.mapId}
-          type="button"
-          onClick={() => onSelect(country)}
-        >
-          Select {country.name} on map
-        </button>
+        <div key={country.mapId}>
+          <button
+            type="button"
+            onClick={() => onSelect(country)}
+          >
+            Select {country.name} on map
+          </button>
+          <button
+            type="button"
+            onClick={() =>
+              onSelectCapital?.({
+                capital: country.name === "Canada" ? "Ottawa" : country.name,
+                country,
+              })
+            }
+          >
+            View {country.name === "Canada" ? "Ottawa" : country.name} live cameras
+          </button>
+        </div>
       ))}
     </section>
   );
@@ -105,6 +118,43 @@ afterEach(() => {
 });
 
 describe("Hemisphere Herald live country delivery", () => {
+  it("opens a country camera panel from a capital star and shows an empty state", async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("mode=country-cameras")) {
+        return Response.json({
+          mode: "country-cameras",
+          countryName: "Canada",
+          capitalName: "Ottawa",
+          generatedAt,
+          videos: [],
+        });
+      }
+      return new Response("Unexpected request", { status: 500 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    render(<WorldPulseApp MapComponent={TestMap} liveUpdates={false} />);
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "View Ottawa live cameras" }),
+    );
+
+    expect(
+      await screen.findByRole("heading", { name: "See Ottawa live" }),
+    ).toBeInTheDocument();
+    expect(
+      await screen.findByRole("heading", {
+        name: "No live cameras are available for Canada",
+      }),
+    ).toBeInTheDocument();
+    expect(fetchMock).toHaveBeenCalledWith(
+      expect.stringContaining(
+        "mode=country-cameras&country=Canada&capital=Ottawa",
+      ),
+      expect.objectContaining({ cache: "no-store" }),
+    );
+  });
+
   it("keeps non-live embeds interactive without network access", () => {
     const fetchMock = vi.fn();
     vi.stubGlobal("fetch", fetchMock);

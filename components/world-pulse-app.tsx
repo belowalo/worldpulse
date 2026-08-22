@@ -913,6 +913,11 @@ interface LiveVideoState {
   generatedAt: string | null;
 }
 
+interface CityCameraLocation {
+  capital: string;
+  country: MapCountry;
+}
+
 const LIVE_DIRECTORY_REFRESH_MS = 90_000;
 
 function formatViewerCount(value: number) {
@@ -920,6 +925,311 @@ function formatViewerCount(value: number) {
     notation: value >= 1_000 ? "compact" : "standard",
     maximumFractionDigits: 1,
   }).format(value);
+}
+
+function CityCameraModal({
+  location,
+  onClose,
+}: {
+  location: CityCameraLocation;
+  onClose: () => void;
+}) {
+  const requestRef = useRef<AbortController | null>(null);
+  const [playerVideoId, setPlayerVideoId] = useState("");
+  const [coverage, setCoverage] = useState<LiveVideoState>({
+    loading: true,
+    refreshing: false,
+    error: null,
+    videos: [],
+    selectedVideoId: "",
+    generatedAt: null,
+  });
+
+  const loadCameras = useCallback(async (initial: boolean) => {
+    requestRef.current?.abort();
+    const controller = new AbortController();
+    requestRef.current = controller;
+    setCoverage((current) => ({
+      ...current,
+      loading: initial && !current.videos.length,
+      refreshing: !initial || Boolean(current.videos.length),
+      error: null,
+    }));
+    try {
+      const query = new URLSearchParams({
+        mode: "country-cameras",
+        country: location.country.name,
+        capital: location.capital,
+      });
+      const response = await fetch(`/api/live-video?${query}`, {
+        cache: "no-store",
+        signal: AbortSignal.any([
+          controller.signal,
+          AbortSignal.timeout(15_000),
+        ]),
+      });
+      const payload = (await response.json()) as {
+        error?: string;
+        generatedAt?: string;
+        videos?: LiveVideo[];
+      };
+      if (!response.ok) {
+        throw new Error(
+          payload.error ?? "Live city cameras could not be checked right now.",
+        );
+      }
+      const videos = payload.videos ?? [];
+      setPlayerVideoId((current) =>
+        videos.some((video) => video.id === current) ? current : "",
+      );
+      setCoverage((current) => ({
+        loading: false,
+        refreshing: false,
+        error: null,
+        videos,
+        selectedVideoId: videos.some(
+          (video) => video.id === current.selectedVideoId,
+        )
+          ? current.selectedVideoId
+          : (videos[0]?.id ?? ""),
+        generatedAt: payload.generatedAt ?? new Date().toISOString(),
+      }));
+    } catch (error) {
+      if (controller.signal.aborted) return;
+      setCoverage((current) => ({
+        ...current,
+        loading: false,
+        refreshing: false,
+        error:
+          error instanceof Error
+            ? error.message
+            : "Live city cameras could not be checked right now.",
+      }));
+    }
+  }, [location.capital, location.country.name]);
+
+  useEffect(() => {
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") onClose();
+    };
+    window.addEventListener("keydown", closeOnEscape);
+    void loadCameras(true);
+    const interval = window.setInterval(() => {
+      if (!document.hidden) void loadCameras(false);
+    }, 120_000);
+    return () => {
+      window.removeEventListener("keydown", closeOnEscape);
+      window.clearInterval(interval);
+      requestRef.current?.abort();
+    };
+  }, [loadCameras, onClose]);
+
+  const selectedVideo =
+    coverage.videos.find((video) => video.id === coverage.selectedVideoId) ??
+    coverage.videos[0];
+  const playerIsActive = selectedVideo?.id === playerVideoId;
+
+  return (
+    <div
+      className="fixed inset-0 z-50 grid place-items-center bg-black/75 p-4 backdrop-blur-md"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="city-camera-title"
+      onMouseDown={(event) => {
+        if (event.target === event.currentTarget) onClose();
+      }}
+    >
+      <section className="max-h-[88vh] w-full max-w-5xl overflow-y-auto rounded-2xl border border-[#344157] bg-[#0e1724] p-5 shadow-2xl sm:p-6">
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <p className="font-mono text-[10px] uppercase tracking-[0.2em] text-[#73e2cc]">
+              Live city cameras · {location.country.name}
+            </p>
+            <h2
+              id="city-camera-title"
+              className="mt-2 text-2xl font-semibold tracking-[-0.04em]"
+            >
+              See {location.capital} live
+            </h2>
+            <p className="mt-2 max-w-2xl text-sm leading-6 text-[#9ba8ba]">
+              Active public webcams showing streets, skylines, traffic, and
+              everyday city views—not news broadcasts.
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            autoFocus
+            className="rounded-full border border-[#3a4659] px-3 py-1.5 text-sm text-[#cad2dd] hover:bg-[#1a2537]"
+          >
+            Close
+          </button>
+        </div>
+
+        {coverage.loading ? (
+          <div
+            className="mt-6 grid min-h-80 place-items-center rounded-2xl border border-[#2a394e] bg-[#080e17]"
+            aria-busy="true"
+          >
+            <div className="text-center">
+              <div className="mx-auto h-7 w-7 animate-spin rounded-full border-2 border-[#4e5e73] border-t-[#73e2cc]" />
+              <p className="mt-4 font-mono text-[9px] uppercase tracking-[0.18em] text-[#8290a3]">
+                Checking active cameras in {location.capital}
+              </p>
+            </div>
+          </div>
+        ) : coverage.error && !coverage.videos.length ? (
+          <div className="mt-6 grid min-h-72 place-items-center rounded-2xl border border-[#4a3037] bg-[#140c11] px-6 text-center">
+            <div>
+              <h3 className="text-lg font-semibold text-white">
+                Live cameras could not be checked
+              </h3>
+              <p className="mt-2 text-xs leading-5 text-[#a9999f]">
+                {coverage.error}
+              </p>
+              <button
+                type="button"
+                onClick={() => void loadCameras(true)}
+                className="mt-5 rounded-full border border-[#70414a] px-4 py-2 text-[10px] text-[#f1c1c6] transition hover:bg-[#2a1117]"
+              >
+                Try again
+              </button>
+            </div>
+          </div>
+        ) : !selectedVideo ? (
+          <div className="mt-6 grid min-h-72 place-items-center rounded-2xl border border-dashed border-[#3b485b] bg-[#09111c] px-6 text-center">
+            <div className="max-w-lg">
+              <div className="mx-auto h-3 w-3 rounded-full bg-[#5d6979]" />
+              <h3 className="mt-4 text-xl font-semibold text-white">
+                No live cameras are available for {location.country.name}
+              </h3>
+              <p className="mt-2 text-xs leading-5 text-[#8996a8]">
+                No active public city or webcam stream could be verified right
+                now. Hemisphere Herald will check again when you reopen this
+                marker.
+              </p>
+              <button
+                type="button"
+                onClick={() => void loadCameras(false)}
+                className="mt-5 inline-flex items-center gap-1.5 rounded-full border border-[#3a4659] px-4 py-2 text-[10px] text-[#cad2dd] transition hover:bg-[#182335]"
+              >
+                <RefreshGlyph active={coverage.refreshing} />
+                Check again
+              </button>
+            </div>
+          </div>
+        ) : (
+          <>
+            <div className="mt-6 flex items-center justify-between gap-3">
+              <p className="font-mono text-[9px] uppercase tracking-[0.16em] text-[#9ba8ba]">
+                <span className="mr-2 inline-block h-2 w-2 rounded-full bg-[#ff5964] shadow-[0_0_10px_#ff5964]" />
+                {coverage.refreshing
+                  ? "Checking live cameras"
+                  : `${coverage.videos.length} active ${coverage.videos.length === 1 ? "camera" : "cameras"}`}
+              </p>
+              <button
+                type="button"
+                onClick={() => void loadCameras(false)}
+                disabled={coverage.refreshing}
+                className="inline-flex items-center gap-1.5 rounded-full border border-[#3a4659] px-4 py-2 text-[10px] text-[#cad2dd] transition hover:bg-[#182335] disabled:cursor-wait disabled:opacity-60"
+              >
+                <RefreshGlyph active={coverage.refreshing} />
+                Refresh
+              </button>
+            </div>
+            <div className="mt-4 grid gap-4 lg:grid-cols-[minmax(0,1fr)_300px]">
+              <div className="overflow-hidden rounded-2xl border border-[#2a394e] bg-black">
+                <div className="aspect-video">
+                  {playerIsActive ? (
+                    <iframe
+                      key={selectedVideo.id}
+                      className="h-full w-full"
+                      src={selectedVideo.embedUrl}
+                      title={`${selectedVideo.channelName}: ${selectedVideo.title}`}
+                      allow="autoplay; encrypted-media; picture-in-picture"
+                      allowFullScreen
+                      referrerPolicy="strict-origin-when-cross-origin"
+                    />
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => setPlayerVideoId(selectedVideo.id)}
+                      aria-label={`Play ${selectedVideo.title}`}
+                      className="group relative h-full w-full overflow-hidden bg-[#05080d]"
+                    >
+                      {selectedVideo.thumbnailUrl ? (
+                        // eslint-disable-next-line @next/next/no-img-element
+                        <img
+                          src={selectedVideo.thumbnailUrl}
+                          alt=""
+                          aria-hidden="true"
+                          decoding="async"
+                          className="absolute inset-0 h-full w-full object-cover opacity-75"
+                        />
+                      ) : null}
+                      <span className="absolute inset-0 bg-black/35" />
+                      <span className="absolute inset-0 grid place-items-center">
+                        <span className="grid h-16 w-16 place-items-center rounded-full border border-white/40 bg-black/65">
+                          <span className="ml-1 h-0 w-0 border-y-[10px] border-l-[16px] border-y-transparent border-l-white" />
+                        </span>
+                      </span>
+                    </button>
+                  )}
+                </div>
+                <div className="border-t border-[#28364a] bg-[#09111c] p-4">
+                  <h3 className="text-sm font-semibold text-white">
+                    {selectedVideo.title}
+                  </h3>
+                  <div className="mt-2 flex items-center justify-between gap-3 text-[10px] text-[#8d9bad]">
+                    <span>{selectedVideo.channelName}</span>
+                    <a
+                      href={selectedVideo.watchUrl}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="text-[#8fcfc4] hover:underline"
+                    >
+                      Open source ↗
+                    </a>
+                  </div>
+                </div>
+              </div>
+              <div className="max-h-[430px] space-y-2 overflow-y-auto pr-1 scrollbar-thin">
+                {coverage.videos.map((video) => (
+                  <button
+                    key={video.id}
+                    type="button"
+                    aria-pressed={video.id === selectedVideo.id}
+                    onClick={() => {
+                      setPlayerVideoId("");
+                      setCoverage((current) => ({
+                        ...current,
+                        selectedVideoId: video.id,
+                      }));
+                    }}
+                    className={`w-full rounded-xl border p-3 text-left transition ${
+                      video.id === selectedVideo.id
+                        ? "border-[#73e2cc] bg-[#142a2b]"
+                        : "border-[#2a394e] bg-[#101a28] hover:border-[#52667f]"
+                    }`}
+                  >
+                    <span className="line-clamp-2 text-xs font-medium leading-5 text-white">
+                      {video.title}
+                    </span>
+                    <span className="mt-1 block truncate text-[9px] text-[#8290a3]">
+                      {video.channelName}
+                      {video.viewerCount
+                        ? ` · ${formatViewerCount(video.viewerCount)} watching`
+                        : ""}
+                    </span>
+                  </button>
+                ))}
+              </div>
+            </div>
+          </>
+        )}
+      </section>
+    </div>
+  );
 }
 
 function LiveNewsDirectory() {
@@ -1603,6 +1913,8 @@ export function WorldPulseApp({
   const [showNewsPanel, setShowNewsPanel] = useState(true);
   const [showLiveSituation, setShowLiveSituation] = useState(false);
   const [showLiveNews, setShowLiveNews] = useState(false);
+  const [cityCameraLocation, setCityCameraLocation] =
+    useState<CityCameraLocation | null>(null);
   const [visibleEventLimit, setVisibleEventLimit] = useState(
     INITIAL_VISIBLE_EVENT_LIMIT,
   );
@@ -2197,6 +2509,10 @@ export function WorldPulseApp({
             countries={mapCountries}
             selectedMapId={globalView ? null : selectedCountry.mapId}
             onSelect={handleSelect}
+            onSelectCapital={(location) => {
+              handleSelect(location.country);
+              setCityCameraLocation(location);
+            }}
             onReady={() => {
               setGlobeError(null);
               setGlobeReady(true);
@@ -2445,6 +2761,13 @@ export function WorldPulseApp({
       ) : null}
       {showLiveNews ? (
         <LiveNewsModal onClose={() => setShowLiveNews(false)} />
+      ) : null}
+      {cityCameraLocation ? (
+        <CityCameraModal
+          key={`${cityCameraLocation.country.mapId}-${cityCameraLocation.capital}`}
+          location={cityCameraLocation}
+          onClose={() => setCityCameraLocation(null)}
+        />
       ) : null}
       </main>
     </>

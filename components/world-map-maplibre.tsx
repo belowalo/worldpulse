@@ -24,11 +24,17 @@ export interface WorldMapProps {
   countries: MapCountry[];
   selectedMapId: string | null;
   onSelect: (country: MapCountry) => void;
+  onSelectCapital?: (selection: CapitalMarkerSelection) => void;
   onReady?: () => void;
   onError?: (message: string) => void;
   readyForDisplay?: boolean;
   statusLabel?: string;
   linkEvents?: Event[];
+}
+
+export interface CapitalMarkerSelection {
+  capital: string;
+  country: MapCountry;
 }
 
 interface CapitalCoordinate {
@@ -494,6 +500,7 @@ export function WorldMap({
   countries,
   selectedMapId,
   onSelect,
+  onSelectCapital,
   onReady,
   onError,
   readyForDisplay = true,
@@ -503,6 +510,7 @@ export function WorldMap({
   const containerRef = useRef<HTMLDivElement>(null);
   const sceneRef = useRef<MapLibreScene | null>(null);
   const onSelectRef = useRef(onSelect);
+  const onSelectCapitalRef = useRef(onSelectCapital);
   const onReadyRef = useRef(onReady);
   const onErrorRef = useRef(onError);
   const readyNotifiedRef = useRef(false);
@@ -541,6 +549,10 @@ export function WorldMap({
   useEffect(() => {
     onSelectRef.current = onSelect;
   }, [onSelect]);
+
+  useEffect(() => {
+    onSelectCapitalRef.current = onSelectCapital;
+  }, [onSelectCapital]);
 
   useEffect(() => {
     onReadyRef.current = onReady;
@@ -848,6 +860,25 @@ export function WorldMap({
         liveMap.getCanvas().style.cursor = "grab";
       });
       liveMap.on("click", (event: MapMouseEvent) => {
+        const capitalFeature = liveMap.getLayer(CAPITAL_LAYER_ID)
+          ? liveMap.queryRenderedFeatures(event.point, {
+              layers: [CAPITAL_LAYER_ID],
+            })[0]
+          : undefined;
+        const capitalMapId = String(
+          capitalFeature?.properties?.worldPulseMapId ?? "",
+        );
+        const capitalCountry = countryIndexRef.current.byId.get(capitalMapId);
+        if (capitalCountry && onSelectCapitalRef.current) {
+          onSelectCapitalRef.current({
+            capital: String(
+              capitalFeature?.properties?.worldPulseCapital ||
+                capitalCountry.name,
+            ),
+            country: capitalCountry,
+          });
+          return;
+        }
         const mapId = locateMapId(liveMap, event.point);
         const country = mapId
           ? countryIndexRef.current.byId.get(mapId)
@@ -971,7 +1002,7 @@ export function WorldMap({
       data-globe-auto-rotate="false"
       data-globe-engine="maplibre-gl"
       data-globe-imagery="sentinel-2-cloudless-2016"
-      aria-label="Interactive 3D satellite world news globe. Drag to rotate, scroll to zoom from space to terrain, and click or tap a country to open its news panel."
+      aria-label="Interactive 3D satellite world news globe. Drag to rotate, click a country for news, or select a capital star for live city cameras."
       aria-describedby="world-globe-instructions"
       role="region"
       tabIndex={0}
@@ -992,13 +1023,14 @@ export function WorldMap({
           The world, in context.
         </h1>
         <p className="mt-2 text-xs leading-relaxed text-[#aab5c5]">
-          Drag to rotate. Scroll or use the controls to zoom into terrain.
+          Drag to rotate. Select a capital star for live city cameras.
         </p>
       </div>
       <p id="world-globe-instructions" className="sr-only">
         Drag or swipe to rotate the globe. Use plus and minus to zoom from space
         into terrain, or press zero to reset the view. Tap or click a country to
-        open its news.
+        open its news, or select a capital star to see available live city
+        cameras.
       </p>
       <div
         className="world-globe-controls absolute bottom-4 left-4 z-20 flex gap-2"

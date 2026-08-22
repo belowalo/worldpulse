@@ -118,6 +118,22 @@ const VERIFIED_LIVE_STREAMS = [
 
 const VIDEO_ID_PATTERN = /^[A-Za-z0-9_-]{6,20}$/;
 const HEADLINE_PATTERN = /^[^\u0000-\u001f\u007f]{8,250}$/u;
+const LOCATION_PATTERN = /^[^\u0000-\u001f\u007f]{2,120}$/u;
+const CAMERA_TERMS = [
+  "camera",
+  "city cam",
+  "citycam",
+  "downtown",
+  "harbor",
+  "harbour",
+  "skyline",
+  "street cam",
+  "traffic cam",
+  "web cam",
+  "webcam",
+] as const;
+const NEWS_BROADCAST_PATTERN =
+  /\b(breaking|conflict|election|headlines|newscast|newsroom|politics|war)\b/i;
 const SEARCH_STOP_WORDS = new Set([
   "about",
   "after",
@@ -376,6 +392,48 @@ export function parseLiveNewsroomSearch(body: string) {
   });
 }
 
+export function parseLiveCameraSearch(
+  body: string,
+  countryName: string,
+  capitalName: string,
+) {
+  const locationTokens = searchTokens(`${capitalName} ${countryName}`);
+  return parsedLiveVideos(body)
+    .flatMap((video) => {
+      const searchable = `${video.title} ${video.channelName} ${
+        video.coverageDescription ?? ""
+      }`.toLocaleLowerCase("en");
+      if (
+        NEWS_BROADCAST_PATTERN.test(searchable) ||
+        newsroomForChannel(video.channelName) ||
+        !CAMERA_TERMS.some((term) => searchable.includes(term))
+      ) {
+        return [];
+      }
+      const searchableTokens = new Set(searchTokens(searchable));
+      const relevance = locationTokens.filter((token) =>
+        searchableTokens.has(token),
+      ).length;
+      return relevance > 0 ? [{ ...video, relevance }] : [];
+    })
+    .sort(
+      (left, right) =>
+        right.relevance - left.relevance ||
+        right.viewerCount - left.viewerCount,
+    )
+    .slice(0, 8)
+    .map((video) => ({
+      id: video.id,
+      title: video.title,
+      channelName: video.channelName,
+      coverageDescription: video.coverageDescription,
+      viewerCount: video.viewerCount,
+      thumbnailUrl: video.thumbnailUrl,
+      watchUrl: video.watchUrl,
+      embedUrl: video.embedUrl,
+    }));
+}
+
 export function verifiedLiveNewsroomFallback() {
   return VERIFIED_LIVE_STREAMS.map((stream) => ({
     id: stream.id,
@@ -449,6 +507,58 @@ export async function discoverLiveNewsrooms(
   return discovered.length ? discovered : verifiedLiveNewsroomFallback();
 }
 
+export async function discoverCountryCameras(
+  countryName: string,
+  capitalName: string,
+  fetchImpl: FetchImplementation = fetch,
+) {
+  const searches = [
+    `${capitalName} ${countryName} live webcam`,
+    `${capitalName} city live camera`,
+    `${countryName} live webcam city`,
+  ];
+  const results = await Promise.allSettled(
+    searches.map(async (query) => {
+      const response = await fetchImpl(
+        youtubeSearchUrl(query),
+        youtubeRequestInit(),
+      );
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      return parseLiveCameraSearch(
+        await response.text(),
+        countryName,
+        capitalName,
+      );
+    }),
+  );
+  const successful = results.filter(
+    (result) => result.status === "fulfilled",
+  );
+  if (!successful.length) {
+    throw new Error("No live-camera search completed.");
+  }
+  const videosById = new Map<
+    string,
+    ReturnType<typeof parseLiveCameraSearch>[number]
+  >();
+  for (const result of successful) {
+    if (result.status !== "fulfilled") continue;
+    for (const video of result.value) {
+      const current = videosById.get(video.id);
+      if (!current || video.viewerCount > current.viewerCount) {
+        videosById.set(video.id, video);
+      }
+    }
+  }
+  return [...videosById.values()]
+    .sort(
+      (left, right) =>
+        right.viewerCount - left.viewerCount ||
+        left.title.localeCompare(right.title),
+    )
+    .slice(0, 8);
+}
+
 export async function handleLiveVideo(
   request: Request,
   fetchImpl: FetchImplementation = fetch,
@@ -460,6 +570,51 @@ export async function handleLiveVideo(
     );
   }
   const url = new URL(request.url);
+  if (url.searchParams.get("mode") === "country-cameras") {
+    const countryName = url.searchParams.get("country")?.trim() ?? "";
+    const capitalName =
+      url.searchParams.get("capital")?.trim() || countryName;
+    if (
+      !LOCATION_PATTERN.test(countryName) ||
+      !LOCATION_PATTERN.test(capitalName)
+    ) {
+      return Response.json(
+        { error: "Provide a valid country and city.", videos: [] },
+        { status: 400, headers: { "Cache-Control": "no-store" } },
+      );
+    }
+    try {
+      const videos = await discoverCountryCameras(
+        countryName,
+        capitalName,
+        fetchImpl,
+      );
+      return Response.json(
+        {
+          mode: "country-cameras",
+          countryName,
+          capitalName,
+          generatedAt: new Date().toISOString(),
+          refreshAfterSeconds: 120,
+          videos,
+        },
+        {
+          headers: {
+            "Cache-Control":
+              "public, max-age=30, s-maxage=60, stale-while-revalidate=120",
+          },
+        },
+      );
+    } catch {
+      return Response.json(
+        {
+          error: "Live city cameras could not be checked right now.",
+          videos: [],
+        },
+        { status: 502, headers: { "Cache-Control": "no-store" } },
+      );
+    }
+  }
   if (url.searchParams.get("mode") === "newsrooms") {
     try {
       const videos = await discoverLiveNewsrooms(fetchImpl);

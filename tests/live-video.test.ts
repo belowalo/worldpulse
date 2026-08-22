@@ -1,8 +1,10 @@
 import { describe, expect, it, vi } from "vitest";
 
 import {
+  discoverCountryCameras,
   discoverLiveNewsrooms,
   handleLiveVideo,
+  parseLiveCameraSearch,
   parseLiveNewsroomSearch,
   parseLiveVideoSearch,
   verifiedLiveNewsroomFallback,
@@ -61,6 +63,77 @@ function youtubeSearchPage(items: unknown[]) {
 }
 
 describe("live video discovery", () => {
+  it("keeps active city cameras and excludes news broadcasts", () => {
+    const body = youtubeSearchPage([
+      liveRenderer({
+        id: "torontocam01",
+        title: "Toronto Canada downtown skyline live webcam",
+        channel: "City View Cameras",
+        viewers: "840",
+      }),
+      liveRenderer({
+        id: "torontonews1",
+        title: "Toronto breaking news live camera",
+        channel: "Local Newsroom",
+        viewers: "9K",
+      }),
+      liveRenderer({
+        id: "pariscamera1",
+        title: "Paris street webcam live",
+        channel: "City Walks",
+        viewers: "3K",
+      }),
+    ]);
+
+    const videos = parseLiveCameraSearch(body, "Canada", "Toronto");
+
+    expect(videos).toEqual([
+      expect.objectContaining({
+        id: "torontocam01",
+        channelName: "City View Cameras",
+      }),
+    ]);
+  });
+
+  it("serves country camera mode with an explicit empty-capable result", async () => {
+    const fetchMock = vi.fn(async () =>
+      new Response(
+        youtubeSearchPage([
+          liveRenderer({
+            id: "ottawacam001",
+            title: "Ottawa Canada city skyline webcam",
+            channel: "Capital Cameras",
+            viewers: "125",
+          }),
+        ]),
+        { status: 200 },
+      ),
+    );
+
+    const response = await handleLiveVideo(
+      new Request(
+        "https://worldpulse.test/api/live-video?mode=country-cameras&country=Canada&capital=Ottawa",
+      ),
+      fetchMock,
+    );
+    const payload = (await response.json()) as {
+      mode: string;
+      countryName: string;
+      capitalName: string;
+      videos: Array<{ id: string }>;
+    };
+
+    expect(response.status).toBe(200);
+    expect(payload).toMatchObject({
+      mode: "country-cameras",
+      countryName: "Canada",
+      capitalName: "Ottawa",
+    });
+    expect(payload.videos.map((video) => video.id)).toEqual(["ottawacam001"]);
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+    expect(await discoverCountryCameras("Canada", "Ottawa", fetchMock)).toHaveLength(1);
+  });
+
   it("returns only matching active streams and ranks them by current viewers", () => {
     const body = youtubeSearchPage([
       liveRenderer({
