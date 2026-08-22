@@ -17,6 +17,7 @@ import {
   biasDistributionForArticles,
   canonicalPublisherKey,
   publisherBiasRating,
+  showsPublisherPerspective,
 } from "@/lib/publisher-bias";
 import type { LiveNewsPayload } from "@/lib/types";
 
@@ -644,7 +645,7 @@ describe("live news normalization", () => {
     );
   });
 
-  it("builds a Ground News publisher mix and excludes unrated outlets", () => {
+  it("builds a publisher mix that includes unrated outlets", () => {
     const [event] = buildLiveEvents(payload, {
       name: "Canada",
       iso2: "CA",
@@ -715,14 +716,26 @@ describe("live news normalization", () => {
       left: 1,
       center: 1,
       right: 0,
+      unrated: 0,
       rated: 2,
       total: 2,
     });
     expect(
       distribution.percentages.left +
         distribution.percentages.center +
-        distribution.percentages.right,
+        distribution.percentages.right +
+        distribution.percentages.unrated,
     ).toBe(100);
+  });
+
+  it("shows publisher perspectives only for political and public-affairs categories", () => {
+    expect(showsPublisherPerspective("Politics")).toBe(true);
+    expect(showsPublisherPerspective("Economy")).toBe(true);
+    expect(showsPublisherPerspective("Conflict and security")).toBe(true);
+    expect(showsPublisherPerspective("Crime and justice")).toBe(true);
+    expect(showsPublisherPerspective("Sports")).toBe(false);
+    expect(showsPublisherPerspective("Culture and entertainment")).toBe(false);
+    expect(showsPublisherPerspective("Weather and disasters")).toBe(false);
   });
 
   it("counts publisher aliases once in the Ground News mix", () => {
@@ -759,8 +772,50 @@ describe("live news normalization", () => {
       left: 1,
       center: 2,
       right: 0,
+      unrated: 0,
       rated: 3,
       total: 3,
+    });
+  });
+
+  it("counts unrated publishers in the displayed percentages", () => {
+    const [event] = buildLiveEvents(payload, {
+      name: "Canada",
+      iso2: "CA",
+    });
+    const template = event.articles[0];
+    const distribution = biasDistributionForArticles([
+      {
+        source: {
+          ...template.source,
+          id: "rated-reuters",
+          publisherName: "Reuters",
+          url: "https://reuters.com/",
+        },
+      },
+      {
+        source: {
+          ...template.source,
+          id: "unrated-local",
+          publisherName: "Unknown Local Desk",
+          url: "https://local.example/",
+        },
+      },
+    ]);
+
+    expect(distribution).toMatchObject({
+      left: 0,
+      center: 1,
+      right: 0,
+      unrated: 1,
+      rated: 1,
+      total: 2,
+      percentages: {
+        left: 0,
+        center: 50,
+        right: 0,
+        unrated: 50,
+      },
     });
   });
 

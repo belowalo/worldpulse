@@ -1,6 +1,7 @@
-import type { Article } from "./types";
+import type { Article, Category } from "./types";
 
 export type BiasBucket = "left" | "center" | "right";
+export type PerspectiveBucket = BiasBucket | "unrated";
 
 export interface PublisherBiasRating {
   bucket: BiasBucket;
@@ -12,9 +13,21 @@ export interface BiasDistribution {
   left: number;
   center: number;
   right: number;
+  unrated: number;
   rated: number;
   total: number;
-  percentages: Record<BiasBucket, number>;
+  percentages: Record<PerspectiveBucket, number>;
+}
+
+const PERSPECTIVE_CATEGORIES = new Set<Category>([
+  "Politics",
+  "Economy",
+  "Conflict and security",
+  "Crime and justice",
+]);
+
+export function showsPublisherPerspective(category: Category) {
+  return PERSPECTIVE_CATEGORIES.has(category);
 }
 
 const GROUND_RATINGS: Array<{
@@ -313,23 +326,35 @@ export function biasDistributionForArticles(
     if (rating) counts[rating.bucket] += 1;
   }
   const rated = counts.left + counts.center + counts.right;
-  const percentages: Record<BiasBucket, number> = {
+  const unrated = distinctPublishers.size - rated;
+  const percentages: Record<PerspectiveBucket, number> = {
     left: 0,
     center: 0,
     right: 0,
+    unrated: 0,
   };
-  if (rated) {
-    const buckets: BiasBucket[] = ["left", "center", "right"];
+  if (distinctPublishers.size) {
+    const buckets: PerspectiveBucket[] = [
+      "left",
+      "center",
+      "right",
+      "unrated",
+    ];
+    const allCounts: Record<PerspectiveBucket, number> = {
+      ...counts,
+      unrated,
+    };
     const raw = buckets.map((bucket) => ({
       bucket,
-      value: (counts[bucket] / rated) * 100,
+      value: (allCounts[bucket] / distinctPublishers.size) * 100,
     }));
     for (const item of raw) percentages[item.bucket] = Math.floor(item.value);
     let remainder =
       100 -
       percentages.left -
       percentages.center -
-      percentages.right;
+      percentages.right -
+      percentages.unrated;
     for (const item of raw.sort(
       (left, right) =>
         right.value -
@@ -344,6 +369,7 @@ export function biasDistributionForArticles(
 
   return {
     ...counts,
+    unrated,
     rated,
     total: distinctPublishers.size,
     percentages,

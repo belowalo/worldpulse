@@ -16,6 +16,7 @@ import {
 import {
   biasDistributionForArticles,
   publisherBiasRating,
+  showsPublisherPerspective,
 } from "@/lib/publisher-bias";
 import { countriesMentionedByEvent } from "@/lib/map-links";
 import { countryCodeForName } from "@/lib/country-locale";
@@ -166,9 +167,8 @@ function EventCard({
 }) {
   const [expanded, setExpanded] = useState(false);
   const [showOriginal, setShowOriginal] = useState(false);
+  const showPublisherPerspective = showsPublisherPerspective(event.category);
   const bias = biasDistributionForArticles(event.articles);
-  const hasFullBiasRange =
-    bias.left > 0 && bias.center > 0 && bias.right > 0;
   const hasOriginal =
     Boolean(event.originalHeadline) &&
     event.originalHeadline !== event.headline;
@@ -264,7 +264,9 @@ function EventCard({
       </div>
       <div className="mt-4 flex flex-wrap items-center gap-2">
         {event.articles.map((article) => {
-          const rating = publisherBiasRating(article.source.publisherName);
+          const rating = showPublisherPerspective
+            ? publisherBiasRating(article.source.publisherName)
+            : null;
           const biasBucket = rating?.bucket ?? "unrated";
           const biasClasses = {
             left:
@@ -290,12 +292,16 @@ function EventCard({
               rel="noreferrer"
               dir="auto"
               title={
-                rating
+                !showPublisherPerspective
+                  ? `Open ${article.source.publisherName}`
+                  : rating
                   ? `Ground News publisher rating: ${rating.label}`
                   : "No Ground News publisher rating mapped"
               }
               aria-label={`Open ${article.source.publisherName} source. ${
-                rating
+                !showPublisherPerspective
+                  ? ""
+                  : rating
                   ? `Publisher rating: ${rating.label}.`
                   : "Publisher bias unrated."
               }`}
@@ -308,74 +314,83 @@ function EventCard({
               />
               <span>{article.source.publisherName}</span>
               <span className="opacity-70">
-                {rating?.label ?? "Unrated"} ↗
+                {showPublisherPerspective
+                  ? `${rating?.label ?? "Unrated"} ↗`
+                  : "↗"}
               </span>
             </a>
           );
         })}
       </div>
-      <div className="mt-4 rounded-lg border border-[#29384b] bg-[#0c1522] p-3">
-        <div className="flex items-center justify-between gap-3">
-          <span className="font-mono text-[9px] uppercase tracking-[0.14em] text-[#aab6c5]">
-            Ground News publisher mix
-          </span>
-          <span className="text-[9px] text-[#718096]">
-            {hasFullBiasRange ? "Left · center · right" : "Viewpoint gap"} ·{" "}
-            {bias.rated}/{bias.total} rated
-          </span>
-        </div>
-        {bias.rated ? (
-          <>
-            <div
-              className="mt-2 flex h-2 overflow-hidden rounded-full bg-[#263247]"
-              aria-label={`Publisher ratings: ${bias.percentages.left}% left, ${bias.percentages.center}% center, ${bias.percentages.right}% right`}
+      {showPublisherPerspective ? (
+        <div className="mt-4 rounded-lg border border-[#29384b] bg-[#0c1522] p-3">
+          <div className="flex items-center justify-between gap-3">
+            <span className="font-mono text-[9px] uppercase tracking-[0.14em] text-[#aab6c5]">
+              Source perspectives
+            </span>
+            <span className="text-[9px] text-[#718096]">
+              {bias.rated} of {bias.total} publishers rated
+            </span>
+          </div>
+          {bias.total ? (
+            <>
+              <div
+                className="mt-2 flex h-2 overflow-hidden rounded-full bg-[#263247]"
+                aria-label={`Publisher ratings: ${bias.percentages.left}% left, ${bias.percentages.center}% center, ${bias.percentages.right}% right, ${bias.percentages.unrated}% unrated`}
+              >
+                <span
+                  className="bg-[#e65b64]"
+                  style={{ width: `${bias.percentages.left}%` }}
+                />
+                <span
+                  className="bg-[#e7edf4]"
+                  style={{ width: `${bias.percentages.center}%` }}
+                />
+                <span
+                  className="bg-[#4f8ee8]"
+                  style={{ width: `${bias.percentages.right}%` }}
+                />
+                <span
+                  className="bg-[#566277]"
+                  style={{ width: `${bias.percentages.unrated}%` }}
+                />
+              </div>
+              <div className="mt-2 grid grid-cols-2 gap-x-3 gap-y-1 text-[9px] sm:grid-cols-4">
+                <span className="text-[#e8878e]">
+                  Left {bias.percentages.left}%
+                </span>
+                <span className="text-[#d9e0e8] sm:text-center">
+                  Center {bias.percentages.center}%
+                </span>
+                <span className="text-[#78a9ed] sm:text-center">
+                  Right {bias.percentages.right}%
+                </span>
+                <span className="text-right text-[#8491a4]">
+                  Unrated {bias.percentages.unrated}%
+                </span>
+              </div>
+            </>
+          ) : (
+            <p className="mt-2 text-[10px] text-[#77869a]">
+              No displayed publisher has a mapped rating.
+            </p>
+          )}
+          <p className="mt-2 text-[9px] leading-4 text-[#68778a]">
+            Publisher-level lean ratings, not a judgment of any article or
+            event. Unrated publishers remain visible and count toward the
+            percentages. Ratings snapshot reviewed July 26, 2026; labels use
+            Ground News&apos;s U.S.-political reference frame.{" "}
+            <a
+              href="https://ground.news/rating-system"
+              target="_blank"
+              rel="noreferrer"
+              className="text-[#8fcfc4] hover:underline"
             >
-              <span
-                className="bg-[#e65b64]"
-                style={{ width: `${bias.percentages.left}%` }}
-              />
-              <span
-                className="bg-[#e7edf4]"
-                style={{ width: `${bias.percentages.center}%` }}
-              />
-              <span
-                className="bg-[#4f8ee8]"
-                style={{ width: `${bias.percentages.right}%` }}
-              />
-            </div>
-            <div className="mt-2 grid grid-cols-3 text-[9px]">
-              <span className="text-[#e8878e]">
-                Left {bias.percentages.left}%
-              </span>
-              <span className="text-center text-[#d9e0e8]">
-                Center {bias.percentages.center}%
-              </span>
-              <span className="text-right text-[#78a9ed]">
-                Right {bias.percentages.right}%
-              </span>
-            </div>
-          </>
-        ) : (
-          <p className="mt-2 text-[10px] text-[#77869a]">
-            No displayed publisher has a mapped rating.
+              Ground News methodology ↗
+            </a>
           </p>
-        )}
-        <p className="mt-2 text-[9px] leading-4 text-[#68778a]">
-          Publication-level ratings, not a rating of this event. Unrated local
-          outlets are excluded. Labels use Ground News&apos;s U.S.-political
-          reference frame. When available, the five displayed sources include
-          at least one left-rated and one right-rated publisher, then favor
-          center-rated publishers before prominence and recency.{" "}
-          <a
-            href="https://ground.news/rating-system"
-            target="_blank"
-            rel="noreferrer"
-            className="text-[#8fcfc4] hover:underline"
-          >
-            Ground News methodology ↗
-          </a>
-        </p>
-      </div>
+        </div>
+      ) : null}
       <button
         type="button"
         className="mt-4 flex w-full items-center justify-between rounded-lg bg-[#182234] px-3 py-2.5 text-left text-xs font-medium text-[#d9e0e9] transition hover:bg-[#1d2a3e]"
