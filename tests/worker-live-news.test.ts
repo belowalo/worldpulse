@@ -222,7 +222,21 @@ describe("worker live-news providers", () => {
     ).toBe(false);
     expect(
       articleMatchesCountry(
-        { searchableText: "Jordan expands trade with West Bank markets" },
+        { searchableText: "Air Jordan 4 gets a military-inspired palette" },
+        countrySearchTerms("Jordan"),
+        "Jordan",
+      ),
+    ).toBe(false);
+    expect(
+      articleMatchesCountry(
+        { searchableText: "Kerry Jordan named city election department director" },
+        countrySearchTerms("Jordan"),
+        "Jordan",
+      ),
+    ).toBe(false);
+    expect(
+      articleMatchesCountry(
+        { searchableText: "Trade seminar reinforces commitment to Jordan and West Bank markets" },
         countrySearchTerms("Jordan"),
         "Jordan",
       ),

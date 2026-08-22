@@ -312,9 +312,19 @@ export function textMatchesCountryName(text: string, countryName: string) {
 
   if (canonicalName === "Jordan") {
     const hasJordanCountryContext =
-      /\b(?:Jordanian|Amman|West Bank|Israel(?:i)?|Palestin(?:e|ian)|Syria(?:n)?|Iraq(?:i)?|Saudi|Middle East|King|Queen|Royal|government|minister|parliament|army|military|border|refugee|diplomat(?:ic)?|embassy|ambassador|trade|market|aid|World Bank|dinar|election)\b/iu.test(
+      /\b(?:Jordanian|Amman)\b/iu.test(text) ||
+      /\bJordan(?:'s|’s)?\s+(?:king|queen|prince|royal|government|minister|parliament|army|military|border|refugees?|economy|economic|dinar|election|embassy|ambassador)\b/iu.test(
         text,
-      ) || /\bJordan(?:'s|’s)?\s+(?:economy|economic)\b/iu.test(text);
+      ) ||
+      /\b(?:king|queen|prince|government|minister|embassy|ambassador)\b.{0,40}\b(?:of|in|from|to)\s+Jordan\b/iu.test(
+        text,
+      ) ||
+      /\b(?:to|from|in|across|throughout|between)\s+Jordan\b(?!\s+Valley)/iu.test(
+        text,
+      ) ||
+      /\bJordan\s+(?:and|with|against)\s+(?:the\s+)?(?:West Bank|Israel|Palestine|Syria|Iraq|Saudi Arabia)\b/iu.test(
+        text,
+      );
     if (!hasJordanCountryContext) return false;
   }
 
