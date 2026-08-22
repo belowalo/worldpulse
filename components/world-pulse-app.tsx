@@ -1455,11 +1455,10 @@ function WorldLoadingScreen({
             <div className="loading-orbit__path" />
             <div className="loading-orbit__moon-carrier">
               <div className="loading-orbit__moon" />
+              <div className="loading-orbit__satellite" />
             </div>
             <div className="loading-orbit__globe">
               <div className="loading-orbit__surface" />
-              <div className="loading-orbit__longitude" />
-              <div className="loading-orbit__latitude" />
             </div>
           </div>
           <div>

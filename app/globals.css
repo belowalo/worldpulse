@@ -391,7 +391,7 @@ select:focus-visible {
 
 .loading-orbit__moon {
   position: absolute;
-  top: -0.65rem;
+  top: 0;
   left: 50%;
   width: 1.3rem;
   height: 1.3rem;
@@ -406,6 +406,49 @@ select:focus-visible {
     inset -0.28rem -0.25rem 0.42rem rgba(26, 34, 41, 0.58),
     0 0 14px rgba(210, 230, 236, 0.34);
   transform: translate(-50%, -50%);
+}
+
+.loading-orbit__satellite {
+  position: absolute;
+  bottom: 0;
+  left: 50%;
+  z-index: 1;
+  width: 0.72rem;
+  height: 0.52rem;
+  border: 1px solid rgba(226, 239, 246, 0.82);
+  border-radius: 0.12rem;
+  background: linear-gradient(135deg, #e8f1f4, #71828d 70%);
+  box-shadow: 0 0 11px rgba(143, 198, 226, 0.42);
+  transform: translate(-50%, 50%) rotate(10deg);
+}
+
+.loading-orbit__satellite::before {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  z-index: -1;
+  width: 2.35rem;
+  height: 0.38rem;
+  border: 1px solid rgba(99, 167, 214, 0.85);
+  background:
+    repeating-linear-gradient(90deg, transparent 0 0.24rem, rgba(129, 198, 239, 0.68) 0.25rem 0.29rem),
+    linear-gradient(180deg, #235886, #102c51);
+  box-shadow: 0 0 8px rgba(69, 153, 216, 0.36);
+  content: "";
+  transform: translate(-50%, -50%);
+}
+
+.loading-orbit__satellite::after {
+  position: absolute;
+  top: -0.48rem;
+  left: 50%;
+  width: 0.56rem;
+  height: 0.4rem;
+  border: 1px solid rgba(226, 239, 246, 0.72);
+  border-bottom: 0;
+  border-radius: 0.56rem 0.56rem 0 0;
+  content: "";
+  transform: translateX(-50%);
 }
 
 .loading-orbit__globe {
@@ -438,35 +481,12 @@ select:focus-visible {
 .loading-orbit__surface {
   position: absolute;
   inset: -1px;
-  background-image:
-    radial-gradient(ellipse at 16% 34%, rgba(96, 178, 128, 0.88) 0 8%, transparent 9%),
-    radial-gradient(ellipse at 28% 48%, rgba(71, 151, 112, 0.84) 0 12%, transparent 13%),
-    radial-gradient(ellipse at 45% 27%, rgba(107, 184, 131, 0.78) 0 7%, transparent 8%),
-    radial-gradient(ellipse at 67% 54%, rgba(74, 155, 116, 0.86) 0 13%, transparent 14%),
-    radial-gradient(ellipse at 84% 36%, rgba(102, 179, 127, 0.8) 0 9%, transparent 10%),
-    radial-gradient(circle at 50% 50%, rgba(31, 107, 145, 0.72), #081c2c 72%);
-  background-position: 0 0;
+  background-image: url("/earth-blue-marble.jpg");
+  background-position: 0 50%;
   background-repeat: repeat-x;
-  background-size: 7.7rem 7.7rem;
-  animation: loading-earth-spin 8.5s linear infinite;
-}
-
-.loading-orbit__longitude,
-.loading-orbit__latitude {
-  position: absolute;
-  inset: 8%;
-  border: 1px solid rgba(115, 226, 204, 0.25);
-  border-radius: 50%;
-}
-
-.loading-orbit__longitude {
-  left: 32%;
-  right: 32%;
-}
-
-.loading-orbit__latitude {
-  top: 36%;
-  bottom: 36%;
+  background-size: 16.4rem 8.2rem;
+  filter: saturate(1.12) contrast(1.06) brightness(0.96);
+  animation: loading-earth-spin 9s linear infinite;
 }
 
 @keyframes loading-moon-orbit {
@@ -477,7 +497,7 @@ select:focus-visible {
 
 @keyframes loading-earth-spin {
   to {
-    background-position: 7.7rem 0;
+    background-position: -16.4rem 50%;
   }
 }
 
