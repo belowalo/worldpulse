@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("vinext/server/app-router-entry", () => ({
   default: { fetch: vi.fn() },
@@ -10,47 +10,11 @@ vi.mock("vinext/server/image-optimization", () => ({
   handleImageOptimization: vi.fn(),
 }));
 
-import worker, {
-  allCountryRefreshJobs,
-  countryRefreshJobsForMinute,
-} from "../worker/index";
+import worker from "../worker/index";
 
 describe("live world delivery", () => {
-  it("covers every mapped country in bounded bootstrap jobs", () => {
-    const jobs = allCountryRefreshJobs(
-      new Date("2026-08-21T20:00:00.000Z"),
-    );
-    const countryNames = jobs.flatMap((job) => job.countries);
-
-    expect(jobs).toHaveLength(43);
-    expect(countryNames).toHaveLength(215);
-    expect(new Set(countryNames).size).toBe(215);
-    expect(jobs.every((job) => job.countries.length <= 5)).toBe(true);
-  });
-
-  it("schedules two bounded server-side country jobs per minute", () => {
-    const jobs = countryRefreshJobsForMinute(
-      new Date("2026-08-21T20:00:00.000Z"),
-    );
-
-    expect(jobs).toHaveLength(2);
-    expect(jobs.every((job) => job.countries.length <= 5)).toBe(true);
-    expect(new Set(jobs.flatMap((job) => job.countries)).size).toBe(
-      jobs.flatMap((job) => job.countries).length,
-    );
-  });
-
-  it("advances to different country jobs on the next minute", () => {
-    const first = countryRefreshJobsForMinute(
-      new Date("2026-08-21T20:00:00.000Z"),
-    );
-    const second = countryRefreshJobsForMinute(
-      new Date("2026-08-21T20:01:00.000Z"),
-    );
-
-    expect(second.flatMap((job) => job.countries)).not.toEqual(
-      first.flatMap((job) => job.countries),
-    );
+  afterEach(() => {
+    vi.unstubAllGlobals();
   });
 
   it("rejects the removed prepared snapshot endpoint", async () => {
@@ -64,5 +28,37 @@ describe("live world delivery", () => {
     await expect(response.json()).resolves.toEqual({
       error: "Snapshot endpoints have been removed. Use scope=world-live.",
     });
+  });
+
+  it("proxies the prepared live response from the continuous Oracle server", async () => {
+    const upstream = {
+      scope: "world-live",
+      generatedAt: "2026-08-22T00:00:00.000Z",
+      refreshAfterSeconds: 60,
+      provider: "WorldPulse continuous Oracle country index",
+      global: { scope: "global", articles: [] },
+      countries: [],
+    };
+    const fetchMock = vi.fn(async () => Response.json(upstream));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const response = await worker.fetch(
+      new Request("https://worldpulse.test/api/live-news?scope=world-live"),
+      { WORLD_PULSE_ORIGIN: "http://140.238.147.141" } as never,
+      { waitUntil: vi.fn(), passThroughOnException: vi.fn() },
+    );
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("X-WorldPulse-Source")).toBe(
+      "continuous-oracle-server",
+    );
+    expect(fetchMock).toHaveBeenCalledOnce();
+    expect(fetchMock).toHaveBeenCalledWith(
+      new URL("http://140.238.147.141/api/live-news?scope=world-live"),
+      expect.objectContaining({
+        headers: { Accept: "application/json" },
+      }),
+    );
+    await expect(response.json()).resolves.toEqual(upstream);
   });
 });

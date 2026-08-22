@@ -399,6 +399,37 @@ function handleRequest(
     sendJson(response, 200, worldPayloadJson(runtime), "public, max-age=30, must-revalidate");
     return;
   }
+  if (url.pathname === "/api/diagnostics/world") {
+    const payload = worldPayloadJson(runtime);
+    const countriesWithNews = runtime.countryNames.filter(
+      (countryName) =>
+        (runtime.state.countries[countryName]?.articles.length ?? 0) > 0,
+    ).length;
+    const diagnostics = {
+      status:
+        progress.ready && countriesWithNews === runtime.countryNames.length
+          ? "healthy"
+          : "degraded",
+      fresh: progress.ready,
+      generatedAt: runtime.state.updatedAt,
+      snapshotGeneratedAt: runtime.state.updatedAt,
+      snapshotBytes: Buffer.byteLength(payload),
+      totalCountries: runtime.countryNames.length,
+      countriesWithNews,
+      inhabitedCountries: runtime.countryNames.length,
+      inhabitedCountriesWithNews: countriesWithNews,
+      missingInhabitedCountries: runtime.countryNames.filter(
+        (countryName) =>
+          !(runtime.state.countries[countryName]?.articles.length ?? 0),
+      ),
+      expectedEmptyCountries: [],
+      globalEventCount: runtime.state.global?.articles.length ?? 0,
+      providerHealth: runtime.state.global?.providers ?? [],
+      bootstrap: progress,
+    };
+    sendJson(response, 200, JSON.stringify(diagnostics));
+    return;
+  }
   sendJson(response, 404, JSON.stringify({ error: "Not found." }));
 }
 
