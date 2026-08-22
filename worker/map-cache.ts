@@ -65,6 +65,48 @@ function mergeCountryArticles(
     .slice(0, MAX_ARTICLES_PER_COUNTRY);
 }
 
+export function mergeMapCountryPayloads(
+  countryNames: string[],
+  ...sources: MapNewsCountryPayload[][]
+) {
+  const merged = new Map<string, MapNewsCountryPayload>();
+  for (const source of sources) {
+    for (const country of source) {
+      const existing = merged.get(country.countryName);
+      if (!existing) {
+        merged.set(country.countryName, country);
+        continue;
+      }
+      const existingTimestamp = Date.parse(existing.generatedAt);
+      const countryTimestamp = Date.parse(country.generatedAt);
+      const newest =
+        Number.isFinite(countryTimestamp) &&
+        (!Number.isFinite(existingTimestamp) ||
+          countryTimestamp > existingTimestamp)
+          ? country
+          : existing;
+      const articles = mergeCountryArticles(
+        newest.articles,
+        newest === country ? existing.articles : country.articles,
+      );
+      merged.set(country.countryName, {
+        ...newest,
+        available: articles.length > 0,
+        articles,
+      });
+    }
+  }
+  return countryNames.map(
+    (countryName): MapNewsCountryPayload =>
+      merged.get(countryName) ?? {
+        countryName,
+        generatedAt: "1970-01-01T00:00:00.000Z",
+        available: false,
+        articles: [],
+      },
+  );
+}
+
 /**
  * Consolidates the newest durable map-cache rows into one last-known-good
  * country directory. Stored rows are ordered newest-first by the database.
@@ -130,7 +172,7 @@ export function collectStoredMapCountries(
 
 /**
  * Converts durable country-request rows into the same shape as map results so
- * successful deep searches can repair gaps in the complete world snapshot.
+ * successful deep searches can repair gaps in the live country index.
  */
 export function collectStoredCountryCountries(
   storedFeeds: StoredNewsPayload[],

@@ -29,7 +29,7 @@ describe("world diagnostics", () => {
     render(<WorldDiagnostics />);
 
     expect(await screen.findByText("212/212")).toBeInTheDocument();
-    expect(screen.getByText("0.42 MB")).toBeInTheDocument();
+    expect(screen.getByText("Direct D1")).toBeInTheDocument();
     expect(screen.getByText("Africanews")).toBeInTheDocument();
     await userEvent.click(screen.getByRole("button", { name: "Check now" }));
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));

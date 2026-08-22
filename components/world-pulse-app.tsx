@@ -6,22 +6,14 @@ import {
   useMemo,
   useRef,
   useState,
-  useTransition,
   type ComponentType,
   type ReactNode,
 } from "react";
 import {
-  buildLiveEvents,
-  enrichEventWithCoverage,
   eventsDescribeSameOccurrence,
   mergeCanonicalEvents,
   mergeEventFeeds,
 } from "@/lib/live-news";
-import {
-  decodePreparedWorldPayload,
-  isCompletePreparedWorld,
-  isPreparedWorldFresh,
-} from "@/lib/prepared-world";
 import {
   biasDistributionForArticles,
   publisherBiasRating,
@@ -32,11 +24,8 @@ import {
   CATEGORIES,
   type Category,
   type Event,
-  type LiveNewsPayload,
-  type MapNewsPayload,
+  type LiveWorldNewsPayload,
   type MapCountry,
-  type PreparedWorldNewsPayload,
-  type PreparedWorldNewsWirePayload,
 } from "@/lib/types";
 import {
   countryPulses,
@@ -44,12 +33,8 @@ import {
 } from "@/lib/seed-data";
 import { categoryColor } from "@/lib/scoring";
 import {
-  isPreparedWorldNewsWire,
-  parsePreparedWorldResponseBytes,
-} from "@/lib/snapshot-transport";
-import {
   applyDetectedGeography,
-  prepareWorldSnapshotFeeds,
+  buildLiveWorldView,
 } from "@/lib/world-snapshot";
 import {
   loadWorldGeometry,
@@ -68,14 +53,6 @@ interface FeedState {
   error: string | null;
 }
 
-interface CoverageState {
-  event?: Event;
-  payload?: LiveNewsPayload;
-  fetchedAt?: number;
-  loading: boolean;
-  error: string | null;
-}
-
 const EMPTY_FEED: FeedState = {
   events: [],
   updatedAt: null,
@@ -84,200 +61,40 @@ const EMPTY_FEED: FeedState = {
   error: null,
 };
 
-function newestFeedStoryTimestamp(feed?: FeedState) {
-  return Math.max(
-    Number.NEGATIVE_INFINITY,
-    ...(feed?.events ?? []).map((event) => {
-      const timestamp = Date.parse(event.lastUpdatedAt);
-      return Number.isFinite(timestamp)
-        ? timestamp
-        : Number.NEGATIVE_INFINITY;
-    }),
-  );
-}
-
-function mergeLiveFeed(current: FeedState | undefined, incoming: FeedState) {
-  if (!current) return incoming;
-  const incomingIsNewer =
-    newestFeedStoryTimestamp(incoming) > newestFeedStoryTimestamp(current);
-  const preferred = incomingIsNewer ? incoming : current;
-  return {
-    ...preferred,
-    events: mergeEventFeeds(incoming.events, current.events),
-    loading: false,
-    error: null,
-  };
-}
-
-function mergeLiveFeedRecords(
-  current: Record<string, FeedState>,
-  incoming: Record<string, FeedState>,
+function mergeLiveFeedMaps(
+  latestFeeds: Record<string, FeedState>,
+  currentFeeds: Record<string, FeedState>,
+  countryNames: string[],
 ) {
-  const merged = { ...current };
-  for (const [countryName, feed] of Object.entries(incoming)) {
-    merged[countryName] = mergeLiveFeed(current[countryName], feed);
-  }
-  return merged;
+  return Object.fromEntries(
+    countryNames.flatMap((countryName) => {
+      const latest = latestFeeds[countryName];
+      const current = currentFeeds[countryName];
+      if (!latest && !current) return [];
+      const latestAt = Date.parse(latest?.updatedAt ?? "");
+      const currentAt = Date.parse(current?.updatedAt ?? "");
+      const latestIsNewer =
+        !current ||
+        (Number.isFinite(latestAt) &&
+          (!Number.isFinite(currentAt) || latestAt >= currentAt));
+      const newest = latestIsNewer ? latest : current;
+      const older = latestIsNewer ? current : latest;
+      return [[countryName, {
+        ...(newest ?? older ?? EMPTY_FEED),
+        events: mergeEventFeeds(
+          newest?.events ?? [],
+          older?.events ?? [],
+        ),
+        loading: false,
+        error: null,
+      } satisfies FeedState]];
+    }),
+  ) as Record<string, FeedState>;
 }
 
 const INITIAL_VISIBLE_EVENT_LIMIT = 40;
-const LIVE_REQUEST_TIMEOUT_MS = 30_000;
-const WORLD_BATCH_REQUEST_TIMEOUT_MS = 60_000;
-const WORLD_BATCH_SIZE = 12;
-const WORLD_BATCH_CONCURRENCY = 6;
-let worldSnapshotPromise: Promise<MapNewsPayload> | null = null;
-let worldSnapshotFetchIdentity: typeof fetch | null = null;
-let preparedWorldPromise: Promise<PreparedWorldNewsPayload> | null = null;
-let preparedWorldFetchIdentity: typeof fetch | null = null;
-
-async function decodePreparedWorldResponse(
-  responseBytes: Uint8Array,
-): Promise<PreparedWorldNewsPayload> {
-  if (typeof Worker === "undefined") {
-    const responsePayload = await parsePreparedWorldResponseBytes(responseBytes);
-    return decodePreparedWorldPayload(
-      isPreparedWorldNewsWire(responsePayload)
-        ? responsePayload
-        : (responsePayload as PreparedWorldNewsPayload),
-    );
-  }
-  const transferable = responseBytes.slice().buffer;
-  return new Promise((resolve, reject) => {
-    const snapshotWorker = new Worker(
-      new URL("../lib/prepared-world.worker.ts", import.meta.url),
-      { type: "module" },
-    );
-    const timeout = window.setTimeout(() => {
-      snapshotWorker.terminate();
-      reject(new Error("Prepared world decoding timed out."));
-    }, WORLD_BATCH_REQUEST_TIMEOUT_MS);
-    snapshotWorker.onmessage = (
-      event: MessageEvent<
-        | { ok: true; payload: PreparedWorldNewsPayload }
-        | { ok: false; message: string }
-      >,
-    ) => {
-      window.clearTimeout(timeout);
-      snapshotWorker.terminate();
-      if (event.data.ok) resolve(event.data.payload);
-      else reject(new Error(event.data.message));
-    };
-    snapshotWorker.onerror = () => {
-      window.clearTimeout(timeout);
-      snapshotWorker.terminate();
-      reject(new Error("Prepared world decoding failed."));
-    };
-    snapshotWorker.postMessage(transferable, [transferable]);
-  });
-}
-
-function loadPreparedWorld({ fresh = false }: { fresh?: boolean } = {}) {
-  if (preparedWorldFetchIdentity !== fetch) {
-    preparedWorldPromise = null;
-    preparedWorldFetchIdentity = fetch;
-  }
-  if (fresh) preparedWorldPromise = null;
-  const supportsCompressedSnapshots =
-    typeof globalThis.DecompressionStream !== "undefined";
-  const preparedWorldUrl = supportsCompressedSnapshots
-    ? "/api/live-news?scope=prepared-world"
-    : "/api/live-news?scope=prepared-world&plain=1";
-  preparedWorldPromise ??= fetch(preparedWorldUrl, {
-    signal: AbortSignal.timeout(WORLD_BATCH_REQUEST_TIMEOUT_MS),
-  }).then(async (response) => {
-    if (!response.ok) {
-      throw new Error("The minute world state is unavailable.");
-    }
-    const responseBytes = new Uint8Array(await response.arrayBuffer());
-    const responsePayload = await parsePreparedWorldResponseBytes(responseBytes);
-    return decodePreparedWorldPayload(
-      isPreparedWorldNewsWire(responsePayload)
-        ? responsePayload
-        : (responsePayload as PreparedWorldNewsPayload),
-    );
-  }).catch((error) => {
-    preparedWorldPromise = null;
-    throw error;
-  });
-  return preparedWorldPromise;
-}
-
-function loadWorldSnapshot() {
-  if (worldSnapshotFetchIdentity !== fetch) {
-    worldSnapshotPromise = null;
-    worldSnapshotFetchIdentity = fetch;
-  }
-  worldSnapshotPromise ??= fetch("/api/live-news?scope=snapshot", {
-    signal: AbortSignal.timeout(WORLD_BATCH_REQUEST_TIMEOUT_MS),
-  }).then(async (response) => {
-    if (!response.ok) {
-      throw new Error("The prepared world snapshot is unavailable.");
-    }
-    return (await response.json()) as MapNewsPayload;
-  });
-  return worldSnapshotPromise;
-}
-
-function prepareWorldSnapshotOffThread(
-  payloads: MapNewsPayload["countries"],
-  countries: MapCountry[],
-): Promise<Record<string, FeedState>> {
-  if (typeof Worker === "undefined") {
-    return Promise.resolve(prepareWorldSnapshotFeeds(payloads, countries));
-  }
-  return new Promise((resolve, reject) => {
-    const snapshotWorker = new Worker(
-      new URL("../lib/world-snapshot.worker.ts", import.meta.url),
-      { type: "module" },
-    );
-    const timeout = window.setTimeout(() => {
-      snapshotWorker.terminate();
-      reject(new Error("Prepared world processing timed out."));
-    }, WORLD_BATCH_REQUEST_TIMEOUT_MS);
-    snapshotWorker.onmessage = (
-      event: MessageEvent<Record<string, FeedState>>,
-    ) => {
-      window.clearTimeout(timeout);
-      snapshotWorker.terminate();
-      resolve(event.data);
-    };
-    snapshotWorker.onerror = () => {
-      window.clearTimeout(timeout);
-      snapshotWorker.terminate();
-      reject(new Error("Prepared world processing failed."));
-    };
-    snapshotWorker.postMessage({ payloads, countries });
-  });
-}
-
-function chunkItems<T>(items: T[], size: number) {
-  const chunks: T[][] = [];
-  for (let index = 0; index < items.length; index += size) {
-    chunks.push(items.slice(index, index + size));
-  }
-  return chunks;
-}
-
-function coverageIsFresh(coverage?: CoverageState) {
-  if (!coverage?.payload || !coverage.fetchedAt) return false;
-  const lifetime =
-    Math.max(300, coverage.payload.refreshAfterSeconds) * 1_000;
-  return Date.now() - coverage.fetchedAt < lifetime;
-}
-
-function coverageForEvent(
-  event: Event,
-  coverageById: Record<string, CoverageState>,
-) {
-  return (
-    coverageById[event.id] ??
-    Object.values(coverageById).find(
-      (coverage) =>
-        coverage.event &&
-        eventsDescribeSameOccurrence(coverage.event, event),
-    )
-  );
-}
+const STARTUP_MAX_WAIT_MS = 10_000;
+const SNAPSHOT_REQUEST_TIMEOUT_MS = 8_500;
 
 const countryMetadata = countryPulses.map(
   (country): MapCountry => ({
@@ -316,24 +133,15 @@ function EventCard({
   event,
   hasConnections,
   connectionFocused,
-  coverageLoading,
-  coverageError,
-  coverageExpanded,
   onActivate,
-  onVisible,
 }: {
   event: Event;
   hasConnections: boolean;
   connectionFocused: boolean;
-  coverageLoading: boolean;
-  coverageError: string | null;
-  coverageExpanded: boolean;
   onActivate: () => void;
-  onVisible: () => void;
 }) {
   const [expanded, setExpanded] = useState(false);
   const [showOriginal, setShowOriginal] = useState(false);
-  const cardRef = useRef<HTMLElement | null>(null);
   const bias = biasDistributionForArticles(event.articles);
   const hasFullBiasRange =
     bias.left > 0 && bias.center > 0 && bias.right > 0;
@@ -349,26 +157,8 @@ function EventCard({
       ? event.originalSummary
       : event.summary;
 
-  useEffect(() => {
-    if (coverageExpanded || coverageLoading || coverageError) return;
-    const card = cardRef.current;
-    if (!card || typeof IntersectionObserver === "undefined") return;
-    const observer = new IntersectionObserver(
-      (entries) => {
-        if (entries.some((entry) => entry.isIntersecting)) {
-          onVisible();
-          observer.disconnect();
-        }
-      },
-      { rootMargin: "120px 0px" },
-    );
-    observer.observe(card);
-    return () => observer.disconnect();
-  }, [coverageError, coverageExpanded, coverageLoading, onVisible]);
-
   return (
     <article
-      ref={cardRef}
       className={`cursor-pointer border-b border-[#273246] py-5 transition first:pt-0 last:border-0 ${
         connectionFocused
           ? "-mx-3 rounded-xl border border-[#3c6d70] bg-[#13262c] px-3"
@@ -417,11 +207,6 @@ function EventCard({
                 ? `Original · ${event.originalLanguage.toUpperCase()}`
                 : "Original"}
           </button>
-        ) : null}
-        {coverageLoading ? (
-          <span className="font-mono text-[8px] uppercase tracking-[0.12em] text-[#73e2cc]">
-            Finding coverage…
-          </span>
         ) : null}
       </div>
       <h3
@@ -567,16 +352,6 @@ function EventCard({
           </a>
         </p>
       </div>
-      {coverageError ? (
-        <p className="mt-3 text-[10px] text-[#d58a96]">
-          {coverageError} Select the card to retry.
-        </p>
-      ) : !coverageExpanded && !coverageLoading ? (
-        <p className="mt-3 text-[10px] text-[#7f8da1]">
-          Broader source coverage loads automatically when this event becomes
-          visible.
-        </p>
-      ) : null}
       <button
         type="button"
         className="mt-4 flex w-full items-center justify-between rounded-lg bg-[#182234] px-3 py-2.5 text-left text-xs font-medium text-[#d9e0e9] transition hover:bg-[#1d2a3e]"
@@ -1537,18 +1312,7 @@ function BreakingNewsBar({ events }: { events: Event[] }) {
 interface WorldPulseAppProps {
   MapComponent?: ComponentType<WorldMapProps>;
   liveUpdates?: boolean;
-  initialWorld?: PreparedWorldNewsPayload | PreparedWorldNewsWirePayload;
-  initialWorldCompressed?: string;
-  initialWorldUrl?: string;
-}
-
-function decodeBase64Bytes(value: string) {
-  const binary = atob(value);
-  const bytes = new Uint8Array(binary.length);
-  for (let index = 0; index < binary.length; index += 1) {
-    bytes[index] = binary.charCodeAt(index);
-  }
-  return bytes;
+  liveWorldUrl?: string;
 }
 
 function WorldLoadingScreen({
@@ -1700,30 +1464,50 @@ function WorldLoadingScreen({
   );
 }
 
+function WorldStartupError() {
+  return (
+    <main
+      className="fixed inset-0 z-[100] grid min-h-screen place-items-center bg-[#040810] px-6 text-center"
+      data-worldpulse-startup-error="true"
+    >
+      <section className="max-w-lg rounded-2xl border border-[#5b3641] bg-[#0b111c] p-8 shadow-2xl">
+        <p className="font-mono text-[9px] uppercase tracking-[0.24em] text-[#d87582]">
+          WorldPulse
+        </p>
+        <h1 className="mt-3 text-2xl font-semibold text-white">
+          The live world feed is unavailable
+        </h1>
+        <p className="mt-3 text-sm leading-6 text-[#9aa8ba]">
+          WorldPulse stopped waiting after ten seconds. Reload to reconnect to
+          the current server feed.
+        </p>
+        <button
+          type="button"
+          onClick={() => window.location.reload()}
+          className="mt-6 rounded-lg border border-[#54706f] bg-[#132522] px-4 py-2 text-xs font-medium text-[#d9fff7] hover:border-[#73e2cc]"
+        >
+          Reload live feed
+        </button>
+      </section>
+    </main>
+  );
+}
+
 export function WorldPulseApp({
   MapComponent = WorldMap,
   liveUpdates = true,
-  initialWorld: initialWorldPayload,
-  initialWorldCompressed,
-  initialWorldUrl,
+  liveWorldUrl = "/api/live-news?scope=world-live",
 }: WorldPulseAppProps = {}) {
-  const decodedInitialWorld = useMemo(
-    () =>
-      initialWorldPayload
-        ? decodePreparedWorldPayload(initialWorldPayload)
-        : undefined,
-    [initialWorldPayload],
-  );
-  const [initialWorld, setInitialWorld] = useState(decodedInitialWorld);
-  const hasServerWorldPayload = Boolean(
-    initialWorldPayload || initialWorldCompressed || initialWorldUrl,
-  );
+  const [initialWorld, setInitialWorld] =
+    useState<ReturnType<typeof buildLiveWorldView>>();
   const [initialWorldDecodeFailed, setInitialWorldDecodeFailed] =
     useState(false);
+  const [startupTimedOut, setStartupTimedOut] = useState(false);
   const [selectedCountry, setSelectedCountry] =
     useState<MapCountry>(initialCountry);
   const [countryDirectory, setCountryDirectory] =
     useState<MapCountry[]>(countryMetadata);
+  const [countryDirectoryReady, setCountryDirectoryReady] = useState(false);
   const [globalFeed, setGlobalFeed] = useState<FeedState>(
     initialWorld?.globalFeed ?? EMPTY_FEED,
   );
@@ -1736,7 +1520,6 @@ export function WorldPulseApp({
   const [countrySignalFeeds, setCountrySignalFeeds] = useState<
     Record<string, FeedState>
   >(initialWorld?.countryFeeds ?? {});
-  const [countryDirectoryReady, setCountryDirectoryReady] = useState(false);
   const [worldScanSettled, setWorldScanSettled] = useState(
     !liveUpdates || Boolean(initialWorld),
   );
@@ -1765,155 +1548,65 @@ export function WorldPulseApp({
   const [visibleEventLimit, setVisibleEventLimit] = useState(
     INITIAL_VISIBLE_EVENT_LIMIT,
   );
-  const [eventCoverage, setEventCoverage] = useState<
-    Record<string, CoverageState>
-  >({});
-  const coverageRequests = useRef(new Set<string>());
-  const activeCoverageRequests = useRef(0);
-  const coverageGeneration = useRef(0);
-  const countryRefreshes = useRef(
-    new Map<string, Promise<boolean>>(),
-  );
-  const [isSwitchingCountry, startCountryTransition] = useTransition();
 
   useEffect(() => {
-    if (!initialWorldCompressed && !initialWorldUrl) return;
+    if (!liveUpdates || !countryDirectoryReady) {
+      return;
+    }
     let cancelled = false;
-    const decodeServerWorld = async () => {
+    let loaded = false;
+    const controller = new AbortController();
+    const loadLiveWorld = async () => {
       try {
-        let responseBytes: Uint8Array;
-        if (initialWorldCompressed) {
-          responseBytes = decodeBase64Bytes(initialWorldCompressed);
-        } else {
-          const response = await fetch(initialWorldUrl as string, {
-            signal: AbortSignal.timeout(WORLD_BATCH_REQUEST_TIMEOUT_MS),
-          });
-          if (!response.ok) {
-            throw new Error("The complete server world state is unavailable.");
-          }
-          responseBytes = new Uint8Array(await response.arrayBuffer());
+        const response = await fetch(liveWorldUrl, {
+          cache: "no-store",
+          signal: AbortSignal.any([
+            controller.signal,
+            AbortSignal.timeout(SNAPSHOT_REQUEST_TIMEOUT_MS),
+          ]),
+        });
+        if (!response.ok) throw new Error("The live world feed is unavailable.");
+        const live = (await response.json()) as LiveWorldNewsPayload;
+        if (live.scope !== "world-live" || !Array.isArray(live.countries)) {
+          throw new Error("The live world feed is invalid.");
         }
-        const prepared = await decodePreparedWorldResponse(responseBytes);
-        if (!cancelled) setInitialWorld(prepared);
+        const world = buildLiveWorldView(
+          live.global,
+          live.countries,
+          countryDirectory,
+          live.generatedAt,
+        );
+        if (!cancelled) {
+          loaded = true;
+          setInitialWorld(world);
+          setInitialWorldDecodeFailed(false);
+        }
       } catch {
-        if (!cancelled) setInitialWorldDecodeFailed(true);
+        if (!cancelled && !loaded) setInitialWorldDecodeFailed(true);
       }
     };
-    void decodeServerWorld();
+    void loadLiveWorld();
+    const interval = window.setInterval(loadLiveWorld, 60_000);
     return () => {
       cancelled = true;
+      controller.abort();
+      window.clearInterval(interval);
     };
-  }, [initialWorldCompressed, initialWorldUrl]);
-
-  const fetchGlobalNews = useCallback(async (forceFresh = false) => {
-    setGlobalFeed((current) => ({
-      ...current,
-      loading: current.events.length === 0,
-      error: null,
-    }));
-    try {
-      const response = await fetch(
-        `/api/live-news?scope=global${forceFresh ? "&fresh=1" : ""}`,
-        {
-        signal: AbortSignal.timeout(LIVE_REQUEST_TIMEOUT_MS),
-        },
-      );
-      if (!response.ok) throw new Error("The global live feed is temporarily unavailable.");
-      const payload = (await response.json()) as LiveNewsPayload;
-      const freshFeed: FeedState = {
-        events: buildLiveEvents(payload, null),
-        updatedAt: payload.generatedAt,
-        provider: payload.provider,
-        loading: false,
-        error: null,
-      };
-      setGlobalFeed((current) => mergeLiveFeed(current, freshFeed));
-      return true;
-    } catch (error) {
-      setGlobalFeed((current) => ({
-        ...current,
-        loading: false,
-        error:
-          error instanceof Error
-            ? error.message
-            : "The global live feed is temporarily unavailable.",
-      }));
-      return false;
-    } finally {
-      setGlobalFeedReady(true);
-    }
-  }, []);
-
-  const refreshCountryNews = useCallback(
-    (country: MapCountry, forceFresh = true) => {
-      const existing = countryRefreshes.current.get(country.name);
-      if (existing) return existing;
-      const request = (async () => {
-        try {
-          const parameters = new URLSearchParams({
-            scope: "country",
-            country: country.name,
-          });
-          const iso2 = country.iso2 ?? countryCodeForName(country.name);
-          if (iso2) parameters.set("iso2", iso2);
-          if (forceFresh) parameters.set("fresh", "1");
-          const response = await fetch(
-            `/api/live-news?${parameters.toString()}`,
-            { signal: AbortSignal.timeout(LIVE_REQUEST_TIMEOUT_MS) },
-          );
-          if (!response.ok) {
-            throw new Error("The country live feed is temporarily unavailable.");
-          }
-          const payload = (await response.json()) as LiveNewsPayload;
-          const freshFeed = prepareWorldSnapshotFeeds(
-            [{
-              countryName: country.name,
-              generatedAt: payload.generatedAt,
-              available: payload.articles.length > 0,
-              articles: payload.articles,
-            }],
-            countryDirectory,
-          )[country.name] ?? {
-            events: [],
-            updatedAt: payload.generatedAt,
-            provider: payload.provider,
-            loading: false as const,
-            error: null,
-          };
-          const commit = (current: Record<string, FeedState>) => ({
-            ...current,
-            [country.name]: mergeLiveFeed(current[country.name], freshFeed),
-          });
-          setCountryFeeds(commit);
-          setLiveCountryFeeds(commit);
-          setCountrySignalFeeds(commit);
-          return true;
-        } catch {
-          return false;
-        }
-      })().finally(() => {
-        countryRefreshes.current.delete(country.name);
-      });
-      countryRefreshes.current.set(country.name, request);
-      return request;
-    },
-    [countryDirectory],
-  );
-
-  const invalidateCoverage = useCallback(() => {
-    coverageGeneration.current += 1;
-    coverageRequests.current.clear();
-    setEventCoverage({});
-  }, []);
+  }, [
+    countryDirectory,
+    countryDirectoryReady,
+    liveUpdates,
+    liveWorldUrl,
+  ]);
 
   useEffect(() => {
     if (!liveUpdates) return;
-    if (!hasServerWorldPayload) {
-      void loadPreparedWorld().catch(() => {
-        // The legacy fallback remains available outside the server-rendered app.
-      });
-    }
-  }, [MapComponent, hasServerWorldPayload, liveUpdates]);
+    const timeout = window.setTimeout(
+      () => setStartupTimedOut(true),
+      STARTUP_MAX_WAIT_MS,
+    );
+    return () => window.clearTimeout(timeout);
+  }, [liveUpdates]);
 
   useEffect(() => {
     if (!liveUpdates) return;
@@ -1941,7 +1634,7 @@ export function WorldPulseApp({
       if (MapComponent === WorldMap) {
         try {
           const response = await fetch("/api/world-directory", {
-            signal: AbortSignal.timeout(10_000),
+            signal: AbortSignal.timeout(SNAPSHOT_REQUEST_TIMEOUT_MS),
           });
           if (!response.ok) throw new Error("World directory is unavailable.");
           const payload = (await response.json()) as {
@@ -1951,7 +1644,7 @@ export function WorldPulseApp({
           if (!directory.length) throw new Error("World directory is empty.");
           return directory;
         } catch {
-          // Development and tests can fall back to the full local geometry.
+          // The bundled geometry is the same immutable country directory.
         }
       }
       const geojson = (await loadWorldGeometry({
@@ -1976,8 +1669,7 @@ export function WorldPulseApp({
         setCountryDirectoryReady(true);
       })
       .catch(() => {
-        // The map remains fully usable with its own GeoJSON fallback.
-        setCountryDirectoryReady(true);
+        if (!cancelled) setInitialWorldDecodeFailed(true);
       });
     return () => {
       cancelled = true;
@@ -1985,237 +1677,44 @@ export function WorldPulseApp({
   }, [MapComponent, liveUpdates]);
 
   useEffect(() => {
-    if (!liveUpdates || !countryDirectoryReady) return;
-    if (!countryDirectory.length) {
-      setWorldScanSettled(true);
-      return;
-    }
-    if (
-      hasServerWorldPayload &&
-      !initialWorld &&
-      !initialWorldDecodeFailed
-    ) {
-      setWorldScanSettled(false);
-      return;
-    }
-    if (initialWorld) {
-      const countryNames = countryDirectory.map((country) => country.name);
-      if (!isCompletePreparedWorld(initialWorld, countryNames)) {
-        setWorldScanSettled(false);
+    if (!liveUpdates || !countryDirectoryReady || !initialWorld) return;
+    const countryNames = countryDirectory.map((country) => country.name);
+    const complete = countryNames.every(
+      (countryName) => initialWorld.countryFeeds[countryName],
+    );
+    const commit = window.setTimeout(() => {
+      if (!complete) {
+        setInitialWorldDecodeFailed(true);
         return;
       }
       setGlobalFeed(initialWorld.globalFeed);
-      setCountryFeeds(initialWorld.countryFeeds);
-      setLiveCountryFeeds(initialWorld.countryFeeds);
-      setCountrySignalFeeds(initialWorld.countryFeeds);
-      setPreparedCountryCount(countryNames.length);
-      setGlobalFeedReady(true);
-      setWorldScanSettled(true);
-      return;
-    }
-
-    let cancelled = false;
-    setLiveCountryFeeds({});
-    setPreparedCountryCount(0);
-    setWorldScanSettled(false);
-
-    const initializePreparedWorld = async () => {
-      const checkedAt = new Date().toISOString();
-      const neutralFeed = (): FeedState => ({
-        events: [],
-        updatedAt: checkedAt,
-        provider: "WorldPulse",
-        loading: false,
-        error: null,
-      });
-      const requestBatch = async (
-        countryNames: string[],
-        forceFresh = false,
-      ) => {
-        const parameters = new URLSearchParams({
-          scope: "map",
-          countries: countryNames.join("|"),
-        });
-        if (forceFresh) parameters.set("fresh", "1");
-        const response = await fetch(`/api/live-news?${parameters.toString()}`, {
-          signal: AbortSignal.timeout(WORLD_BATCH_REQUEST_TIMEOUT_MS),
-        });
-        if (!response.ok) throw new Error("World news is temporarily unavailable.");
-        return (await response.json()) as MapNewsPayload;
-      };
-      const compileFeeds = (
-        payloads: MapNewsPayload["countries"],
-        countryNames: string[],
-      ) => {
-        const batchFeeds: Record<string, FeedState> = {
-          ...prepareWorldSnapshotFeeds(payloads, countryDirectory),
-        };
-        for (const countryName of countryNames) {
-          batchFeeds[countryName] ??= neutralFeed();
-        }
-        return batchFeeds;
-      };
-      const commitFeeds = (
-        batchFeeds: Record<string, FeedState>,
-        preparedCount: number,
-      ) => {
-        if (cancelled) return;
-        setLiveCountryFeeds((current) => ({
-          ...current,
-          ...batchFeeds,
-        }));
-        setPreparedCountryCount((current) =>
-          Math.min(countryDirectory.length, current + preparedCount),
-        );
-      };
-      const prepareBatch = async (countryNames: string[]) => {
-        let payloads: MapNewsPayload["countries"] = [];
-        try {
-          const first = await requestBatch(countryNames);
-          payloads = first.countries ?? [];
-          const received = new Set(
-            payloads.map((country) => country.countryName),
-          );
-          const missing = countryNames.filter((name) => !received.has(name));
-          if (missing.length) {
-            const retry = await requestBatch(missing, true);
-            payloads = [...payloads, ...(retry.countries ?? [])];
-          }
-        } catch {
-          try {
-            const retry = await requestBatch(countryNames, true);
-            payloads = retry.countries ?? [];
-          } catch {
-            payloads = [];
-          }
-        }
-        commitFeeds(
-          compileFeeds(payloads, countryNames),
-          countryNames.length,
-        );
-      };
-      const allCountryNames = countryDirectory.map((country) => country.name);
-      let missingCountryNames = allCountryNames;
-      try {
-        const prepared = await loadPreparedWorld();
-        if (cancelled) return;
-        setGlobalFeed(prepared.globalFeed);
-        setGlobalFeedReady(true);
-        const receivedNames = allCountryNames.filter(
-          (countryName) => prepared.countryFeeds[countryName],
-        );
-        if (receivedNames.length) {
-          const snapshotFeeds = Object.fromEntries(
-            receivedNames.map((countryName) => [
-              countryName,
-              prepared.countryFeeds[countryName],
-            ]),
-          );
-          commitFeeds(
-            snapshotFeeds,
-            receivedNames.length,
-          );
-        }
-        const received = new Set(receivedNames);
-        missingCountryNames = allCountryNames.filter(
-          (countryName) => !received.has(countryName),
-        );
-      } catch {
-        void fetchGlobalNews();
-        try {
-          const snapshot = await loadWorldSnapshot();
-          const requestedNames = new Set(allCountryNames);
-          const snapshotPayloads = (snapshot.countries ?? []).filter(
-            (country) => requestedNames.has(country.countryName),
-          );
-          const receivedNames = [
-            ...new Set(snapshotPayloads.map((country) => country.countryName)),
-          ];
-          if (receivedNames.length) {
-            const snapshotFeeds = await prepareWorldSnapshotOffThread(
-              snapshotPayloads,
-              countryDirectory,
-            );
-            commitFeeds(snapshotFeeds, receivedNames.length);
-          }
-          const received = new Set(receivedNames);
-          missingCountryNames = allCountryNames.filter(
-            (countryName) => !received.has(countryName),
-          );
-        } catch {
-          // A cold or unavailable snapshot falls back to the bounded live scan.
-        }
-      }
-      const batches = chunkItems(missingCountryNames, WORLD_BATCH_SIZE);
-      let nextBatchIndex = 0;
-      const worker = async () => {
-        while (!cancelled) {
-          const batchIndex = nextBatchIndex;
-          nextBatchIndex += 1;
-          const batch = batches[batchIndex];
-          if (!batch) return;
-          await prepareBatch(batch);
-        }
-      };
-      try {
-        await Promise.all(
-          Array.from(
-            { length: Math.min(WORLD_BATCH_CONCURRENCY, batches.length) },
-            () => worker(),
-          ),
-        );
-      } finally {
-        if (!cancelled) {
-          setPreparedCountryCount(countryDirectory.length);
-          setWorldScanSettled(true);
-        }
-      }
-    };
-
-    void initializePreparedWorld();
-    return () => {
-      cancelled = true;
-    };
-  }, [
-    countryDirectory,
-    countryDirectoryReady,
-    fetchGlobalNews,
-    hasServerWorldPayload,
-    initialWorld,
-    initialWorldDecodeFailed,
-    liveUpdates,
-  ]);
-
-  const refreshPreparedWorldFromServer = useCallback(async () => {
-    if (!countryDirectoryReady || !countryDirectory.length) return false;
-    try {
-      const prepared = await loadPreparedWorld({ fresh: true });
-      const countryNames = countryDirectory.map((country) => country.name);
-      if (
-        !isCompletePreparedWorld(prepared, countryNames) ||
-        !isPreparedWorldFresh(prepared)
-      ) {
-        return false;
-      }
-      setGlobalFeed((current) => mergeLiveFeed(current, prepared.globalFeed));
       setCountryFeeds((current) =>
-        mergeLiveFeedRecords(current, prepared.countryFeeds),
+        mergeLiveFeedMaps(
+          initialWorld.countryFeeds,
+          current,
+          countryNames,
+        ),
       );
       setLiveCountryFeeds((current) =>
-        mergeLiveFeedRecords(current, prepared.countryFeeds),
+        mergeLiveFeedMaps(
+          initialWorld.countryFeeds,
+          current,
+          countryNames,
+        ),
       );
       setCountrySignalFeeds((current) =>
-        mergeLiveFeedRecords(current, prepared.countryFeeds),
+        mergeLiveFeedMaps(
+          initialWorld.countryFeeds,
+          current,
+          countryNames,
+        ),
       );
       setPreparedCountryCount(countryNames.length);
       setGlobalFeedReady(true);
       setWorldScanSettled(true);
-      invalidateCoverage();
-      return true;
-    } catch {
-      return false;
-    }
-  }, [countryDirectory, countryDirectoryReady, invalidateCoverage]);
+    }, 0);
+    return () => window.clearTimeout(commit);
+  }, [countryDirectory, countryDirectoryReady, initialWorld, liveUpdates]);
 
   const mapCountries = useMemo(
     () =>
@@ -2256,123 +1755,6 @@ export function WorldPulseApp({
   const activeCountry =
     mapCountries.find((country) => country.mapId === selectedCountry.mapId) ??
     selectedCountry;
-
-  useEffect(() => {
-    if (
-      !liveUpdates ||
-      !initialWorldUrl ||
-      !initialWorld ||
-      !countryDirectoryReady
-    ) {
-      return;
-    }
-    const synchronize = () => {
-      void Promise.allSettled([
-        fetchGlobalNews(true),
-        refreshCountryNews(selectedCountry, true),
-      ]);
-      void refreshPreparedWorldFromServer();
-    };
-    const refreshTimer = window.setInterval(() => {
-      synchronize();
-    }, 60_000);
-    return () => {
-      window.clearInterval(refreshTimer);
-    };
-  }, [
-    countryDirectoryReady,
-    fetchGlobalNews,
-    initialWorld,
-    initialWorldUrl,
-    liveUpdates,
-    refreshCountryNews,
-    refreshPreparedWorldFromServer,
-    selectedCountry,
-  ]);
-  const fetchEventCoverage = useCallback(
-    async (event: Event) => {
-      if (coverageRequests.current.has(event.id)) return;
-      if (coverageRequests.current.size >= 4) return;
-      const generation = coverageGeneration.current;
-      coverageRequests.current.add(event.id);
-      while (activeCoverageRequests.current >= 2) {
-        await new Promise<void>((resolve) =>
-          window.setTimeout(resolve, 120),
-        );
-        if (generation !== coverageGeneration.current) {
-          coverageRequests.current.delete(event.id);
-          return;
-        }
-      }
-      activeCoverageRequests.current += 1;
-      if (generation === coverageGeneration.current) {
-        setEventCoverage((current) => ({
-          ...current,
-          [event.id]: {
-            ...current[event.id],
-            event,
-            loading: true,
-            error: null,
-          },
-        }));
-      }
-      try {
-        const parameters = new URLSearchParams({
-          scope: "event",
-          headline: event.headline,
-        });
-        const eventCountry = mapCountries.find(
-          (country) =>
-            country.iso2 === event.primaryCountry ||
-            country.name === event.primaryCountry ||
-            event.affectedCountries.includes(country.iso2 ?? country.name),
-        );
-        if (eventCountry) {
-          parameters.set("country", eventCountry.name);
-          if (eventCountry.iso2) parameters.set("iso2", eventCountry.iso2);
-        }
-        const response = await fetch(`/api/live-news?${parameters.toString()}`, {
-          signal: AbortSignal.timeout(LIVE_REQUEST_TIMEOUT_MS),
-        });
-        if (!response.ok) {
-          throw new Error("Broader coverage search is temporarily unavailable.");
-        }
-        const payload = (await response.json()) as LiveNewsPayload;
-        if (generation !== coverageGeneration.current) return;
-        setEventCoverage((current) => ({
-          ...current,
-          [event.id]: {
-            event,
-            payload,
-            fetchedAt: Date.now(),
-            loading: false,
-            error: null,
-          },
-        }));
-      } catch (error) {
-        if (generation !== coverageGeneration.current) return;
-        setEventCoverage((current) => ({
-          ...current,
-          [event.id]: {
-            ...current[event.id],
-            event,
-            loading: false,
-            error:
-              error instanceof Error
-                ? error.message
-                : "Broader coverage search is temporarily unavailable.",
-          },
-        }));
-      } finally {
-        activeCoverageRequests.current = Math.max(
-          0,
-          activeCoverageRequests.current - 1,
-        );
-        coverageRequests.current.delete(event.id);
-      }
-    },
-    [mapCountries],
-  );
   const fullCountryFeed = countryFeeds[activeCountry.name];
   const liveCountryFeed = liveCountryFeeds[activeCountry.name];
   const combinedCountryFeed = useMemo(
@@ -2400,34 +1782,17 @@ export function WorldPulseApp({
       liveCountryFeed,
     ],
   );
-  const activeCountrySignal = countrySignalFeeds[activeCountry.name];
-  const countryFeedPending =
-    liveUpdates &&
-    !activeCountrySignal &&
-    !liveCountryFeed &&
-    Boolean(fullCountryFeed?.loading);
   const fallbackCountryFeed: FeedState = {
     events: activeCountry.events,
     updatedAt: globalFeed.updatedAt,
     provider: globalFeed.provider,
-    loading:
-      fullCountryFeed?.loading ??
-      (liveUpdates ? true : globalFeed.loading),
-    error: fullCountryFeed?.error ?? globalFeed.error,
+    loading: false,
+    error: null,
   };
   const resolvedCountryFeed =
     combinedCountryFeed ?? fallbackCountryFeed;
-  const activeFeed = globalView
-    ? globalFeed
-    : countryFeedPending
-      ? {
-          ...resolvedCountryFeed,
-          provider:
-            "Full country feed syncing automatically in the background",
-          loading: true,
-          error: null,
-        }
-      : resolvedCountryFeed;
+  const activeFeed = globalView ? globalFeed : resolvedCountryFeed;
+
   const geocodedGlobalEvents = useMemo(
     () =>
       globalFeed.events.map((event) =>
@@ -2550,18 +1915,12 @@ export function WorldPulseApp({
   );
   const expandedEvents = useMemo(
     () =>
-      baseEvents
-        .map((event) => {
-          const payload = coverageForEvent(event, eventCoverage)?.payload;
-          return payload ? enrichEventWithCoverage(event, payload) : event;
-        })
-        .sort(
-          (left, right) =>
-            right.importanceScore - left.importanceScore ||
-            Date.parse(right.lastUpdatedAt) -
-              Date.parse(left.lastUpdatedAt),
-        ),
-    [baseEvents, eventCoverage],
+      [...baseEvents].sort(
+        (left, right) =>
+          right.importanceScore - left.importanceScore ||
+          Date.parse(right.lastUpdatedAt) - Date.parse(left.lastUpdatedAt),
+      ),
+    [baseEvents],
   );
   const filteredEvents = useMemo(() => {
     const limitHours =
@@ -2572,7 +1931,7 @@ export function WorldPulseApp({
           : timeRange === "7 days"
             ? 168
             : Number.POSITIVE_INFINITY;
-    const reference = Date.now();
+    const reference = Date.parse(initialWorld?.generatedAt ?? "") || 0;
     const query = search.trim().toLowerCase();
     return expandedEvents.filter((event) => {
       const matchesCategory = category === "All" || event.category === category;
@@ -2591,7 +1950,7 @@ export function WorldPulseApp({
         );
       return matchesCategory && matchesImportance && matchesTime && matchesSearch;
     });
-  }, [category, expandedEvents, importance, search, timeRange]);
+  }, [category, expandedEvents, importance, initialWorld, search, timeRange]);
   const focusedConnectionEvent = filteredEvents.find(
     (event) => event.id === connectionEventId,
   );
@@ -2637,23 +1996,16 @@ export function WorldPulseApp({
           candidate.mapId === country.mapId ||
           candidate.name === country.name,
       ) ?? country;
-    invalidateCoverage();
     setShowNewsPanel(true);
-    startCountryTransition(() => {
-      setSelectedCountry(resolvedCountry);
-      setGlobalView(false);
-      setVisibleEventLimit(INITIAL_VISIBLE_EVENT_LIMIT);
-      setConnectionEventId(null);
-      setCategory("All");
-      setImportance("All");
-      setTimeRange("7 days");
-      setSearch("");
-    });
-  }, [
-    invalidateCoverage,
-    mapCountries,
-    startCountryTransition,
-  ]);
+    setSelectedCountry(resolvedCountry);
+    setGlobalView(false);
+    setVisibleEventLimit(INITIAL_VISIBLE_EVENT_LIMIT);
+    setConnectionEventId(null);
+    setCategory("All");
+    setImportance("All");
+    setTimeRange("7 days");
+    setSearch("");
+  }, [mapCountries]);
   const handleEventActivate = (event: Event) => {
     const hasExplicitConnections =
       countriesMentionedByEvent(event, mapCountries).length > 1;
@@ -2663,17 +2015,6 @@ export function WorldPulseApp({
       );
     } else {
       setConnectionEventId(null);
-    }
-    const coverage = coverageForEvent(event, eventCoverage);
-    if (!coverage?.loading && !coverageIsFresh(coverage)) {
-      void fetchEventCoverage(event);
-    }
-  };
-  const handleEventVisible = (event: Event) => {
-    if (countryFeedPending && !globalView) return;
-    const coverage = coverageForEvent(event, eventCoverage);
-    if (!coverage?.loading && !coverageIsFresh(coverage) && !coverage?.error) {
-      void fetchEventCoverage(event);
     }
   };
   const hasActiveFilters =
@@ -2685,38 +2026,25 @@ export function WorldPulseApp({
     baseEvents.length > 0 &&
     filteredEvents.length === 0 &&
     !hasActiveFilters;
-  const refreshActiveFeed = () => {
-    invalidateCoverage();
-    if (globalView) {
-      void Promise.allSettled([
-        refreshPreparedWorldFromServer(),
-        fetchGlobalNews(true),
-      ]);
-      return;
-    }
-    void Promise.allSettled([
-      refreshPreparedWorldFromServer(),
-      refreshCountryNews(activeCountry, true),
-    ]);
-  };
-
   const dataReady =
     !liveUpdates ||
     (countryDirectoryReady &&
       worldScanSettled &&
       globalFeedReady);
-  const initialWorldReady = dataReady && globeReady;
+  const startupFailed =
+    liveUpdates &&
+    !dataReady &&
+    (initialWorldDecodeFailed || startupTimedOut);
+  const initialWorldReady = dataReady && (globeReady || startupTimedOut);
   const worldIndexComplete =
     !liveUpdates || worldScanSettled;
-  const worldStatusLabel = isSwitchingCountry
-    ? "Opening country"
-    : worldIndexComplete
-      ? "Live"
-      : "Preparing the world";
+  const worldStatusLabel = worldIndexComplete ? "Live" : "Preparing the world";
 
   return (
     <>
-      {!initialWorldReady ? (
+      {startupFailed ? (
+        <WorldStartupError />
+      ) : !initialWorldReady ? (
         <WorldLoadingScreen
           countryDirectoryReady={countryDirectoryReady}
           preparedCountryCount={preparedCountryCount}
@@ -2736,10 +2064,14 @@ export function WorldPulseApp({
       ) : null}
       <main
         className={`min-h-screen bg-[#080d15] transition-opacity duration-200 ${
-          initialWorldReady ? "opacity-100" : "pointer-events-none opacity-0"
+          initialWorldReady && !startupFailed
+            ? "opacity-100"
+            : "pointer-events-none opacity-0"
         }`}
-        aria-hidden={!initialWorldReady || undefined}
-        data-worldpulse-ready={initialWorldReady ? "true" : "false"}
+        aria-hidden={!initialWorldReady || startupFailed || undefined}
+        data-worldpulse-ready={
+          initialWorldReady && !startupFailed ? "true" : "false"
+        }
       >
       <BreakingNewsBar events={breakingEvents} />
       <header className="sticky top-9 z-40 flex h-16 items-center justify-between border-b border-[#222d3e] bg-[#080d15]/95 px-3 backdrop-blur sm:px-6">
@@ -2887,21 +2219,8 @@ export function WorldPulseApp({
             </div>
             <div className="mt-3 flex items-center justify-between gap-3">
               <span className="font-mono text-[8px] uppercase tracking-[0.13em] text-[#6f7e92]">
-                {activeFeed.loading
-                  ? "Updating stories…"
-                  : activeFeed.error
-                    ? "Stories are temporarily unavailable"
-                    : "Latest stories"}
+                Live server feed · reads server updates every minute
               </span>
-              <button
-                type="button"
-                onClick={refreshActiveFeed}
-                disabled={activeFeed.loading || !liveUpdates}
-                className="inline-flex items-center gap-1.5 rounded-md border border-[#354359] px-2.5 py-1.5 text-[9px] text-[#aeb9c7] transition hover:border-[#64748b] hover:text-white disabled:cursor-wait disabled:opacity-50"
-              >
-                <RefreshGlyph active={activeFeed.loading} />
-                Refresh
-              </button>
             </div>
 
             <div className="mt-4 grid grid-cols-3 gap-2">
@@ -2967,44 +2286,7 @@ export function WorldPulseApp({
           </div>
 
           <div className="flex-1 overflow-y-auto px-5 py-5 scrollbar-thin">
-            {activeFeed.loading && !baseEvents.length ? (
-              <div
-                className="space-y-5"
-                aria-label="Loading current reporting"
-                aria-busy="true"
-              >
-                {[0, 1, 2].map((item) => (
-                  <div
-                    key={item}
-                    className="animate-pulse border-b border-[#273246] pb-5"
-                  >
-                    <div className="h-2 w-28 rounded bg-[#263247]" />
-                    <div className="mt-4 h-5 w-4/5 rounded bg-[#263247]" />
-                    <div className="mt-3 h-3 w-full rounded bg-[#1d293b]" />
-                    <div className="mt-2 h-3 w-2/3 rounded bg-[#1d293b]" />
-                  </div>
-                ))}
-              </div>
-            ) : activeFeed.error && !baseEvents.length ? (
-              <div className="grid min-h-60 place-items-center rounded-xl border border-dashed border-[#6b3b48] p-8 text-center">
-                <div>
-                  <div className="text-2xl text-[#d36b7b]">!</div>
-                  <h3 className="mt-3 text-sm font-medium">
-                    Live feed unavailable
-                  </h3>
-                  <p className="mt-2 text-xs leading-5 text-[#8f9caf]">
-                    {activeFeed.error}
-                  </p>
-                  <button
-                    type="button"
-                    onClick={refreshActiveFeed}
-                    className="mt-4 rounded-lg border border-[#46556b] px-3 py-2 text-[10px] text-[#cad3df] hover:bg-[#192437]"
-                  >
-                    Try again
-                  </button>
-                </div>
-              </div>
-            ) : filteredEvents.length ? (
+            {filteredEvents.length ? (
               <>
                 {visibleEvents.map((event) => (
                   <EventCard
@@ -3014,17 +2296,7 @@ export function WorldPulseApp({
                       countriesMentionedByEvent(event, mapCountries).length > 1
                     }
                     connectionFocused={connectionEventId === event.id}
-                    coverageLoading={
-                      coverageForEvent(event, eventCoverage)?.loading ?? false
-                    }
-                    coverageError={
-                      coverageForEvent(event, eventCoverage)?.error ?? null
-                    }
-                    coverageExpanded={coverageIsFresh(
-                      coverageForEvent(event, eventCoverage),
-                    )}
                     onActivate={() => handleEventActivate(event)}
-                    onVisible={() => handleEventVisible(event)}
                   />
                 ))}
                 {visibleEvents.length < filteredEvents.length ? (

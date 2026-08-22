@@ -52,7 +52,7 @@ export function WorldDiagnostics() {
           <div>
             <Link href="/" className="font-mono text-xs uppercase tracking-[0.18em] text-[#73e2cc]">WorldPulse</Link>
             <h1 className="mt-3 text-3xl font-semibold tracking-[-0.04em]">World feed health</h1>
-            <p className="mt-2 max-w-2xl text-sm leading-6 text-[#9aa5b5]">Snapshot freshness, country coverage, payload size, and upstream provider status. This view refreshes once a minute.</p>
+            <p className="mt-2 max-w-2xl text-sm leading-6 text-[#9aa5b5]">Live-index freshness, country coverage, and upstream provider status. This view refreshes once a minute.</p>
           </div>
           <button type="button" onClick={refreshNow} disabled={refreshing} className="min-h-11 rounded-lg border border-[#3b4a60] px-4 text-sm text-white disabled:opacity-50">
             {refreshing ? "Checking…" : "Check now"}
@@ -62,12 +62,12 @@ export function WorldDiagnostics() {
         {error ? <div role="alert" className="mt-6 rounded-xl border border-[#8b3947] bg-[#32151c] p-4 text-sm text-[#ffd7dc]">{error}</div> : null}
         {health ? (
           <>
-            <section aria-label="Snapshot summary" className="mt-6 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+            <section aria-label="Live index summary" className="mt-6 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
               {[
                 ["Status", health.status],
-                ["Snapshot age", `${ageLabel(health.snapshotGeneratedAt)}${health.fresh ? "" : " · stale"}`],
+                ["Live index age", `${ageLabel(health.snapshotGeneratedAt)}${health.fresh ? "" : " · stale"}`],
                 ["Country coverage", `${health.inhabitedCountriesWithNews}/${health.inhabitedCountries}`],
-                ["Network payload", `${(health.snapshotBytes / 1_000_000).toFixed(2)} MB`],
+                ["Delivery", "Direct D1"],
               ].map(([label, value]) => (
                 <article key={label} className="rounded-xl border border-[#283447] bg-[#111927] p-4">
                   <div className="font-mono text-[10px] uppercase tracking-[0.16em] text-[#8290a3]">{label}</div>

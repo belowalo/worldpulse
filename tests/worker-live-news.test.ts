@@ -627,7 +627,7 @@ describe("worker live-news providers", () => {
       requestedUrls.filter((url) =>
         url.startsWith("https://www.bing.com/news/search"),
       ),
-    ).toHaveLength(1);
+    ).toHaveLength(3);
     expect(
       requestedUrls.some((url) =>
         url.startsWith("https://news.google.com/rss/search"),
@@ -683,7 +683,7 @@ describe("worker live-news providers", () => {
       ],
     });
     expect(requestedQueries).toEqual([
-      '"Canada" when:7d',
+      '"Canada" when:3d',
       "Canada when:7d",
     ]);
   });

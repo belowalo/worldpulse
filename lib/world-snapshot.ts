@@ -32,7 +32,7 @@ export interface PreparedCountryFeed {
 // the minute snapshot within the production Worker's CPU allowance. Local
 // country feeds remain independently complete.
 export const MAX_PREPARED_GLOBAL_ARTICLES = 30;
-export const MAX_PREPARED_COUNTRY_EVENTS = 8;
+export const MAX_PREPARED_COUNTRY_EVENTS = 20;
 export const PREPARED_STORY_RETENTION_MS = 7 * 24 * 60 * 60 * 1_000;
 const PREPARED_STORY_ROLLOVER_GUARD_MS = 5 * 60_000;
 
@@ -71,6 +71,34 @@ export function mergePreparedCountryFeedSnapshots(
       loading: false,
       error: null,
     };
+  }
+  return merged;
+}
+
+export function mergeLatestPreparedCountryFeedSources(
+  leftFeeds: Record<string, PreparedNewsFeed>,
+  rightFeeds: Record<string, PreparedNewsFeed>,
+  countryNames: string[],
+) {
+  const merged: Record<string, PreparedNewsFeed> = {};
+  for (const countryName of countryNames) {
+    const left = leftFeeds[countryName];
+    const right = rightFeeds[countryName];
+    if (!left && !right) continue;
+    const leftTimestamp = Date.parse(left?.updatedAt ?? "");
+    const rightTimestamp = Date.parse(right?.updatedAt ?? "");
+    const leftIsLatest =
+      !right ||
+      (Number.isFinite(leftTimestamp) &&
+        (!Number.isFinite(rightTimestamp) || leftTimestamp >= rightTimestamp));
+    const latest = leftIsLatest ? left : right;
+    const previous = leftIsLatest ? right : left;
+    const country = mergePreparedCountryFeedSnapshots(
+      latest ? { [countryName]: latest } : {},
+      previous ? { [countryName]: previous } : {},
+      [countryName],
+    )[countryName];
+    if (country) merged[countryName] = country;
   }
   return merged;
 }
@@ -161,7 +189,7 @@ export function prepareWorldSnapshotFeeds(
   return feeds;
 }
 
-export function prepareCompleteWorldSnapshot(
+export function buildLiveWorldView(
   globalPayload: LiveNewsPayload,
   countryPayloads: MapNewsPayload["countries"],
   countryDirectory: MapCountry[],
@@ -178,6 +206,10 @@ export function prepareCompleteWorldSnapshot(
     generatedAt,
   );
 }
+
+// Legacy test fixtures still import the old builder name. Production uses the
+// live-world name above and never persists its return value.
+export const prepareCompleteWorldSnapshot = buildLiveWorldView;
 
 export function prepareCompleteWorldSnapshotFromFeeds(
   globalPayload: LiveNewsPayload,
@@ -226,9 +258,16 @@ export function prepareCompleteWorldSnapshotFromFeeds(
         applyDetectedGeography(event, countryDirectory, country),
       )
       .filter(isRetainedStory);
+    const latestLocalEvents = [...normalizedLocalEvents]
+      .sort(
+        (left, right) =>
+          Date.parse(right.lastUpdatedAt) - Date.parse(left.lastUpdatedAt) ||
+          right.importanceScore - left.importanceScore,
+      )
+      .slice(0, MAX_PREPARED_COUNTRY_EVENTS);
     countryFeeds[country.name] = {
       events: mergeEventFeeds(
-        normalizedLocalEvents.slice(0, MAX_PREPARED_COUNTRY_EVENTS),
+        latestLocalEvents,
         currentGlobalEventsByCountry.get(country.name) ?? [],
       ).sort(
         (left, right) =>

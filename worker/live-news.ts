@@ -794,7 +794,7 @@ function googleCountryProvider(
         "q",
         broaderSearch
           ? `${queryTerm} when:7d`
-          : `"${queryTerm}" when:7d`,
+          : `"${queryTerm}" when:3d`,
       );
       url.searchParams.set("hl", "en");
       url.searchParams.set("gl", locale.region);
@@ -939,54 +939,34 @@ async function fetchMapCountry(
   const googleProvider = googleCountryProvider(countryName);
   const broaderGoogleProvider = googleCountryProvider(countryName, true);
   const countryProviders = countryBingProviders(countryName);
-  const results = [
-    await fetchProvider(
-      googleProvider,
-      "country",
-      countryName,
-      terms,
-      fetchImpl,
-    ),
+  // A country is only published after a multi-source current scan. Stopping
+  // after the first non-empty RSS feed made the prepared globe much thinner
+  // than the focused country endpoint, especially for high-volume countries.
+  const primaryProviders = [
+    googleProvider,
+    broaderGoogleProvider,
+    countryProviders[0],
+    GDELT_PROVIDER,
+    ...regionalProvidersForCountry(countryName),
   ];
+  const results = await mapWithConcurrency(
+    primaryProviders,
+    4,
+    (provider) =>
+      fetchProvider(
+        provider,
+        "country",
+        countryName,
+        terms,
+        fetchImpl,
+      ),
+  );
   let relevantResults = countryRelevantResults(results, terms);
-  if (!hasProviderArticles(relevantResults)) {
-    const fallbackResults = await Promise.all([
-        fetchProvider(
-          broaderGoogleProvider,
-          "country",
-          countryName,
-          terms,
-          fetchImpl,
-        ),
-        fetchProvider(
-          countryProviders[0],
-          "country",
-          countryName,
-          terms,
-          fetchImpl,
-        ),
-        fetchProvider(
-          GDELT_PROVIDER,
-          "country",
-          countryName,
-          terms,
-          fetchImpl,
-        ),
-        ...regionalProvidersForCountry(countryName).map((provider) =>
-          fetchProvider(provider, "country", countryName, terms, fetchImpl),
-        ),
-      ]);
-    const [broaderGoogleResult, currentCountryResult, gdeltResult, ...regionalResults] = fallbackResults;
-    results.push(...fallbackResults);
-    relevantResults = [
-      ...relevantResults,
-      ...countryRelevantResults([broaderGoogleResult], terms),
-      ...countryRelevantResults([currentCountryResult], terms),
-      ...countryRelevantResults([gdeltResult], terms),
-      ...countryRelevantResults(regionalResults, terms),
-    ];
-  }
-  if (!hasProviderArticles(relevantResults)) {
+  const relevantArticleCount = relevantResults.reduce(
+    (total, result) => total + result.articles.length,
+    0,
+  );
+  if (relevantArticleCount < MIN_COUNTRY_ARTICLES_BEFORE_RETRY) {
     const [latestCountryResult, alternateCountryResult] = await Promise.all([
       fetchProvider(
         countryProviders[1],
@@ -1008,24 +988,6 @@ async function fetchMapCountry(
       ...relevantResults,
       ...countryRelevantResults([latestCountryResult], terms),
       ...countryRelevantResults([alternateCountryResult], terms),
-    ];
-  }
-  if (!hasProviderArticles(relevantResults)) {
-    const retryResults = await Promise.all(
-      countryProviders.slice(1).map((provider) =>
-        fetchProvider(
-          provider,
-          "country",
-          countryName,
-          terms,
-          fetchImpl,
-        ),
-      ),
-    );
-    results.push(...retryResults);
-    relevantResults = [
-      ...relevantResults,
-      ...countryRelevantResults(retryResults, terms),
     ];
   }
   const successful = relevantResults.filter(
@@ -1066,10 +1028,6 @@ function countryRelevantResults(
       articleMatchesCountry(article, terms),
     ),
   }));
-}
-
-function hasProviderArticles(results: ProviderResult[]) {
-  return results.some((result) => result.ok && result.articles.length);
 }
 
 function articleIsCurrent(article: CandidateArticle) {

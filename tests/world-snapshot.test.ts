@@ -4,6 +4,7 @@ import { gzipSync } from "node:zlib";
 import {
   MAX_PREPARED_GLOBAL_ARTICLES,
   MAX_PREPARED_COUNTRY_EVENTS,
+  mergeLatestPreparedCountryFeedSources,
   mergePreparedCountryFeedSnapshots,
   prepareCompleteWorldSnapshot,
   prepareCompleteWorldSnapshotFromFeeds,
@@ -150,8 +151,8 @@ describe("prepared minute world state", () => {
     expect(JSON.stringify(wire).length).toBeLessThan(JSON.stringify(prepared).length);
   });
 
-  it("allows up to eight local events per country", () => {
-    expect(MAX_PREPARED_COUNTRY_EVENTS).toBeGreaterThan(6);
+  it("retains enough local events for useful recent-country filters", () => {
+    expect(MAX_PREPARED_COUNTRY_EVENTS).toBeGreaterThanOrEqual(20);
   });
 
   it("keeps recent last-known-good country stories when a fresh feed is thin", () => {
@@ -194,6 +195,47 @@ describe("prepared minute world state", () => {
     expect(merged.Canada.events).toHaveLength(1);
     expect(merged.Canada.events[0]?.headline).toBe("Canada current story");
     expect(merged.Canada.updatedAt).toBe(fresh.Canada.updatedAt);
+  });
+
+  it("treats the newest country source as current regardless of source type", () => {
+    const generatedAt = new Date().toISOString();
+    const directory: MapCountry[] = [
+      { mapId: "840", name: "United States", iso2: "US", events: [] },
+    ];
+    const countryFeeds = prepareCompleteWorldSnapshot(
+      {
+        scope: "global",
+        countryName: null,
+        generatedAt,
+        refreshAfterSeconds: 60,
+        provider: "Live providers",
+        articles: [],
+      },
+      [{
+        countryName: "United States",
+        generatedAt,
+        available: true,
+        articles: [liveArticle("usa-current", "United States current policy update")],
+      }],
+      directory,
+      generatedAt,
+    ).countryFeeds;
+    const olderUpdatedAt = new Date(Date.parse(generatedAt) - 60_000).toISOString();
+    const older = {
+      "United States": {
+        ...countryFeeds["United States"],
+        updatedAt: olderUpdatedAt,
+      },
+    };
+
+    const merged = mergeLatestPreparedCountryFeedSources(
+      older,
+      countryFeeds,
+      ["United States"],
+    );
+
+    expect(merged["United States"].updatedAt).toBe(generatedAt);
+    expect(merged["United States"].events).toHaveLength(1);
   });
 
   it("drops stale U.S. state events from Georgia's prepared country feed", () => {

@@ -155,6 +155,15 @@ export interface MapNewsPayload {
   countries: MapNewsCountryPayload[];
 }
 
+export interface LiveWorldNewsPayload {
+  scope: "world-live";
+  generatedAt: string;
+  refreshAfterSeconds: number;
+  provider: string;
+  global: LiveNewsPayload;
+  countries: MapNewsCountryPayload[];
+}
+
 export interface PreparedNewsFeed {
   events: Event[];
   updatedAt: string | null;

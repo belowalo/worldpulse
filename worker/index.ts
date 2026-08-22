@@ -1,5 +1,9 @@
-/** Cloudflare Worker entry point for the vinext-starter template. */
-import { handleImageOptimization, DEFAULT_DEVICE_SIZES, DEFAULT_IMAGE_SIZES } from "vinext/server/image-optimization";
+/** Cloudflare Worker entry point for WorldPulse. */
+import {
+  DEFAULT_DEVICE_SIZES,
+  DEFAULT_IMAGE_SIZES,
+  handleImageOptimization,
+} from "vinext/server/image-optimization";
 import handler from "vinext/server/app-router-entry";
 import {
   readLatestStoredGlobalFeed,
@@ -9,23 +13,17 @@ import {
   writeStoredNewsFeed,
 } from "../db/news-cache";
 import { countryCodeForName } from "../lib/country-locale";
-import {
-  mergePreparedCountryFeedSnapshots,
-  prepareCompleteWorldSnapshotFromFeeds,
-  prepareWorldSnapshotFeeds,
-} from "../lib/world-snapshot";
-import { encodePreparedWorldNews } from "../lib/snapshot-transport";
-import { buildWorldDiagnostics } from "../lib/world-health";
 import type {
   LiveNewsPayload,
+  LiveWorldNewsPayload,
   MapCountry,
-  PreparedNewsFeed,
   WorldPulseDiagnostics,
 } from "../lib/types";
 import { mergeCachedPayloads } from "./live-cache";
 import {
   collectStoredCountryCountries,
   collectStoredMapCountries,
+  mergeMapCountryPayloads,
 } from "./map-cache";
 import { handleLiveNews } from "./live-news";
 import { handleLiveVideo } from "./live-video";
@@ -34,12 +32,14 @@ import worldGeometrySource from "../public/countries.geojson?raw";
 interface Env {
   ASSETS: Fetcher;
   DB?: D1Database;
-  SNAPSHOTS?: R2Bucket;
-  WORLD_SNAPSHOT_REFRESH_TOKEN?: string;
+  NEWS_REFRESH_QUEUE?: Queue<CountryRefreshJob>;
   IMAGES: {
     input(stream: ReadableStream): {
       transform(options: Record<string, unknown>): {
-        output(options: { format: string; quality: number }): Promise<{ response(): Response }>;
+        output(options: {
+          format: string;
+          quality: number;
+        }): Promise<{ response(): Response }>;
       };
     };
   };
@@ -50,25 +50,26 @@ interface ExecutionContext {
   passThroughOnException(): void;
 }
 
-const LIVE_CACHE_NAME = "worldpulse-live-v19";
-const LIVE_CACHE_FRESH_MS = 60_000;
-const LIVE_CACHE_RETENTION_SECONDS = 3 * 24 * 60 * 60;
-const LIVE_MAP_STALE_MS = LIVE_CACHE_RETENTION_SECONDS * 1_000;
-const PREPARED_WORLD_KEY = "world/latest.json";
-const PREPARED_WORLD_HEALTH_KEY = "world/health.json";
-const PREPARED_WORLD_FRESH_MS = 60_000;
-const PREPARED_WORLD_CHUNK_SIZE = 12;
-const PREPARED_COUNTRY_REFRESH_BATCH_SIZE = 4;
-
-let preparedWorldRefresh: Promise<void> | null = null;
-let preparedCountryRefresh: Promise<void> | null = null;
-let worldDirectoryCache: MapCountry[] | null = null;
-
 interface WorldGeometry {
   features?: Array<{
     id?: string | number;
     properties?: { name?: string };
   }>;
+}
+
+const LIVE_CACHE_NAME = "worldpulse-live-v20";
+const LIVE_CACHE_FRESH_MS = 60_000;
+const LIVE_CACHE_RETENTION_SECONDS = 3 * 24 * 60 * 60;
+const LIVE_MAP_STALE_MS = LIVE_CACHE_RETENTION_SECONDS * 1_000;
+const LIVE_COUNTRY_REFRESH_JOB_SIZE = 5;
+const LIVE_COUNTRY_REFRESH_JOBS_PER_MINUTE = 2;
+
+let worldDirectoryCache: MapCountry[] | null = null;
+
+interface CountryRefreshJob {
+  version: 1;
+  scheduledAt: string;
+  countries: string[];
 }
 
 function loadWorldDirectory() {
@@ -90,579 +91,12 @@ function loadWorldDirectory() {
   return worldDirectoryCache;
 }
 
-interface PreparedCountryChunk {
-  generatedAt: string;
-  countryFeeds: Record<string, PreparedNewsFeed>;
-}
-
-function preparedCountryChunkKey(batchIndex: number) {
-  return `world/countries/${batchIndex}.json`;
-}
-
-async function readPreparedCountryChunk(
-  snapshots: R2Bucket,
-  chunkIndex: number,
-) {
-  const object = await snapshots.get(preparedCountryChunkKey(chunkIndex));
-  if (!object) return null;
-  try {
-    const chunk = JSON.parse(await object.text()) as PreparedCountryChunk;
-    return chunk?.countryFeeds ? chunk : null;
-  } catch {
-    return null;
-  }
-}
-
-async function readCompletePreparedCountryFeeds(
-  snapshots: R2Bucket,
-  directory: MapCountry[],
-) {
-  const batchCount = Math.ceil(
-    directory.length / PREPARED_WORLD_CHUNK_SIZE,
-  );
-  const feeds: Record<string, PreparedNewsFeed> = {};
-  const chunks = await Promise.all(
-    Array.from({ length: batchCount }, (_, batchIndex) =>
-      readPreparedCountryChunk(snapshots, batchIndex),
-    ),
-  );
-  for (const chunk of chunks) {
-    if (chunk) Object.assign(feeds, chunk.countryFeeds);
-  }
-  const missingCountries = directory.filter(
-    (country) => !feeds[country.name],
-  );
-  if (missingCountries.length) {
-    throw new Error(
-      `Prepared world is missing ${missingCountries.length} country feeds.`,
-    );
-  }
-  return feeds;
-}
-
-async function refreshPreparedWorld(env: Env) {
-  if (!env.DB || !env.SNAPSHOTS) {
-    throw new Error("Prepared world storage is unavailable.");
-  }
-  const directory = loadWorldDirectory();
-  const globalUrl = new URL("https://worldpulse.internal/api/live-news");
-  globalUrl.searchParams.set("scope", "global");
-  const globalCacheKey = normalizedLiveCacheKey(new Request(globalUrl)).url;
-  // Browser requests use the public host while scheduled jobs use the internal
-  // host, so select the newest global row independently of its URL origin.
-  const storedGlobal = await readLatestStoredGlobalFeed(env.DB);
-  let globalPayload: LiveNewsPayload | null = null;
-  if (
-    storedGlobal &&
-    Date.now() - storedGlobal.generated_at < LIVE_CACHE_FRESH_MS
-  ) {
-    try {
-      const candidate = JSON.parse(storedGlobal.payload) as LiveNewsPayload;
-      if (candidate.scope === "global" && Array.isArray(candidate.articles)) {
-        globalPayload = candidate;
-      }
-    } catch {
-      // Fall through to a direct provider refresh for an invalid cache row.
-    }
-  }
-  if (!globalPayload) {
-    const globalResponse = await handleLiveNews(new Request(globalUrl));
-    if (!globalResponse.ok) {
-      throw new Error("Fresh global reporting is unavailable.");
-    }
-    const payload = await globalResponse.text();
-    globalPayload = JSON.parse(payload) as LiveNewsPayload;
-    await writeStoredNewsFeed(env.DB, globalCacheKey, payload, Date.now());
-  }
-  const generatedAt = new Date().toISOString();
-  const localFeeds = await readCompletePreparedCountryFeeds(
-    env.SNAPSHOTS,
-    directory,
-  );
-  const snapshot = prepareCompleteWorldSnapshotFromFeeds(
-    globalPayload,
-    localFeeds,
-    directory,
-    generatedAt,
-  );
-  const wirePayload = JSON.stringify(encodePreparedWorldNews(snapshot));
-  const compressedPayload = await new Response(
-    new Response(wirePayload).body?.pipeThrough(new CompressionStream("gzip")),
-  ).arrayBuffer();
-  const diagnostics = buildWorldDiagnostics(
-    snapshot,
-    directory,
-    globalPayload,
-    compressedPayload.byteLength,
-  );
-  if (diagnostics.status === "degraded") {
-    console.error(
-      JSON.stringify({
-        event: "world_coverage_alert",
-        missingInhabitedCountries: diagnostics.missingInhabitedCountries,
-      }),
-    );
-  }
-  await Promise.all([
-    env.SNAPSHOTS.put(PREPARED_WORLD_KEY, compressedPayload, {
-      httpMetadata: {
-        contentEncoding: "gzip",
-        contentType: "application/json; charset=utf-8",
-      },
-      customMetadata: {
-        generatedAt,
-        encoding: "gzip",
-        countryCount: String(directory.length),
-      },
-    }),
-    env.SNAPSHOTS.put(
-      PREPARED_WORLD_HEALTH_KEY,
-      JSON.stringify(diagnostics),
-      {
-        httpMetadata: { contentType: "application/json; charset=utf-8" },
-        customMetadata: { generatedAt },
-      },
-    ),
-  ]);
-  console.info(
-    JSON.stringify({
-      event: "prepared_world_refresh_completed",
-      generatedAt,
-      countryCount: directory.length,
-    }),
-  );
-}
-
-async function handleWorldDiagnostics(env: Env) {
-  if (!env.SNAPSHOTS) {
-    return Response.json(
-      { error: "World health reporting is unavailable." },
-      { status: 503, headers: { "Cache-Control": "no-store" } },
-    );
-  }
-  const health = await env.SNAPSHOTS.get(PREPARED_WORLD_HEALTH_KEY);
-  if (!health) {
-    return Response.json(
-      { error: "World health reporting is still being prepared." },
-      { status: 503, headers: { "Cache-Control": "no-store" } },
-    );
-  }
-  const diagnostics = JSON.parse(await health.text()) as WorldPulseDiagnostics;
-  diagnostics.fresh =
-    Date.now() - Date.parse(diagnostics.snapshotGeneratedAt) < 5 * 60_000;
-  if (!diagnostics.fresh) diagnostics.status = "degraded";
-  return Response.json(diagnostics, {
-    headers: {
-      "Cache-Control": "no-store",
-    },
-  });
-}
-
-async function refreshStoredGlobalFeed(env: Env) {
-  if (!env.DB) return;
-  const globalUrl = new URL("https://worldpulse.internal/api/live-news");
-  globalUrl.searchParams.set("scope", "global");
-  const cacheKey = normalizedLiveCacheKey(new Request(globalUrl)).url;
-  const response = await handleLiveNews(new Request(globalUrl));
-  if (!response.ok) return;
-  let payload = await response.text();
-  const previous = await readStoredNewsFeed(env.DB, cacheKey);
-  if (previous) payload = mergeCachedPayloads(payload, previous.payload);
-  await writeStoredNewsFeed(env.DB, cacheKey, payload, Date.now());
-}
-
-async function refreshStoredGlobalFeedSafely(env: Env) {
-  try {
-    await refreshStoredGlobalFeed(env);
-  } catch (error) {
-    console.error(
-      JSON.stringify({
-        event: "prepared_global_refresh_failed",
-        error: error instanceof Error ? error.message : "unknown error",
-      }),
-    );
-  }
-}
-
-async function refreshPreparedCountryBatch(
-  env: Env,
-  requestedBatchIndex?: number,
-  cacheOnly = false,
-) {
-  if (!env.DB || !env.SNAPSHOTS) return;
-  const directory = loadWorldDirectory();
-  const countryNames = directory.map((country) => country.name);
-  const batchCount = Math.ceil(
-    countryNames.length / PREPARED_COUNTRY_REFRESH_BATCH_SIZE,
-  );
-  const batchIndex = Number.isInteger(requestedBatchIndex)
-    ? Math.max(0, Math.min(batchCount - 1, requestedBatchIndex as number))
-    : Math.floor(Date.now() / 60_000) % batchCount;
-  const refreshCountries = countryNames.slice(
-    batchIndex * PREPARED_COUNTRY_REFRESH_BATCH_SIZE,
-    (batchIndex + 1) * PREPARED_COUNTRY_REFRESH_BATCH_SIZE,
-  );
-  if (!cacheOnly) {
-    const mapUrl = new URL("https://worldpulse.internal/api/live-news");
-    mapUrl.searchParams.set("scope", "map");
-    mapUrl.searchParams.set("countries", refreshCountries.join("|"));
-    const mapResponse = await handleLiveNews(new Request(mapUrl));
-    if (!mapResponse.ok) return;
-    const cacheKey = normalizedLiveCacheKey(new Request(mapUrl)).url;
-    let mapPayload = await mapResponse.text();
-    const previous = await readStoredNewsFeed(env.DB, cacheKey);
-    if (previous) {
-      mapPayload = mergeCachedPayloads(mapPayload, previous.payload);
-    }
-    await writeStoredNewsFeed(env.DB, cacheKey, mapPayload, Date.now());
-  }
-  const firstCountryIndex = batchIndex * PREPARED_COUNTRY_REFRESH_BATCH_SIZE;
-  const chunkIndex = Math.floor(firstCountryIndex / PREPARED_WORLD_CHUNK_SIZE);
-  const chunkCountries = countryNames.slice(
-    chunkIndex * PREPARED_WORLD_CHUNK_SIZE,
-    (chunkIndex + 1) * PREPARED_WORLD_CHUNK_SIZE,
-  );
-  const expectedCountryNames = new Set(chunkCountries);
-  const previousChunk = await readPreparedCountryChunk(
-    env.SNAPSHOTS,
-    chunkIndex,
-  );
-  const [storedMapFeeds, storedCountryFeeds] = await Promise.all([
-    readStoredMapFeeds(env.DB),
-    readStoredCountryFeeds(
-      env.DB,
-      chunkCountries,
-      chunkCountries.length * 3,
-    ),
-  ]);
-  const mapFeeds = prepareWorldSnapshotFeeds(
-    collectStoredMapCountries(storedMapFeeds, expectedCountryNames).countries,
-    directory,
-  );
-  const directCountryFeeds = prepareWorldSnapshotFeeds(
-    collectStoredCountryCountries(
-      storedCountryFeeds,
-      expectedCountryNames,
-    ).countries,
-    directory,
-  );
-  const freshFeeds = mergePreparedCountryFeedSnapshots(
-    directCountryFeeds,
-    mapFeeds,
-    chunkCountries,
-  );
-  const countryFeeds = mergePreparedCountryFeedSnapshots(
-    freshFeeds,
-    previousChunk?.countryFeeds ?? {},
-    chunkCountries,
-  );
-  const missingCountries = chunkCountries.filter(
-    (countryName) => !countryFeeds[countryName],
-  );
-  if (missingCountries.length) {
-    throw new Error(
-      `Prepared country batch is missing ${missingCountries.length} feeds.`,
-    );
-  }
-  const generatedAt = new Date().toISOString();
-  const chunk: PreparedCountryChunk = {
-    generatedAt,
-    countryFeeds,
-  };
-  await env.SNAPSHOTS.put(
-    preparedCountryChunkKey(chunkIndex),
-    JSON.stringify(chunk),
-    {
-      httpMetadata: { contentType: "application/json; charset=utf-8" },
-      customMetadata: { generatedAt },
-    },
-  );
-  console.info(
-    JSON.stringify({
-      event: "prepared_country_refresh_completed",
-      refreshBatchIndex: batchIndex,
-      chunkIndex,
-      countries: refreshCountries,
-    }),
-  );
-}
-
-function refreshPreparedWorldOnce(env: Env) {
-  preparedWorldRefresh ??= refreshPreparedWorld(env).finally(() => {
-    preparedWorldRefresh = null;
-  });
-  return preparedWorldRefresh;
-}
-
-async function refreshPreparedWorldSafely(env: Env) {
-  try {
-    await refreshPreparedWorldOnce(env);
-  } catch (error) {
-    console.error(
-      JSON.stringify({
-        event: "prepared_world_refresh_failed",
-        error: error instanceof Error ? error.message : "unknown error",
-      }),
-    );
-  }
-}
-
-function refreshPreparedCountryBatchOnce(env: Env) {
-  preparedCountryRefresh ??= refreshPreparedCountryBatch(env).finally(() => {
-    preparedCountryRefresh = null;
-  });
-  return preparedCountryRefresh;
-}
-
-async function refreshPreparedCountryBatchSafely(env: Env) {
-  try {
-    await refreshPreparedCountryBatchOnce(env);
-  } catch (error) {
-    console.error(
-      JSON.stringify({
-        event: "prepared_country_refresh_failed",
-        error: error instanceof Error ? error.message : "unknown error",
-      }),
-    );
-  }
-}
-
-async function promoteCountriesToPreparedWorld(
-  env: Env,
-  requestedCountryNames: string[],
-) {
-  if (!requestedCountryNames.length) return;
-  const directory = loadWorldDirectory();
-  const countryIndexByName = new Map(
-    directory.map((country, index) => [country.name, index]),
-  );
-  const chunkIndexes = new Set<number>();
-  for (const countryName of requestedCountryNames) {
-    const countryIndex = countryIndexByName.get(countryName);
-    if (countryIndex !== undefined) {
-      chunkIndexes.add(Math.floor(countryIndex / PREPARED_WORLD_CHUNK_SIZE));
-    }
-  }
-  const batchesPerChunk = Math.ceil(
-    PREPARED_WORLD_CHUNK_SIZE / PREPARED_COUNTRY_REFRESH_BATCH_SIZE,
-  );
-  for (const chunkIndex of chunkIndexes) {
-    await refreshPreparedCountryBatch(
-      env,
-      chunkIndex * batchesPerChunk,
-      true,
-    );
-  }
-  await refreshPreparedWorldSafely(env);
-}
-
-async function promoteCountriesToPreparedWorldSafely(
-  env: Env,
-  requestedCountryNames: string[],
-) {
-  try {
-    await promoteCountriesToPreparedWorld(env, requestedCountryNames);
-  } catch (error) {
-    console.error(
-      JSON.stringify({
-        event: "prepared_country_promotion_failed",
-        countries: requestedCountryNames,
-        error: error instanceof Error ? error.message : "unknown error",
-      }),
-    );
-  }
-}
-
-async function refreshMinuteWorldState(env: Env) {
-  // Refresh the underlying reporting before publishing a new version. A new
-  // snapshot timestamp must never be applied to yesterday's provider payload.
-  await refreshStoredGlobalFeedSafely(env);
-  await refreshPreparedCountryBatchSafely(env);
-  await refreshPreparedWorldSafely(env);
-}
-
-async function refreshTrafficWorldState(env: Env) {
-  // Browser traffic keeps the global feed current when scheduled delivery is
-  // delayed, without starting the long multi-country scan in waitUntil().
-  await refreshStoredGlobalFeedSafely(env);
-  await refreshPreparedWorldSafely(env);
-}
-
-async function handlePreparedWorld(
-  request: Request,
-  env: Env,
-  ctx: ExecutionContext,
-) {
-  if (!env.SNAPSHOTS) {
-    return Response.json(
-      { error: "The minute world state is unavailable." },
-      { status: 503, headers: { "Cache-Control": "no-store" } },
-    );
-  }
-  let current = await env.SNAPSHOTS.get(PREPARED_WORLD_KEY);
-  let currentBytes: ArrayBuffer | null = null;
-  const generatedAt = Date.parse(current?.customMetadata?.generatedAt ?? "");
-  const age = Number.isFinite(generatedAt)
-    ? Date.now() - generatedAt
-    : Number.POSITIVE_INFINITY;
-  const requestUrl = new URL(request.url);
-  const suppliedToken = request.headers.get("X-WorldPulse-Refresh-Token");
-  const canWaitForRefresh = Boolean(
-    env.WORLD_SNAPSHOT_REFRESH_TOKEN &&
-    suppliedToken === env.WORLD_SNAPSHOT_REFRESH_TOKEN,
-  );
-  if (canWaitForRefresh) {
-    const requestedBatch = requestUrl.searchParams.get("countryBatch");
-    if (requestedBatch !== null) {
-      const batchIndex = Number(requestedBatch);
-      if (!Number.isInteger(batchIndex) || batchIndex < 0) {
-        return Response.json(
-          { error: "A valid country batch is required." },
-          { status: 400, headers: { "Cache-Control": "no-store" } },
-        );
-      }
-      try {
-        await refreshPreparedCountryBatch(
-          env,
-          batchIndex,
-          requestUrl.searchParams.get("countryBatchCacheOnly") === "1",
-        );
-      } catch (error) {
-        console.warn(
-          JSON.stringify({
-            event: "prepared_country_seed_failed",
-            error: error instanceof Error ? error.message : "unknown error",
-          }),
-        );
-      }
-      if (requestUrl.searchParams.get("countryBatchOnly") === "1") {
-        return Response.json(
-          { status: "country batch refreshed", batchIndex },
-          { status: 202, headers: { "Cache-Control": "no-store" } },
-        );
-      }
-    }
-    if (age >= PREPARED_WORLD_FRESH_MS || requestedBatch !== null) {
-      try {
-        await refreshPreparedWorld(env);
-      } catch (error) {
-        console.warn(
-          JSON.stringify({
-            event: "prepared_world_seed_failed",
-            error: error instanceof Error ? error.message : "unknown error",
-          }),
-        );
-      }
-      current = await env.SNAPSHOTS.get(PREPARED_WORLD_KEY);
-    }
-  } else if (age >= PREPARED_WORLD_FRESH_MS) {
-    // Never hold the first paint behind a world rebuild. Return the last
-    // complete atomic snapshot and roll it forward in the background.
-    if (current) currentBytes = await current.arrayBuffer();
-    ctx.waitUntil(refreshTrafficWorldState(env));
-  }
-  if (!current) {
-    return Response.json(
-      { error: "The minute world state is still being prepared." },
-      { status: 503, headers: { "Cache-Control": "no-store" } },
-    );
-  }
-  const headers = new Headers({
-    "Cache-Control": "no-store",
-    "Content-Type":
-      current.customMetadata?.encoding === "gzip"
-        ? "application/vnd.worldpulse.snapshot+gzip"
-        : "application/json; charset=utf-8",
-    "X-WorldPulse-Snapshot-Generated-At":
-      current.customMetadata?.generatedAt ?? "unknown",
-    "X-WorldPulse-Country-Count":
-      current.customMetadata?.countryCount ?? String(loadWorldDirectory().length),
-  });
-  let body: BodyInit | null = currentBytes ?? current.body;
-  if (
-    current.customMetadata?.encoding === "gzip" &&
-    requestUrl.searchParams.get("plain") === "1"
-  ) {
-    body = new Response(body).body?.pipeThrough(
-      new DecompressionStream("gzip"),
-    ) ?? null;
-    headers.set("Content-Type", "application/json; charset=utf-8");
-  }
-  return new Response(body, { headers });
-}
-
-async function handleWorldSnapshot(
-  request: Request,
-  env: Env,
-  ctx: ExecutionContext,
-) {
-  if (!env.DB) {
-    return Response.json(
-      { error: "The prepared world news snapshot is unavailable." },
-      { status: 503, headers: { "Cache-Control": "no-store" } },
-    );
-  }
-  const requestUrl = new URL(request.url);
-  const requestedCountries = [
-    ...new Set(
-      (requestUrl.searchParams.get("countries") ?? "")
-        .split("|")
-        .map((country) => country.trim())
-        .filter(Boolean),
-    ),
-  ];
-  if (requestedCountries.length) {
-    const batchSize = 12;
-    const batchCount = Math.ceil(requestedCountries.length / batchSize);
-    const batchIndex = Math.floor(Date.now() / 60_000) % batchCount;
-    const refreshCountries = requestedCountries.slice(
-      batchIndex * batchSize,
-      (batchIndex + 1) * batchSize,
-    );
-    const refreshUrl = new URL(request.url);
-    refreshUrl.searchParams.delete("snapshot");
-    refreshUrl.searchParams.delete("warm");
-    refreshUrl.searchParams.set("scope", "map");
-    refreshUrl.searchParams.set("countries", refreshCountries.join("|"));
-    refreshUrl.searchParams.set("fresh", "1");
-    ctx.waitUntil(
-      handleCachedLiveNews(
-        new Request(refreshUrl.toString(), { method: "GET" }),
-        env,
-        ctx,
-      ).then((response) => response.body?.cancel()),
-    );
-  }
-  if (requestUrl.searchParams.get("warm") === "1") {
-    return new Response(null, {
-      status: 202,
-      headers: { "Cache-Control": "no-store" },
-    });
-  }
-  const storedFeeds = await readStoredMapFeeds(env.DB);
-  const snapshot = collectStoredMapCountries(storedFeeds);
-  return Response.json(
-    {
-      scope: "map",
-      generatedAt: snapshot.generatedAt,
-      refreshAfterSeconds: LIVE_CACHE_FRESH_MS / 1_000,
-      provider: "WorldPulse",
-      countries: snapshot.countries,
-    },
-    {
-      headers: {
-        "Cache-Control": "public, max-age=60, s-maxage=300, stale-while-revalidate=86400",
-      },
-    },
-  );
-}
-
 function normalizedLiveCacheKey(request: Request) {
   const url = new URL(request.url);
   url.hash = "";
   url.searchParams.delete("release");
   url.searchParams.delete("fresh");
-  url.searchParams.set("__wp_cache", "20");
+  url.searchParams.set("__wp_cache", "21");
   url.searchParams.sort();
   return new Request(url.toString(), { method: "GET" });
 }
@@ -691,13 +125,9 @@ function persistentResponse(payload: string, generatedAt: number) {
   });
 }
 
-async function mergeFreshResponse(
-  fresh: Response,
-  fallback: Response | null,
-) {
+async function mergeFreshResponse(fresh: Response, fallback: Response | null) {
   if (!fallback) return fresh;
   if (!fresh.ok) return responseWithCacheState(fallback, "stale-if-error");
-
   const [freshPayload, storedPayload] = await Promise.all([
     fresh.text(),
     fallback.text(),
@@ -730,19 +160,14 @@ async function storeLiveResponse(
       const stored = await readStoredNewsFeed(db, cacheKey.url);
       if (stored) payload = mergeCachedPayloads(payload, stored.payload);
     } catch (error) {
-      console.warn(
-        JSON.stringify({
-          event: "news_persistent_cache_merge_failed",
-          error: error instanceof Error ? error.message : "unknown error",
-        }),
-      );
+      console.warn(JSON.stringify({
+        event: "news_persistent_cache_merge_failed",
+        error: error instanceof Error ? error.message : "unknown error",
+      }));
     }
   }
   const headers = new Headers(response.headers);
-  headers.set(
-    "Cache-Control",
-    `public, max-age=${LIVE_CACHE_RETENTION_SECONDS}`,
-  );
+  headers.set("Cache-Control", `public, max-age=${LIVE_CACHE_RETENTION_SECONDS}`);
   headers.set("X-WorldPulse-Cached-At", String(cachedAt));
   const writes: Promise<unknown>[] = [
     cache.put(
@@ -756,16 +181,12 @@ async function storeLiveResponse(
   ];
   if (db) {
     writes.push(
-      writeStoredNewsFeed(db, cacheKey.url, payload, cachedAt).catch(
-        (error) => {
-          console.warn(
-            JSON.stringify({
-              event: "news_persistent_cache_write_failed",
-              error: error instanceof Error ? error.message : "unknown error",
-            }),
-          );
-        },
-      ),
+      writeStoredNewsFeed(db, cacheKey.url, payload, cachedAt).catch((error) => {
+        console.warn(JSON.stringify({
+          event: "news_persistent_cache_write_failed",
+          error: error instanceof Error ? error.message : "unknown error",
+        }));
+      }),
     );
   }
   await Promise.all(writes);
@@ -786,31 +207,13 @@ async function handleCachedLiveNews(
   ctx: ExecutionContext,
 ) {
   if (request.method !== "GET") return handleLiveNews(request);
-
   const cache = await caches.open(LIVE_CACHE_NAME);
   const cacheKey = normalizedLiveCacheKey(request);
   const requestUrl = new URL(request.url);
   const isMapSearch = requestUrl.searchParams.get("scope") === "map";
-  const requestedScope = requestUrl.searchParams.get("scope") ?? "country";
-  const requestedPreparedCountries = isMapSearch
-    ? (requestUrl.searchParams.get("countries") ?? "")
-        .split("|")
-        .map((country) => country.trim())
-        .filter(Boolean)
-    : requestedScope === "country" && requestUrl.searchParams.get("country")
-      ? [requestUrl.searchParams.get("country") as string]
-      : [];
-  const storeAndPromote = async (response: Response) => {
-    await storeLiveResponse(cache, cacheKey, response, env.DB);
-    if (requestedPreparedCountries.length) {
-      await promoteCountriesToPreparedWorldSafely(
-        env,
-        requestedPreparedCountries,
-      );
-    }
-  };
   const forceFresh = requestUrl.searchParams.get("fresh") === "1";
   const cached = await cache.match(cacheKey);
+
   if (forceFresh) {
     requestUrl.searchParams.delete("fresh");
     let fallback = cached?.clone() ?? null;
@@ -819,18 +222,15 @@ async function handleCachedLiveNews(
         const stored = await readStoredNewsFeed(env.DB, cacheKey.url);
         if (
           stored &&
-          Date.now() - stored.generated_at <
-            LIVE_CACHE_RETENTION_SECONDS * 1_000
+          Date.now() - stored.generated_at < LIVE_CACHE_RETENTION_SECONDS * 1_000
         ) {
           fallback = persistentResponse(stored.payload, stored.generated_at);
         }
       } catch (error) {
-        console.warn(
-          JSON.stringify({
-            event: "news_persistent_cache_read_failed",
-            error: error instanceof Error ? error.message : "unknown error",
-          }),
-        );
+        console.warn(JSON.stringify({
+          event: "news_persistent_cache_read_failed",
+          error: error instanceof Error ? error.message : "unknown error",
+        }));
       }
     }
     const fresh = await handleLiveNews(new Request(requestUrl, request));
@@ -838,18 +238,7 @@ async function handleCachedLiveNews(
       return responseWithCacheState(fallback, "stale-if-error");
     }
     const merged = await mergeFreshResponse(fresh, fallback);
-    // Persist the exact response before returning it. Previously this write
-    // shared one long waitUntil task with country promotion and could be
-    // cancelled before the live result reached the server-side cache.
     await storeLiveResponse(cache, cacheKey, merged.clone(), env.DB);
-    if (requestedPreparedCountries.length) {
-      ctx.waitUntil(
-        promoteCountriesToPreparedWorldSafely(
-          env,
-          requestedPreparedCountries,
-        ),
-      );
-    }
     return responseWithCacheState(merged, "miss");
   }
 
@@ -858,24 +247,16 @@ async function handleCachedLiveNews(
     const cacheAge = Number.isFinite(cachedAt)
       ? Date.now() - cachedAt
       : Number.POSITIVE_INFINITY;
-    const isFresh =
-      Number.isFinite(cachedAt) && cacheAge < LIVE_CACHE_FRESH_MS;
-    const canStreamMapWhileRefreshing =
-      isMapSearch && cacheAge < LIVE_MAP_STALE_MS;
+    const isFresh = cacheAge < LIVE_CACHE_FRESH_MS;
+    const canStreamMapWhileRefreshing = isMapSearch && cacheAge < LIVE_MAP_STALE_MS;
     if (!isFresh && isMapSearch && !canStreamMapWhileRefreshing) {
       const fresh = await handleLiveNews(cacheKey);
-      if (!fresh.ok) {
-        return responseWithCacheState(cached, "stale-if-error");
-      }
+      if (!fresh.ok) return responseWithCacheState(cached, "stale-if-error");
       const merged = await mergeFreshResponse(fresh, cached.clone());
-      ctx.waitUntil(
-        storeLiveResponse(cache, cacheKey, merged.clone(), env.DB),
-      );
+      ctx.waitUntil(storeLiveResponse(cache, cacheKey, merged.clone(), env.DB));
       return responseWithCacheState(merged, "miss");
     }
-    if (!isFresh) {
-      ctx.waitUntil(refreshLiveResponse(cache, cacheKey, env.DB));
-    }
+    if (!isFresh) ctx.waitUntil(refreshLiveResponse(cache, cacheKey, env.DB));
     return responseWithCacheState(cached, isFresh ? "hit" : "refreshing");
   }
 
@@ -884,24 +265,12 @@ async function handleCachedLiveNews(
       const stored = await readStoredNewsFeed(env.DB, cacheKey.url);
       if (
         stored &&
-        Date.now() - stored.generated_at <
-          LIVE_CACHE_RETENTION_SECONDS * 1_000
+        Date.now() - stored.generated_at < LIVE_CACHE_RETENTION_SECONDS * 1_000
       ) {
-        const storedResponse = persistentResponse(
-          stored.payload,
-          stored.generated_at,
-        );
+        const storedResponse = persistentResponse(stored.payload, stored.generated_at);
         const storedAge = Date.now() - stored.generated_at;
-        const isFresh =
-          storedAge < LIVE_CACHE_FRESH_MS;
-        if (
-          !isFresh &&
-          isMapSearch &&
-          storedAge >= LIVE_MAP_STALE_MS
-        ) {
-          // A genuinely old map index is not shown. Continue to a direct live
-          // request below instead.
-        } else {
+        const isFresh = storedAge < LIVE_CACHE_FRESH_MS;
+        if (!(isMapSearch && storedAge >= LIVE_MAP_STALE_MS)) {
           ctx.waitUntil(
             isFresh
               ? cache.put(cacheKey, storedResponse.clone())
@@ -914,45 +283,235 @@ async function handleCachedLiveNews(
         }
       }
     } catch (error) {
-      console.warn(
-        JSON.stringify({
-          event: "news_persistent_cache_read_failed",
-          error: error instanceof Error ? error.message : "unknown error",
-        }),
-      );
+      console.warn(JSON.stringify({
+        event: "news_persistent_cache_read_failed",
+        error: error instanceof Error ? error.message : "unknown error",
+      }));
     }
   }
 
   const fresh = await handleLiveNews(request);
-  if (fresh.ok) ctx.waitUntil(storeAndPromote(fresh.clone()));
+  if (fresh.ok) {
+    ctx.waitUntil(storeLiveResponse(cache, cacheKey, fresh.clone(), env.DB));
+  }
   return responseWithCacheState(fresh, "miss");
 }
 
-// Image security config. SVG sources with .svg extension auto-skip the
-// optimization endpoint on the client side (served directly, no proxy).
-// To route SVGs through the optimizer (with security headers), set
-// dangerouslyAllowSVG: true in next.config.js and uncomment below:
-// const imageConfig: ImageConfig = { dangerouslyAllowSVG: true };
+async function refreshStoredGlobalFeed(env: Env) {
+  if (!env.DB) return;
+  const globalUrl = new URL("https://worldpulse.internal/api/live-news");
+  globalUrl.searchParams.set("scope", "global");
+  const cacheKey = normalizedLiveCacheKey(new Request(globalUrl)).url;
+  const response = await handleLiveNews(new Request(globalUrl));
+  if (!response.ok) return;
+  let payload = await response.text();
+  const previous = await readStoredNewsFeed(env.DB, cacheKey);
+  if (previous) payload = mergeCachedPayloads(payload, previous.payload);
+  await writeStoredNewsFeed(env.DB, cacheKey, payload, Date.now());
+}
+
+async function refreshStoredGlobalFeedSafely(env: Env) {
+  try {
+    await refreshStoredGlobalFeed(env);
+  } catch (error) {
+    console.error(JSON.stringify({
+      event: "live_global_refresh_failed",
+      error: error instanceof Error ? error.message : "unknown error",
+    }));
+  }
+}
+
+async function readLiveCountryIndex(env: Env) {
+  if (!env.DB) return [];
+  const countryNames = loadWorldDirectory().map((country) => country.name);
+  const expectedCountries = new Set(countryNames);
+  const [storedMapFeeds, storedCountryFeeds] = await Promise.all([
+    readStoredMapFeeds(env.DB, 320),
+    readStoredCountryFeeds(env.DB, [], 640),
+  ]);
+  const mapCountries = collectStoredMapCountries(
+    storedMapFeeds,
+    expectedCountries,
+  ).countries;
+  const directCountries = collectStoredCountryCountries(
+    storedCountryFeeds,
+    expectedCountries,
+  ).countries;
+  return mergeMapCountryPayloads(countryNames, mapCountries, directCountries);
+}
+
+export function allCountryRefreshJobs(date: Date) {
+  const countryNames = loadWorldDirectory().map((country) => country.name);
+  const groups: string[][] = [];
+  for (
+    let index = 0;
+    index < countryNames.length;
+    index += LIVE_COUNTRY_REFRESH_JOB_SIZE
+  ) {
+    groups.push(countryNames.slice(index, index + LIVE_COUNTRY_REFRESH_JOB_SIZE));
+  }
+  return groups.map((countries) => ({
+    version: 1 as const,
+    scheduledAt: date.toISOString(),
+    countries,
+  }));
+}
+
+export function countryRefreshJobsForMinute(date: Date) {
+  const jobs = allCountryRefreshJobs(date);
+  const minute = Math.floor(date.getTime() / 60_000);
+  const firstGroup =
+    (minute * LIVE_COUNTRY_REFRESH_JOBS_PER_MINUTE) % jobs.length;
+  return Array.from(
+    { length: LIVE_COUNTRY_REFRESH_JOBS_PER_MINUTE },
+    (_, offset) => jobs[(firstGroup + offset) % jobs.length],
+  );
+}
+
+async function refreshLiveCountries(env: Env, countryNames: string[]) {
+  if (!env.DB || !countryNames.length) return;
+  const mapUrl = new URL("https://worldpulse.internal/api/live-news");
+  mapUrl.searchParams.set("scope", "map");
+  mapUrl.searchParams.set("countries", countryNames.join("|"));
+  const response = await handleLiveNews(new Request(mapUrl));
+  if (!response.ok) throw new Error("Live country refresh failed.");
+  const cacheKey = normalizedLiveCacheKey(new Request(mapUrl)).url;
+  let payload = await response.text();
+  const previous = await readStoredNewsFeed(env.DB, cacheKey);
+  if (previous) payload = mergeCachedPayloads(payload, previous.payload);
+  await writeStoredNewsFeed(env.DB, cacheKey, payload, Date.now());
+  console.info(JSON.stringify({
+    event: "live_country_refresh_completed",
+    countries: countryNames,
+  }));
+}
+
+async function enqueueCountryRefreshJobs(env: Env, date: Date) {
+  if (!env.NEWS_REFRESH_QUEUE) {
+    console.error(JSON.stringify({ event: "news_refresh_queue_unavailable" }));
+    return;
+  }
+  const hasCountryIndex = env.DB
+    ? (await readStoredMapFeeds(env.DB, 1)).length > 0
+    : true;
+  const jobs = hasCountryIndex
+    ? countryRefreshJobsForMinute(date)
+    : allCountryRefreshJobs(date);
+  await env.NEWS_REFRESH_QUEUE.sendBatch(
+    jobs.map((body) => ({ body, contentType: "json" as const })),
+  );
+  console.info(JSON.stringify({
+    event: "news_refresh_jobs_enqueued",
+    bootstrap: !hasCountryIndex,
+    jobs: jobs.length,
+    countries: jobs.flatMap((job) => job.countries),
+  }));
+}
+
+async function currentGlobalFeed(env: Env) {
+  if (!env.DB) return null;
+  const stored = await readLatestStoredGlobalFeed(env.DB);
+  if (stored) {
+    try {
+      const payload = JSON.parse(stored.payload) as LiveNewsPayload;
+      if (payload.scope === "global" && Array.isArray(payload.articles)) {
+        return payload;
+      }
+    } catch {
+      console.error(JSON.stringify({ event: "live_global_record_invalid" }));
+    }
+  }
+  return null;
+}
+
+async function handleLiveWorld(env: Env) {
+  if (!env.DB) {
+    return Response.json(
+      { error: "The live world news index is unavailable." },
+      { status: 503, headers: { "Cache-Control": "no-store" } },
+    );
+  }
+  const [countries, global] = await Promise.all([
+    readLiveCountryIndex(env),
+    currentGlobalFeed(env),
+  ]);
+  if (!global) {
+    return Response.json(
+      { error: "Current global reporting is unavailable." },
+      { status: 503, headers: { "Cache-Control": "no-store" } },
+    );
+  }
+  const payload: LiveWorldNewsPayload = {
+    scope: "world-live",
+    generatedAt: new Date().toISOString(),
+    refreshAfterSeconds: 60,
+    provider: "WorldPulse live country index",
+    global,
+    countries,
+  };
+  return Response.json(payload, { headers: { "Cache-Control": "no-store" } });
+}
+
+async function handleLiveWorldDiagnostics(env: Env) {
+  if (!env.DB) {
+    return Response.json(
+      { error: "Live world diagnostics are unavailable." },
+      { status: 503, headers: { "Cache-Control": "no-store" } },
+    );
+  }
+  const [countries, global] = await Promise.all([
+    readLiveCountryIndex(env),
+    currentGlobalFeed(env),
+  ]);
+  const generatedAt = new Date().toISOString();
+  const countriesWithNews = countries.filter(
+    (country) => country.articles.length > 0,
+  ).length;
+  const diagnostics: WorldPulseDiagnostics = {
+    status: countriesWithNews === countries.length ? "healthy" : "degraded",
+    fresh: true,
+    generatedAt,
+    snapshotGeneratedAt: generatedAt,
+    snapshotBytes: 0,
+    totalCountries: countries.length,
+    countriesWithNews,
+    inhabitedCountries: countries.length,
+    inhabitedCountriesWithNews: countriesWithNews,
+    missingInhabitedCountries: countries
+      .filter((country) => !country.articles.length)
+      .map((country) => country.countryName),
+    expectedEmptyCountries: [],
+    globalEventCount: global?.articles.length ?? 0,
+    providerHealth: global?.providers ?? [],
+  };
+  return Response.json(diagnostics, {
+    headers: { "Cache-Control": "no-store" },
+  });
+}
 
 const worker = {
-  async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
+  async fetch(request: Request, env: Env, ctx: ExecutionContext) {
     const url = new URL(request.url);
 
     if (url.pathname === "/api/live-news") {
-      if (url.searchParams.get("scope") === "prepared-world") {
-        return handlePreparedWorld(request, env, ctx);
+      if (url.searchParams.get("scope") === "world-live") {
+        return handleLiveWorld(env);
       }
       if (
+        url.searchParams.get("scope") === "prepared-world" ||
         url.searchParams.get("scope") === "snapshot" ||
         url.searchParams.get("snapshot") === "1"
       ) {
-        return handleWorldSnapshot(request, env, ctx);
+        return Response.json(
+          { error: "Snapshot endpoints have been removed. Use scope=world-live." },
+          { status: 410, headers: { "Cache-Control": "no-store" } },
+        );
       }
       return handleCachedLiveNews(request, env, ctx);
     }
 
     if (url.pathname === "/api/diagnostics/world") {
-      return handleWorldDiagnostics(env);
+      return handleLiveWorldDiagnostics(env);
     }
 
     if (url.pathname === "/api/world-directory") {
@@ -966,7 +525,8 @@ const worker = {
         },
         {
           headers: {
-            "Cache-Control": "public, max-age=86400, stale-while-revalidate=604800",
+            "Cache-Control":
+              "public, max-age=86400, stale-while-revalidate=604800",
           },
         },
       );
@@ -975,35 +535,68 @@ const worker = {
     if (url.pathname === "/api/world-geometry") {
       return new Response(worldGeometrySource, {
         headers: {
-          "Cache-Control": "public, max-age=86400, stale-while-revalidate=604800",
+          "Cache-Control":
+            "public, max-age=86400, stale-while-revalidate=604800",
           "Content-Type": "application/geo+json; charset=utf-8",
         },
       });
     }
 
-    if (url.pathname === "/api/live-video") {
-      return handleLiveVideo(request);
-    }
+    if (url.pathname === "/api/live-video") return handleLiveVideo(request);
 
     if (url.pathname === "/_vinext/image") {
       const allowedWidths = [...DEFAULT_DEVICE_SIZES, ...DEFAULT_IMAGE_SIZES];
-      return handleImageOptimization(request, {
-        fetchAsset: (path) => env.ASSETS.fetch(new Request(new URL(path, request.url))),
-        transformImage: async (body, { width, format, quality }) => {
-          const result = await env.IMAGES.input(body).transform(width > 0 ? { width } : {}).output({ format, quality });
-          return result.response();
+      return handleImageOptimization(
+        request,
+        {
+          fetchAsset: (path) =>
+            env.ASSETS.fetch(new Request(new URL(path, request.url))),
+          transformImage: async (body, { width, format, quality }) => {
+            const result = await env.IMAGES.input(body)
+              .transform(width > 0 ? { width } : {})
+              .output({ format, quality });
+            return result.response();
+          },
         },
-      }, allowedWidths);
+        allowedWidths,
+      );
     }
 
     return handler.fetch(request, env, ctx);
   },
   async scheduled(
-    _controller: ScheduledController,
+    controller: ScheduledController,
     env: Env,
     ctx: ExecutionContext,
   ) {
-    ctx.waitUntil(refreshMinuteWorldState(env));
+    const scheduledAt = new Date(controller.scheduledTime);
+    ctx.waitUntil(Promise.all([
+      refreshStoredGlobalFeedSafely(env),
+      enqueueCountryRefreshJobs(env, scheduledAt),
+    ]));
+  },
+  async queue(batch: MessageBatch<CountryRefreshJob>, env: Env) {
+    for (const message of batch.messages) {
+      try {
+        const job = message.body;
+        if (
+          job.version !== 1 ||
+          !Array.isArray(job.countries) ||
+          !job.countries.length ||
+          job.countries.length > LIVE_COUNTRY_REFRESH_JOB_SIZE
+        ) {
+          throw new Error("Invalid country refresh job.");
+        }
+        await refreshLiveCountries(env, job.countries);
+        message.ack();
+      } catch (error) {
+        console.error(JSON.stringify({
+          event: "news_refresh_job_failed",
+          error: error instanceof Error ? error.message : "unknown error",
+        }));
+        message.retry({ delaySeconds: 60 });
+      }
+    }
   },
 };
 
