@@ -1996,7 +1996,7 @@ export function WorldPulseApp({
       if (MapComponent === WorldMap) {
         try {
           const response = await fetch("/api/world-directory", {
-          signal: AbortSignal.timeout(LIVE_WORLD_REQUEST_TIMEOUT_MS),
+            signal: AbortSignal.timeout(LIVE_WORLD_REQUEST_TIMEOUT_MS),
           });
           if (!response.ok) throw new Error("World directory is unavailable.");
           const payload = (await response.json()) as {
