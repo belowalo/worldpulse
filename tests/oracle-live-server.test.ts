@@ -38,7 +38,12 @@ describe("Oracle live server", () => {
       countryName: "Iran",
       generatedAt: "2026-08-21T00:00:00.000Z",
       available: true,
-      articles: [article("current")],
+      articles: [
+        {
+          ...article("current"),
+          title: "Iran announces a new national infrastructure plan",
+        },
+      ],
     };
     const incoming: MapNewsCountryPayload = {
       countryName: "Iran",
@@ -50,6 +55,29 @@ describe("Oracle live server", () => {
     expect(merged.generatedAt).toBe(incoming.generatedAt);
     expect(merged.available).toBe(true);
     expect(merged.articles.map((item) => item.id)).toEqual(["current"]);
+  });
+
+  it("purges topic labels and Palestine locality collisions from persisted state", () => {
+    const publishedAt = new Date().toISOString();
+    const current: MapNewsCountryPayload = {
+      countryName: "Palestine",
+      generatedAt: publishedAt,
+      available: true,
+      articles: [
+        { ...article("topic", publishedAt), title: "Israel & Palestine" },
+        {
+          ...article("new-palestine", publishedAt),
+          title: "New Palestine wins Indiana high school football opener",
+        },
+        {
+          ...article("gaza-aid", publishedAt),
+          title: "Palestinian officials discuss aid deliveries in Gaza",
+        },
+      ],
+    };
+
+    const merged = mergeCountryFeed("Palestine", current, undefined);
+    expect(merged.articles.map((item) => item.id)).toEqual(["gaza-aid"]);
   });
 
   it("retains distinct events before additional coverage of a dominant story", () => {

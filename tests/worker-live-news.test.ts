@@ -154,8 +154,7 @@ describe("worker live-news providers", () => {
       </item></channel></rss>
     `;
 
-    const [article] = parseGoogleNewsFeed(xml);
-    expect(articleMatchesCountry(article, ["Canada", "Canadian"])).toBe(false);
+    expect(parseGoogleNewsFeed(xml)).toEqual([]);
   });
 
   it("rejects generic publisher index pages as country events", () => {
@@ -171,6 +170,39 @@ describe("worker live-news providers", () => {
     `;
 
     expect(parseGoogleNewsFeed(xml)).toEqual([]);
+  });
+
+  it("rejects a publisher topic label masquerading as an event headline", () => {
+    const xml = `
+      <rss><channel><item>
+        <title>Israel &amp; Palestine - Democracy Now!</title>
+        <description>Israel &amp; Palestine Democracy Now!</description>
+        <link>https://news.google.com/rss/articles/democracy-now-topic</link>
+        <guid>democracy-now-topic</guid>
+        <pubDate>Sun, 26 Jul 2026 21:06:00 GMT</pubDate>
+        <source url="https://www.democracynow.org/">Democracy Now!</source>
+      </item></channel></rss>
+    `;
+
+    expect(parseGoogleNewsFeed(xml)).toEqual([]);
+  });
+
+  it("rejects U.S. locality collisions from the Palestine country feed", () => {
+    const terms = countrySearchTerms("Palestine");
+    expect(
+      articleMatchesCountry(
+        { searchableText: "New Palestine wins Indiana high school football opener" },
+        terms,
+        "Palestine",
+      ),
+    ).toBe(false);
+    expect(
+      articleMatchesCountry(
+        { searchableText: "Palestinian officials discuss aid deliveries in Gaza" },
+        terms,
+        "Palestine",
+      ),
+    ).toBe(true);
   });
 
   it("parses Bing News publisher attribution and restores the article URL", () => {
@@ -754,7 +786,7 @@ describe("worker live-news providers", () => {
     const requestedUrls: string[] = [];
     const bingItem = `
       <rss><channel><item>
-        <title>São Tomé current affairs</title>
+        <title>São Tomé government expands coastal protection program</title>
         <description>Current reporting from São Tomé and Principe.</description>
         <link>https://regional.example/sao-tome-story</link>
         <guid>sao-tome-story</guid>

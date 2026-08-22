@@ -314,6 +314,31 @@ describe("live news normalization", () => {
     expect(events[0].importanceScore).toBeGreaterThan(0);
   });
 
+  it("does not build an event from a cached publisher topic label", () => {
+    const events = buildLiveEvents(
+      {
+        countryName: "Palestine",
+        scope: "country",
+        generatedAt: "2026-08-21T18:00:00.000Z",
+        refreshAfterSeconds: 60,
+        provider: "Test RSS",
+        articles: [
+          {
+            id: "democracy-now-topic",
+            title: "Israel & Palestine",
+            url: "https://news.google.com/rss/articles/democracy-now-topic",
+            publisherName: "Democracy Now!",
+            publisherUrl: "https://www.democracynow.org/",
+            publishedAt: "2026-08-21T17:37:00.000Z",
+          },
+        ],
+      },
+      { name: "Palestine", iso2: "PS" },
+    );
+
+    expect(events).toEqual([]);
+  });
+
   it("matches global headlines to a country", () => {
     expect(articlesMentioningCountry(payload, "Canada")).toHaveLength(2);
     expect(articlesMentioningCountry(payload, "Japan")).toHaveLength(0);

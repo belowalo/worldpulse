@@ -1,8 +1,8 @@
-import { isProviderErrorArticleTitle } from "../lib/news-quality";
 import {
-  countrySearchTerms,
-  textMatchesCountry,
-} from "../lib/country-terms";
+  isNonEventNewsTitle,
+  isProviderErrorArticleTitle,
+} from "../lib/news-quality";
+import { textMatchesCountryName } from "../lib/country-terms";
 
 const ARTICLE_RETENTION_MS = 8 * 24 * 60 * 60_000;
 
@@ -37,17 +37,15 @@ function mergeCachedArticles(
       const description =
         typeof candidate.description === "string" ? candidate.description : "";
       if (
-        !textMatchesCountry(
-          `${title} ${description}`,
-          countrySearchTerms(countryName),
-        )
+        !textMatchesCountryName(`${title} ${description}`, countryName)
       ) {
         continue;
       }
     }
     if (
       typeof candidate.title === "string" &&
-      isProviderErrorArticleTitle(candidate.title)
+      (isProviderErrorArticleTitle(candidate.title) ||
+        isNonEventNewsTitle(candidate.title))
     ) {
       continue;
     }

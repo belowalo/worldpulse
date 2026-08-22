@@ -3,6 +3,8 @@ import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { buildLiveEvents } from "../lib/live-news";
+import { textMatchesCountryName } from "../lib/country-terms";
+import { isNonEventNewsTitle } from "../lib/news-quality";
 import type {
   LiveArticle,
   LiveNewsPayload,
@@ -72,13 +74,25 @@ function articleKey(article: LiveArticle) {
   return article.url || article.id || article.title;
 }
 
+function isValidCountryArticle(countryName: string, article: LiveArticle) {
+  return (
+    !isNonEventNewsTitle(article.title) &&
+    textMatchesCountryName(
+      `${article.title} ${article.description ?? ""}`,
+      countryName,
+    )
+  );
+}
+
 export function selectDiverseCountryArticles(
   countryName: string,
   articles: LiveArticle[],
   limit = MAX_ARTICLES_PER_COUNTRY,
   now = Date.now(),
 ) {
-  const ranked = [...articles].sort(
+  const ranked = articles
+    .filter((article) => isValidCountryArticle(countryName, article))
+    .sort(
     (left, right) =>
       Date.parse(right.publishedAt) - Date.parse(left.publishedAt),
   );
@@ -129,7 +143,12 @@ export function mergeCountryFeed(
 ): MapNewsCountryPayload {
   const articles = new Map<string, LiveArticle>();
   for (const article of [...(incoming?.articles ?? []), ...(current?.articles ?? [])]) {
-    if (!isCurrentArticle(article, now)) continue;
+    if (
+      !isCurrentArticle(article, now) ||
+      !isValidCountryArticle(countryName, article)
+    ) {
+      continue;
+    }
     const key = articleKey(article);
     if (!articles.has(key)) articles.set(key, article);
   }
@@ -180,7 +199,9 @@ export function buildWorldPayload(
     global: state.global ?? emptyGlobalFeed(),
     countries: countryNames.map((countryName) => {
       const country = state.countries[countryName] ?? emptyCountry(countryName);
-      const articles = country.articles.slice(0, MAX_ARTICLES_PER_COUNTRY);
+      const articles = country.articles
+        .filter((article) => isValidCountryArticle(countryName, article))
+        .slice(0, MAX_ARTICLES_PER_COUNTRY);
       return {
         ...country,
         available: articles.length > 0,

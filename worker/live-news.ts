@@ -2,10 +2,14 @@ import {
   canonicalCountryName,
   countrySearchTerms,
   textMatchesCountry,
+  textMatchesCountryName,
 } from "../lib/country-terms";
 import { googleNewsLocaleForCountry } from "../lib/country-locale";
 import { newsTextTokens } from "../lib/live-news";
-import { isProviderErrorArticleTitle } from "../lib/news-quality";
+import {
+  isNonEventNewsTitle,
+  isProviderErrorArticleTitle,
+} from "../lib/news-quality";
 
 export { isProviderErrorArticleTitle } from "../lib/news-quality";
 
@@ -376,16 +380,9 @@ function buildCandidate(
   const searchableDescription = publisherPattern
     ? cleanDescription.replace(new RegExp(publisherPattern, "giu"), " ")
     : cleanDescription;
-  const isGenericNewsIndex =
-    /\bnews\s*\|\s*today(?:'|’)?s latest stories\s*\|\s*reuters$/iu.test(
-      cleanTitle,
-    ) ||
-    /^(?:latest|breaking)\s+.+\s+news(?:\s+and\s+headlines)?$/iu.test(
-      cleanTitle,
-    );
   if (
     !cleanTitle ||
-    isGenericNewsIndex ||
+    isNonEventNewsTitle(cleanTitle) ||
     !safeUrl ||
     !cleanPublisherName ||
     !safePublishedAt
@@ -973,7 +970,7 @@ async function fetchMapCountry(
         fetchImpl,
       ),
   );
-  let relevantResults = countryRelevantResults(results, terms);
+  let relevantResults = countryRelevantResults(results, terms, countryName);
   const relevantArticleCount = relevantResults.reduce(
     (total, result) => total + result.articles.length,
     0,
@@ -998,8 +995,8 @@ async function fetchMapCountry(
     results.push(latestCountryResult, alternateCountryResult);
     relevantResults = [
       ...relevantResults,
-      ...countryRelevantResults([latestCountryResult], terms),
-      ...countryRelevantResults([alternateCountryResult], terms),
+      ...countryRelevantResults([latestCountryResult], terms, countryName),
+      ...countryRelevantResults([alternateCountryResult], terms, countryName),
     ];
     const retryArticleCount = relevantResults.reduce(
       (total, result) => total + result.articles.length,
@@ -1016,7 +1013,11 @@ async function fetchMapCountry(
       results.push(internationalGoogleResult);
       relevantResults = [
         ...relevantResults,
-        ...countryRelevantResults([internationalGoogleResult], terms),
+        ...countryRelevantResults(
+          [internationalGoogleResult],
+          terms,
+          countryName,
+        ),
       ];
     }
   }
@@ -1037,25 +1038,32 @@ async function fetchMapCountry(
 export function articleMatchesCountry(
   article: Pick<CandidateArticle, "searchableText">,
   terms: string[],
+  countryName?: string,
 ) {
-  return textMatchesCountry(article.searchableText, terms);
+  return countryName
+    ? textMatchesCountryName(article.searchableText, countryName)
+    : textMatchesCountry(article.searchableText, terms);
 }
 
 export function articleHeadlineMatchesCountry(
   article: Pick<CandidateArticle, "title">,
   terms: string[],
+  countryName?: string,
 ) {
-  return textMatchesCountry(article.title, terms);
+  return countryName
+    ? textMatchesCountryName(article.title, countryName)
+    : textMatchesCountry(article.title, terms);
 }
 
 function countryRelevantResults(
   results: ProviderResult[],
   terms: string[],
+  countryName: string,
 ) {
   return results.map((result) => ({
     ...result,
     articles: result.articles.filter((article) =>
-      articleMatchesCountry(article, terms),
+      articleMatchesCountry(article, terms, countryName),
     ),
   }));
 }
@@ -1104,7 +1112,11 @@ async function fetchProvider(
     const articles =
       scope === "country" && provider.filterByCountry
         ? parsed.filter((article) =>
-            articleHeadlineMatchesCountry(article, terms),
+            articleHeadlineMatchesCountry(
+              article,
+              terms,
+              countryName ?? undefined,
+            ),
           )
         : parsed;
     return { name: provider.name, ok: true, articles };
@@ -1332,7 +1344,11 @@ export async function handleLiveNews(
       fetchProvider(provider, scope, countryName, terms, fetchImpl),
   );
   if (scope === "country") {
-    let relevantResults = countryRelevantResults(results, terms);
+    let relevantResults = countryRelevantResults(
+      results,
+      terms,
+      countryName!,
+    );
     const relevantArticleCount = relevantResults.reduce(
       (total, result) => total + result.articles.length,
       0,
@@ -1352,7 +1368,11 @@ export async function handleLiveNews(
           results[resultIndex] = retry;
         }
       });
-      relevantResults = countryRelevantResults(results, terms);
+      relevantResults = countryRelevantResults(
+        results,
+        terms,
+        countryName!,
+      );
     }
     results = relevantResults;
   }

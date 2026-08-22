@@ -35,6 +35,27 @@ describe("live response cache merging", () => {
     expect(merged.articles).toEqual([]);
   });
 
+  it("removes cached publisher topic labels", () => {
+    const merged = JSON.parse(
+      mergeCachedPayloads(
+        JSON.stringify({ scope: "global", articles: [] }),
+        JSON.stringify({
+          scope: "global",
+          articles: [
+            {
+              id: "democracy-now-topic",
+              title: "Israel & Palestine",
+              url: "https://news.google.com/rss/articles/democracy-now-topic",
+              publishedAt: new Date().toISOString(),
+            },
+          ],
+        }),
+      ),
+    ) as { articles: unknown[] };
+
+    expect(merged.articles).toEqual([]);
+  });
+
   it("keeps a recent country signal when a fresh provider response is empty", () => {
     const publishedAt = new Date(Date.now() - 60 * 60_000).toISOString();
     const stored = JSON.stringify({

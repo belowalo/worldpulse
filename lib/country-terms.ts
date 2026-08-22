@@ -112,6 +112,14 @@ const COUNTRY_RELATED_TERMS: Record<string, string[]> = {
   "Northern Cyprus": ["Turkish Cypriot", "North Cyprus"],
   "Northern Mariana Islands": ["CNMI", "Saipan", "Marianas"],
   Palau: ["Koror", "Palauan"],
+  Palestine: [
+    "Palestinian",
+    "Gaza",
+    "West Bank",
+    "Ramallah",
+    "Palestinian Authority",
+    "State of Palestine",
+  ],
   Samoa: ["Apia", "Samoan"],
   "Solomon Islands": ["Honiara", "Solomon Islander"],
   Tonga: ["Nuku'alofa", "Tongan"],
@@ -283,4 +291,24 @@ function countryTermPattern(term: string) {
 
 export function textMatchesCountry(text: string, terms: string[]) {
   return terms.some((term) => countryTermPattern(term).test(text));
+}
+
+/** Matches a country while rejecting well-known place-name collisions. */
+export function textMatchesCountryName(text: string, countryName: string) {
+  const canonicalName = canonicalCountryName(countryName);
+  if (!textMatchesCountry(text, countrySearchTerms(countryName))) return false;
+
+  if (canonicalName === "Palestine") {
+    const hasPalestinianContext =
+      /\b(?:Palestinian|Gaza|West Bank|Ramallah|Hamas|Fatah|Palestinian Authority|State of Palestine)\b/iu.test(
+        text,
+      );
+    const hasUnrelatedLocality =
+      /\b(?:East|New) Palestine\b|\bPalestine\s*,?\s*(?:Texas|TX|Ohio|OH|Illinois|IL|Indiana|IN)\b/iu.test(
+        text,
+      );
+    if (hasUnrelatedLocality && !hasPalestinianContext) return false;
+  }
+
+  return true;
 }

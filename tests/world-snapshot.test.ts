@@ -412,7 +412,12 @@ describe("prepared minute world state", () => {
         countryName: "Gabon",
         generatedAt,
         available: true,
-        articles: [liveArticle("gabon-old", "Gabon current affairs")],
+        articles: [
+          liveArticle(
+            "gabon-old",
+            "Gabon parliament approves a new infrastructure program",
+          ),
+        ],
       }],
       directory,
       generatedAt,

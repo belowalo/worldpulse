@@ -8,6 +8,7 @@ import {
   countrySearchTerms,
   textMatchesCountry,
 } from "./country-terms";
+import { isNonEventNewsTitle } from "./news-quality";
 import type {
   Article,
   Category,
@@ -1424,7 +1425,9 @@ export function buildLiveEvents(
   const primaryCountry = country?.iso2 ?? country?.name ?? "GLOBAL";
   const scope: GeographicScope = country ? "National" : "International";
 
-  const { analyses, clusters } = clusterArticles(payload.articles);
+  const { analyses, clusters } = clusterArticles(
+    payload.articles.filter((article) => !isNonEventNewsTitle(article.title)),
+  );
   return clusters
     .map((cluster): Event => {
       const sourceArticles = distinctPublisherArticles(cluster);
