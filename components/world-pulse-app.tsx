@@ -560,10 +560,13 @@ function MethodologyModal({ onClose }: { onClose: () => void }) {
           <p>
             Publisher lean labels use a checked Ground News ratings snapshot
             dated July 26, 2026. They describe publications—not individual
-            articles or events—use a U.S.-political reference frame, and exclude
-            unrated publishers from percentage calculations. Where available,
+            articles or events—and use a U.S.-political reference frame. They
+            appear only for politics, economy, conflict and security, and crime
+            and justice stories. Unrated publishers remain visible and count
+            toward the displayed percentages. For those public-affairs topics,
             source selection broadens viewpoint representation before using
-            prominence and recency as tie-breakers.
+            prominence and recency as tie-breakers; other topics use prominence
+            and recency only.
           </p>
         </div>
       </section>

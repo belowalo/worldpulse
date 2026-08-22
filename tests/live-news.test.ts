@@ -832,9 +832,9 @@ describe("live news normalization", () => {
           ["Local Desk", "https://local.example/"],
         ].map(([publisherName, publisherUrl], index) => ({
           id: `balanced-${index}`,
-          title: `Canada wildfire response expands across western provinces ${index}`,
+          title: `Canada parliament election campaign expands nationwide ${index}`,
           description:
-            "Canada is expanding its response to major western wildfires.",
+            "Canada's federal election campaign is expanding nationwide.",
           url: `${publisherUrl}story-${index}`,
           publisherName,
           publisherUrl,
@@ -852,5 +852,38 @@ describe("live news normalization", () => {
     expect(
       event.articles.map((article) => article.source.publisherName),
     ).toContain("New York Post");
+  });
+
+  it("uses prominence and recency rather than political balance for sports", () => {
+    const [event] = buildLiveEvents(
+      {
+        ...payload,
+        articles: [
+          ["Reuters", "https://reuters.com/"],
+          ["Associated Press", "https://apnews.com/"],
+          ["BBC News", "https://bbc.com/"],
+          ["The New York Times", "https://nytimes.com/"],
+          ["The Washington Post", "https://washingtonpost.com/"],
+          ["CNN", "https://cnn.com/"],
+          ["National Review", "https://nationalreview.com/"],
+        ].map(([publisherName, publisherUrl], index) => ({
+          id: `sports-${index}`,
+          title: `Canada wins international hockey championship final ${index}`,
+          description:
+            "Canada won the international hockey championship final.",
+          url: `${publisherUrl}story-${index}`,
+          publisherName,
+          publisherUrl,
+          publishedAt: `2026-07-24T${23 - index}:00:00.000Z`,
+        })),
+      },
+      { name: "Canada", iso2: "CA" },
+    );
+
+    expect(event.category).toBe("Sports");
+    expect(event.articles).toHaveLength(5);
+    expect(
+      event.articles.map((article) => article.source.publisherName),
+    ).not.toContain("National Review");
   });
 });

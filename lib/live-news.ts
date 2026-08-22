@@ -2,6 +2,7 @@ import { calculateImportance } from "./scoring";
 import {
   canonicalPublisherKey,
   publisherBiasRating,
+  showsPublisherPerspective,
 } from "./publisher-bias";
 import {
   countrySearchTerms,
@@ -1119,6 +1120,7 @@ function selectBalancedSources<T>(
   publisherName: (item: T) => string,
   publishedAt: (item: T) => string,
   limit = 5,
+  balancePerspectives = true,
 ) {
   const ranked = [...items].sort(
     (left, right) =>
@@ -1126,6 +1128,8 @@ function selectBalancedSources<T>(
         publisherProminence(publisherName(left)) ||
       Date.parse(publishedAt(right)) - Date.parse(publishedAt(left)),
   );
+  if (!balancePerspectives) return ranked.slice(0, limit);
+
   const selected: T[] = [];
   const selectedItems = new Set<T>();
   const takeFirst = (bucket: "left" | "center" | "right") => {
@@ -1193,6 +1197,8 @@ export function mergeCanonicalEvents(
     allArticles,
     (article) => article.source.publisherName,
     (article) => article.publishedAt,
+    5,
+    showsPublisherPerspective(canonicalEvent.category),
   );
   const affectedCountries = [
     ...new Set(
@@ -1422,11 +1428,6 @@ export function buildLiveEvents(
   return clusters
     .map((cluster): Event => {
       const sourceArticles = distinctPublisherArticles(cluster);
-      const visibleSourceArticles = selectBalancedSources(
-        sourceArticles,
-        (article) => article.publisherName,
-        (article) => article.publishedAt,
-      );
       const representative = representativeArticle(cluster, analyses);
       const headline = representative?.title ?? "Current report";
       const classificationText = [
@@ -1441,6 +1442,13 @@ export function buildLiveEvents(
         headlineCategory === "Local affairs"
           ? classifyLiveHeadline(classificationText)
           : headlineCategory;
+      const visibleSourceArticles = selectBalancedSources(
+        sourceArticles,
+        (article) => article.publisherName,
+        (article) => article.publishedAt,
+        5,
+        showsPublisherPerspective(eventCategory),
+      );
       const eventId = `live-event-${stableId(headline.toLowerCase())}`;
       const articles = visibleSourceArticles
         .map((article, index): Article => {
@@ -1598,6 +1606,8 @@ export function enrichEventWithCoverage(
     allArticles,
     (article) => article.source.publisherName,
     (article) => article.publishedAt,
+    5,
+    showsPublisherPerspective(event.category),
   );
   const matchedPublisherCount = Math.max(
     event.matchedPublisherCount ?? 0,
