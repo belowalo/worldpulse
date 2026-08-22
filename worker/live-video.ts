@@ -401,7 +401,7 @@ function youtubeRequestInit() {
     headers: {
       "Accept-Language": "en-US,en;q=0.9",
       "User-Agent":
-        "Mozilla/5.0 (compatible; WorldPulse/1.3; live coverage index)",
+        "Mozilla/5.0 (compatible; HemisphereHerald/1.3; live coverage index)",
     },
     signal: AbortSignal.timeout(8_000),
   };

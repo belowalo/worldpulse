@@ -28,7 +28,7 @@ export async function generateMetadata(): Promise<Metadata> {
         ? "http"
         : "https";
   const origin = `${protocol}://${host}`;
-  const title = "WorldPulse — Global news, mapped";
+  const title = "Hemisphere Herald — Global news, mapped";
   const description =
     "An interactive world-news tracker mapping current reporting across every country and territory.";
   return {

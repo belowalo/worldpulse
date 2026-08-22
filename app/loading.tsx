@@ -10,7 +10,7 @@ export default function Loading() {
           <div className="h-48 animate-pulse rounded-xl bg-[#111a29]" />
         </div>
       </div>
-      <span className="sr-only">Loading WorldPulse</span>
+      <span className="sr-only">Loading Hemisphere Herald</span>
     </main>
   );
 }

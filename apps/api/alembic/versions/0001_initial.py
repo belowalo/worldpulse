@@ -1,4 +1,4 @@
-"""Initial WorldPulse schema."""
+"""Initial Hemisphere Herald schema."""
 
 import sqlalchemy as sa
 

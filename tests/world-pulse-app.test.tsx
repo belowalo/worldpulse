@@ -104,7 +104,7 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-describe("WorldPulse live country delivery", () => {
+describe("Hemisphere Herald live country delivery", () => {
   it("keeps non-live embeds interactive without network access", () => {
     const fetchMock = vi.fn();
     vi.stubGlobal("fetch", fetchMock);

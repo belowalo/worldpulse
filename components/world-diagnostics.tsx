@@ -50,7 +50,7 @@ export function WorldDiagnostics() {
       <div className="mx-auto max-w-6xl">
         <header className="flex flex-wrap items-start justify-between gap-4 border-b border-[#283447] pb-6">
           <div>
-            <Link href="/" className="font-mono text-xs uppercase tracking-[0.18em] text-[#73e2cc]">WorldPulse</Link>
+            <Link href="/" className="font-mono text-xs uppercase tracking-[0.18em] text-[#73e2cc]">Hemisphere Herald</Link>
             <h1 className="mt-3 text-3xl font-semibold tracking-[-0.04em]">World feed health</h1>
             <p className="mt-2 max-w-2xl text-sm leading-6 text-[#9aa5b5]">Live-index freshness, country coverage, and upstream provider status. This view refreshes once a minute.</p>
           </div>

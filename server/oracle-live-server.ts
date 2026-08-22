@@ -103,7 +103,7 @@ function emptyGlobalFeed(): LiveNewsPayload {
     scope: "global",
     generatedAt: "1970-01-01T00:00:00.000Z",
     refreshAfterSeconds: 60,
-    provider: "WorldPulse live server is starting",
+    provider: "Hemisphere Herald live server is starting",
     degraded: true,
     articles: [],
   };
@@ -126,7 +126,7 @@ export function buildWorldPayload(
     scope: "world-live",
     generatedAt: state.updatedAt,
     refreshAfterSeconds: 60,
-    provider: "WorldPulse continuous Oracle country index",
+    provider: "Hemisphere Herald continuous Oracle country index",
     global: state.global ?? emptyGlobalFeed(),
     countries: countryNames.map((countryName) => {
       const country = state.countries[countryName] ?? emptyCountry(countryName);

@@ -516,7 +516,7 @@ function MethodologyModal({ onClose }: { onClose: () => void }) {
         <div className="flex items-start justify-between gap-4">
           <div>
             <p className="font-mono text-[10px] uppercase tracking-[0.2em] text-[#73e2cc]">
-              How WorldPulse works
+              How Hemisphere Herald works
             </p>
             <h2
               id="methodology-title"
@@ -535,7 +535,7 @@ function MethodologyModal({ onClose }: { onClose: () => void }) {
           </button>
         </div>
         <p className="mt-5 text-sm leading-6 text-[#b5bfcd]">
-          WorldPulse groups public headline metadata into developing events and
+          Hemisphere Herald groups public headline metadata into developing events and
           estimates their relative impact on a 0–100 scale. The score is an
           orientation tool, not an objective fact or a judgment about human
           worth.
@@ -563,7 +563,7 @@ function MethodologyModal({ onClose }: { onClose: () => void }) {
           <p>
             Reports enter a country feed only when that country is explicitly
             identified in available headline metadata. A country with no
-            current verified match stays neutral; WorldPulse does not invent a
+            current verified match stays neutral; Hemisphere Herald does not invent a
             story to fill the map. Coverage can still be uneven where
             accessible digital reporting is limited.
           </p>
@@ -1060,7 +1060,7 @@ function LiveNewsDirectory() {
             No major newsrooms are live right now
           </p>
           <p className="mt-2 text-xs leading-5 text-[#8996a8]">
-            WorldPulse will check again automatically, or you can refresh now.
+            Hemisphere Herald will check again automatically, or you can refresh now.
           </p>
           <button
             type="button"
@@ -1463,7 +1463,7 @@ function WorldLoadingScreen({
           </div>
           <div>
             <p className="font-mono text-[9px] uppercase tracking-[0.28em] text-[#73e2cc]">
-              WorldPulse
+              Hemisphere Herald
             </p>
             <h1 className="mt-3 text-3xl font-semibold tracking-[-0.05em] text-white sm:text-4xl">
               Preparing the live world
@@ -1531,13 +1531,13 @@ function WorldStartupError() {
     >
       <section className="max-w-lg rounded-2xl border border-[#5b3641] bg-[#0b111c] p-8 shadow-2xl">
         <p className="font-mono text-[9px] uppercase tracking-[0.24em] text-[#d87582]">
-          WorldPulse
+          Hemisphere Herald
         </p>
         <h1 className="mt-3 text-2xl font-semibold text-white">
           The live world feed is unavailable
         </h1>
         <p className="mt-3 text-sm leading-6 text-[#9aa8ba]">
-          WorldPulse could not reach or prepare the current server feed. Reload
+          Hemisphere Herald could not reach or prepare the current server feed. Reload
           to reconnect.
         </p>
         <button
@@ -2139,7 +2139,7 @@ export function WorldPulseApp({
           </div>
           <div>
             <div className="text-sm font-semibold tracking-[-0.02em]">
-              WorldPulse
+              Hemisphere Herald
             </div>
             <div className="hidden font-mono text-[8px] uppercase tracking-[0.19em] text-[#7f8da1] sm:block">
               News around the world

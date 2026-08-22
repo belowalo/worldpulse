@@ -870,8 +870,8 @@ export function WorldMap({
           viewer.destroy();
           return;
         }
-        const markers = new runtime.CustomDataSource("WorldPulse markers");
-        const arcs = new runtime.CustomDataSource("WorldPulse connections");
+        const markers = new runtime.CustomDataSource("Hemisphere Herald markers");
+        const arcs = new runtime.CustomDataSource("Hemisphere Herald connections");
         await Promise.all([
           viewer.dataSources.add(countryDataSource),
           viewer.dataSources.add(markers),
@@ -1211,7 +1211,7 @@ export function WorldMap({
             <div className="text-3xl text-[#d36b7b]">!</div>
             <p className="mt-3 text-sm text-[#d4dbe5]">{mapError}</p>
             <p className="mt-2 text-xs text-[#8290a3]">
-              Try enabling hardware acceleration, then reload WorldPulse.
+              Try enabling hardware acceleration, then reload Hemisphere Herald.
             </p>
           </div>
         </div>

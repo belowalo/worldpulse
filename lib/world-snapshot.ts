@@ -191,7 +191,7 @@ export function prepareWorldSnapshotFeeds(
       scope: "country",
       generatedAt: countryPayload.generatedAt,
       refreshAfterSeconds: 300,
-      provider: "WorldPulse",
+      provider: "Hemisphere Herald",
       // The globe renders at most twenty country events. Bounding the input
       // prevents thousands of extra similarity comparisons on every poll.
       articles: countryPayload.articles.slice(0, MAX_PREPARED_COUNTRY_EVENTS),
@@ -201,7 +201,7 @@ export function prepareWorldSnapshotFeeds(
       // publishing this record, so the browser should not filter it again.
       events: buildLiveEvents(livePayload, country),
       updatedAt: countryPayload.generatedAt,
-      provider: "WorldPulse",
+      provider: "Hemisphere Herald",
       loading: false,
       error: null,
     };
@@ -295,7 +295,7 @@ export function prepareCompleteWorldSnapshotFromFeeds(
         ? mergeEventFeeds(latestLocalEvents, matchingGlobalEvents)
         : latestLocalEvents,
       updatedAt: localFeed?.updatedAt ?? generatedAt,
-      provider: "WorldPulse \u00b7 minute world state",
+      provider: "Hemisphere Herald \u00b7 minute world state",
       loading: false,
       error: null,
     };

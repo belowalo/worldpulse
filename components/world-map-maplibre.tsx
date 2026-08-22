@@ -326,7 +326,7 @@ function emptyFeatureCollection() {
 function createMapStyle(): StyleSpecification {
   return {
     version: 8,
-    name: "WorldPulse satellite globe",
+    name: "Hemisphere Herald satellite globe",
     sources: {
       satellite: {
         type: "raster",
@@ -1050,7 +1050,7 @@ export function WorldMap({
             <div className="text-3xl text-[#d36b7b]">!</div>
             <p className="mt-3 text-sm text-[#d4dbe5]">{mapError}</p>
             <p className="mt-2 text-xs text-[#8290a3]">
-              Try enabling hardware acceleration, then reload WorldPulse.
+              Try enabling hardware acceleration, then reload Hemisphere Herald.
             </p>
           </div>
         </div>

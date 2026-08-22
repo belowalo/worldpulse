@@ -9,7 +9,7 @@ class NewsProvider(ABC):
         ...
 ```
 
-Provider output contains a stable external ID, headline, canonical URL, publisher, publication time, and a licensed body excerpt. A provider must not directly assign WorldPulse event IDs or importance scores.
+Provider output contains a stable external ID, headline, canonical URL, publisher, publication time, and a licensed body excerpt. A provider must not directly assign Hemisphere Herald event IDs or importance scores.
 
 ## Adding an RSS provider
 
@@ -25,7 +25,7 @@ RSS content must not be extended with unsupported page scraping.
 ## Adding a licensed news API
 
 1. Add credentials only through environment variables or the deployment secret store.
-2. Map provider publisher IDs to WorldPulse `Source` records.
+2. Map provider publisher IDs to Hemisphere Herald `Source` records.
 3. Preserve canonical source URLs and provider provenance.
 4. Implement cursoring, quota handling, and idempotent replay.
 5. Respect retention and display requirements in the provider contract.
@@ -51,4 +51,4 @@ The hosted Cloudflare Worker exposes `/api/live-news` for global, country, map-b
 
 The Oracle live server continuously refreshes the oldest country records from multiple current indexes and refreshes the global provider set every five minutes. The client reads the complete live index through the Cloudflare proxy, polls it every minute, and uses the already-loaded country record whenever a country is selected. Articles must explicitly reference a country before they enter its signal. A failed provider call keeps current last-known-good articles visible while the collector continues retrying. There is no prepared-world, Cloudflare Queue, D1 world index, or R2 snapshot delivery path.
 
-This adapter does not fetch article bodies, bypass publisher access controls, or present feed metadata as original WorldPulse reporting. A future licensed provider can replace or supplement it without changing the map and panel contracts.
+This adapter does not fetch article bodies, bypass publisher access controls, or present feed metadata as original Hemisphere Herald reporting. A future licensed provider can replace or supplement it without changing the map and panel contracts.

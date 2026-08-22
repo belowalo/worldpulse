@@ -11,9 +11,9 @@ from .schemas import CountryOut, EventOut, PaginatedEvents
 from .services import get_country, get_event, list_countries, list_events
 
 app = FastAPI(
-    title="WorldPulse API",
+    title="Hemisphere Herald API",
     version="0.1.0",
-    description="Country and event signals for the WorldPulse MVP.",
+    description="Country and event signals for the Hemisphere Herald MVP.",
 )
 app.add_middleware(
     CORSMiddleware,

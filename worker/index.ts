@@ -1,4 +1,4 @@
-/** Cloudflare Worker entry point for WorldPulse. */
+/** Cloudflare Worker entry point for Hemisphere Herald. */
 import {
   DEFAULT_DEVICE_SIZES,
   DEFAULT_IMAGE_SIZES,

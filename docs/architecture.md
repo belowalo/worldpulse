@@ -2,7 +2,7 @@
 
 ## System overview
 
-WorldPulse separates presentation, domain scoring, ingestion contracts, and persistence.
+Hemisphere Herald separates presentation, domain scoring, ingestion contracts, and persistence.
 
 ```text
 Browser
@@ -39,7 +39,7 @@ The web app is at the repository root because the deployable Sites runtime expec
 - `public/countries.geojson` is a local, deployment-safe country dataset derived from the ISC-licensed `geojson-world-map` package.
 - `public/world-capitals.json` is the bundled ISO-to-capital coordinate index used for signal markers and selected-story connection endpoints.
 
-The globe supports pointer navigation and direct country selection across all 215 geometries in the bundled dataset. Cesium renders EOX Sentinel-2 cloudless imagery over Mapzen/AWS Terrarium elevation tiles served through the same-origin terrain cache. Translucent, ground-clamped GeoJSON polygons retain WorldPulse country colors while allowing the satellite surface to remain visible. Every mapped country receives one or more capital markers when capital data exists and a geographic-center fallback otherwise. The camera never rotates automatically, and country hover/selection updates only the indexed overlay entities rather than reprocessing the complete dataset.
+The globe supports pointer navigation and direct country selection across all 215 geometries in the bundled dataset. Cesium renders EOX Sentinel-2 cloudless imagery over Mapzen/AWS Terrarium elevation tiles served through the same-origin terrain cache. Translucent, ground-clamped GeoJSON polygons retain Hemisphere Herald country colors while allowing the satellite surface to remain visible. Every mapped country receives one or more capital markers when capital data exists and a geographic-center fallback otherwise. The camera never rotates automatically, and country hover/selection updates only the indexed overlay entities rather than reprocessing the complete dataset.
 
 Startup keeps the staged readiness screen visible while the live Oracle country index, immutable country directory, globe runtime, geometry, and capital index load in parallel. The live endpoint is not exposed as ready until every mapped country has been attempted at least once. The client refreshes the server index every minute. Country selection uses the already-loaded server record and never calls an upstream provider. The startup gate has a hard ten-second network deadline; failure becomes a terminal retry screen instead of an indefinite loader.
 

@@ -17,7 +17,7 @@ function preparedWorld(countryNames: string[]): PreparedWorldNewsPayload {
   const feed = {
     events: [],
     updatedAt: generatedAt,
-    provider: "WorldPulse",
+    provider: "Hemisphere Herald",
     loading: false as const,
     error: null,
   };

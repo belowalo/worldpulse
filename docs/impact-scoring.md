@@ -1,6 +1,6 @@
 # Impact scoring
 
-WorldPulse importance is a deterministic estimate, not an objective fact. It ranks editorial attention within the product; it does not measure the moral worth of people, countries, or subjects.
+Hemisphere Herald importance is a deterministic estimate, not an objective fact. It ranks editorial attention within the product; it does not measure the moral worth of people, countries, or subjects.
 
 ## Formula
 

@@ -1,1 +1,1 @@
-"""WorldPulse API package."""
+"""Hemisphere Herald API package."""

@@ -8,7 +8,7 @@ export default function ErrorPage({ reset }: { reset: () => void }) {
           Signal interrupted
         </p>
         <h1 className="mt-3 text-2xl font-semibold">
-          WorldPulse could not load.
+          Hemisphere Herald could not load.
         </h1>
         <p className="mt-2 text-sm text-[#9aa5b5]">
           Check your connection and try the news desk again.

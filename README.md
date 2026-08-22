@@ -1,6 +1,6 @@
-# WorldPulse
+# Hemisphere Herald
 
-WorldPulse is a production-quality MVP for exploring recent world news through an interactive globe. Each country's hue represents the category of its highest-impact active event, while intensity represents a deterministic 0–100 importance estimate. Clicking any mapped country opens the current server-indexed headlines, publisher links, timestamps, geographic scope, and a plain-language score explanation.
+Hemisphere Herald is a production-quality MVP for exploring recent world news through an interactive globe. Each country's hue represents the category of its highest-impact active event, while intensity represents a deterministic 0–100 importance estimate. Clicking any mapped country opens the current server-indexed headlines, publisher links, timestamps, geographic scope, and a plain-language score explanation.
 
 The hosted site is driven by a continuously running Oracle Always Free news server. Two collector lanes rotate through all 215 mapped countries without waiting for site traffic, while a separate global collector refreshes every five minutes. Each country scan combines current Google News, Bing News, GDELT, and available regional feeds, and keeps last-known-good current articles through transient provider failures. The website reads the server's complete in-memory index through a thin same-origin Cloudflare proxy every minute; opening the site or selecting a country never starts provider work. There is no prepared-world object, scheduled Cloudflare Queue, D1 world index, or R2 snapshot in the delivery path.
 
@@ -102,7 +102,7 @@ Copy `.env.example` to `.env`. Never commit real credentials.
 
 ## Impact scoring
 
-WorldPulse calculates rather than hard-codes importance labels:
+Hemisphere Herald calculates rather than hard-codes importance labels:
 
 - 25% independent source count and source-country diversity
 - 25% affected-country count and significance

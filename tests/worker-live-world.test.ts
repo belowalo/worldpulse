@@ -35,7 +35,7 @@ describe("live world delivery", () => {
       scope: "world-live",
       generatedAt: "2026-08-22T00:00:00.000Z",
       refreshAfterSeconds: 60,
-      provider: "WorldPulse continuous Oracle country index",
+      provider: "Hemisphere Herald continuous Oracle country index",
       global: { scope: "global", articles: [] },
       countries: [],
     };

@@ -1,5 +1,5 @@
 [Unit]
-Description=WorldPulse continuous country news collector
+Description=Hemisphere Herald continuous country news collector
 After=network-online.target
 Wants=network-online.target
 

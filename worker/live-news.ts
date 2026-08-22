@@ -1081,7 +1081,7 @@ async function fetchProvider(
       headers: {
         Accept:
           "application/rss+xml, application/json;q=0.9, application/xml;q=0.8, text/xml;q=0.7",
-        "User-Agent": "WorldPulse/1.1 (live news metadata reader)",
+        "User-Agent": "HemisphereHerald/1.1 (live news metadata reader)",
       },
       signal: AbortSignal.timeout(provider.timeoutMs),
     });
@@ -1424,7 +1424,7 @@ export async function handleLiveNews(
     provider:
       scope === "event"
         ? `Expanded topic search · ${successful.length} feeds`
-        : `WorldPulse live index · ${successful.length} feeds`,
+        : `Hemisphere Herald live index · ${successful.length} feeds`,
     providers: diagnostics,
     degraded: successful.length < providers.length,
     articles: mergeArticles(
