@@ -67,7 +67,6 @@ function geometryResponse() {
 function TestMap({
   countries: mapCountries,
   onSelect,
-  onSelectCapital,
   onReady,
   readyForDisplay,
   statusLabel,
@@ -83,25 +82,13 @@ function TestMap({
         {mapCountries.filter((country) => country.topEvent).length}
       </span>
       {mapCountries.map((country) => (
-        <div key={country.mapId}>
-          <button
-            type="button"
-            onClick={() => onSelect(country)}
-          >
-            Select {country.name} on map
-          </button>
-          <button
-            type="button"
-            onClick={() =>
-              onSelectCapital?.({
-                capital: country.name === "Canada" ? "Ottawa" : country.name,
-                country,
-              })
-            }
-          >
-            View {country.name === "Canada" ? "Ottawa" : country.name} live cameras
-          </button>
-        </div>
+        <button
+          key={country.mapId}
+          type="button"
+          onClick={() => onSelect(country)}
+        >
+          Select {country.name} on map
+        </button>
       ))}
     </section>
   );
@@ -118,7 +105,7 @@ afterEach(() => {
 });
 
 describe("Hemisphere Herald live country delivery", () => {
-  it("opens a country camera panel from a capital star and shows an empty state", async () => {
+  it("opens a country camera panel from the selected-country sidebar", async () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input);
       if (url.includes("mode=country-cameras")) {
@@ -135,9 +122,9 @@ describe("Hemisphere Herald live country delivery", () => {
     vi.stubGlobal("fetch", fetchMock);
     render(<WorldPulseApp MapComponent={TestMap} liveUpdates={false} />);
 
-    fireEvent.click(
-      screen.getByRole("button", { name: "View Ottawa live cameras" }),
-    );
+    fireEvent.click(screen.getByRole("button", {
+      name: "Open live cameras for Canada",
+    }));
 
     expect(
       await screen.findByRole("heading", { name: "See Canada live" }),
@@ -149,7 +136,7 @@ describe("Hemisphere Herald live country delivery", () => {
     ).toBeInTheDocument();
     expect(fetchMock).toHaveBeenCalledWith(
       expect.stringContaining(
-        "mode=country-cameras&country=Canada&capital=Ottawa",
+        "mode=country-cameras&country=Canada",
       ),
       expect.objectContaining({ cache: "no-store" }),
     );

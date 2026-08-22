@@ -914,7 +914,7 @@ interface LiveVideoState {
 }
 
 interface CityCameraLocation {
-  capital: string;
+  capital?: string;
   country: MapCountry;
 }
 
@@ -959,8 +959,8 @@ function CityCameraModal({
       const query = new URLSearchParams({
         mode: "country-cameras",
         country: location.country.name,
-        capital: location.capital,
       });
+      if (location.capital) query.set("capital", location.capital);
       const response = await fetch(`/api/live-video?${query}`, {
         cache: "no-store",
         signal: AbortSignal.any([
@@ -1053,8 +1053,10 @@ function CityCameraModal({
             </h2>
             <p className="mt-2 max-w-2xl text-sm leading-6 text-[#9ba8ba]">
               Active public webcams showing streets, skylines, traffic, and
-              everyday city views—not news broadcasts. {location.capital} is
-              prioritized, followed by other verified cameras in the country.
+              everyday city views—not news broadcasts.
+              {location.capital
+                ? ` ${location.capital} is prioritized, followed by other verified cameras in the country.`
+                : " Available cameras from across the selected country are included."}
             </p>
           </div>
           <button
@@ -2510,10 +2512,6 @@ export function WorldPulseApp({
             countries={mapCountries}
             selectedMapId={globalView ? null : selectedCountry.mapId}
             onSelect={handleSelect}
-            onSelectCapital={(location) => {
-              handleSelect(location.country);
-              setCityCameraLocation(location);
-            }}
             onReady={() => {
               setGlobeError(null);
               setGlobeReady(true);
@@ -2593,6 +2591,22 @@ export function WorldPulseApp({
               <span className="font-mono text-[8px] uppercase tracking-[0.13em] text-[#6f7e92]">
                 Live server feed · reads server updates every minute
               </span>
+              {!globalView ? (
+                <button
+                  type="button"
+                  onClick={() =>
+                    setCityCameraLocation({ country: activeCountry })
+                  }
+                  aria-label={`Open live cameras for ${activeCountry.name}`}
+                  className="inline-flex shrink-0 items-center gap-2 rounded-full border border-[#4f6870] bg-[#10272a] px-3 py-2 text-[9px] font-medium text-[#c9fff5] transition hover:border-[#73e2cc] hover:bg-[#173438]"
+                >
+                  <span
+                    className="h-1.5 w-1.5 rounded-full bg-[#ff5964] shadow-[0_0_8px_#ff5964]"
+                    aria-hidden="true"
+                  />
+                  Live cameras
+                </button>
+              ) : null}
             </div>
 
             <div className="mt-4 grid grid-cols-3 gap-2">
@@ -2765,7 +2779,7 @@ export function WorldPulseApp({
       ) : null}
       {cityCameraLocation ? (
         <CityCameraModal
-          key={`${cityCameraLocation.country.mapId}-${cityCameraLocation.capital}`}
+          key={`${cityCameraLocation.country.mapId}-${cityCameraLocation.capital ?? "country"}`}
           location={cityCameraLocation}
           onClose={() => setCityCameraLocation(null)}
         />
