@@ -316,6 +316,11 @@ async function proxyOracleLiveServer(env: Env, pathAndQuery: string) {
 }
 
 const worker = {
+  scheduled() {
+    // A legacy Cloudflare cron trigger still targets this Worker. The Oracle
+    // collector owns live refreshes, so the browser-facing Worker has no work
+    // to perform for scheduled events.
+  },
   async fetch(request: Request, env: Env, ctx: ExecutionContext) {
     const url = new URL(request.url);
 

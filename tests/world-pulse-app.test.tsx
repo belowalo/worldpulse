@@ -32,23 +32,24 @@ function articleFor(countryName: string, suffix = "current national update") {
 
 function liveWorld(
   articlesByCountry: Record<string, LiveArticle[]>,
+  worldGeneratedAt = generatedAt,
 ): LiveWorldNewsPayload {
   return {
     scope: "world-live",
-    generatedAt,
+    generatedAt: worldGeneratedAt,
     refreshAfterSeconds: 60,
     provider: "Test live world",
     global: {
       scope: "global",
       countryName: null,
-      generatedAt,
+      generatedAt: worldGeneratedAt,
       refreshAfterSeconds: 60,
       provider: "Test global",
       articles: [],
     },
     countries: countries.map((country) => ({
       countryName: country.name,
-      generatedAt,
+      generatedAt: worldGeneratedAt,
       available: Boolean(articlesByCountry[country.name]?.length),
       articles: articlesByCountry[country.name] ?? [],
     })),
@@ -99,6 +100,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  Reflect.deleteProperty(document, "hidden");
   vi.useRealTimers();
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
@@ -180,6 +182,87 @@ describe("Hemisphere Herald live country delivery", () => {
         String(input).includes("scope=world-live"),
       ),
     ).toBe(true);
+  });
+
+  it("replaces the current feed and prevents overlapping refresh work", async () => {
+    const oldArticle = articleFor("Canada", "old report to replace");
+    const newArticle = articleFor("Canada", "new current report");
+    const firstWorld = liveWorld({ Canada: [oldArticle], Iran: [] });
+    const secondWorld = liveWorld(
+      { Canada: [newArticle], Iran: [] },
+      "2026-08-21T20:01:00.000Z",
+    );
+    let refresh: (() => void) | undefined;
+    let resolveRefresh: ((response: Response) => void) | undefined;
+    let worldRequestCount = 0;
+    vi.spyOn(window, "setInterval").mockImplementation((handler) => {
+      refresh = handler as () => void;
+      return 1 as unknown as ReturnType<typeof setInterval>;
+    });
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === "/countries.geojson") return geometryResponse();
+      if (url.includes("scope=world-live")) {
+        worldRequestCount += 1;
+        if (worldRequestCount === 1) return Response.json(firstWorld);
+        return new Promise<Response>((resolve) => {
+          resolveRefresh = resolve;
+        });
+      }
+      return new Response("Unexpected request", { status: 500 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    render(<WorldPulseApp MapComponent={TestMap} />);
+    await screen.findByRole("heading", { name: oldArticle.title });
+
+    act(() => {
+      refresh?.();
+      refresh?.();
+    });
+    expect(worldRequestCount).toBe(2);
+
+    await act(async () => {
+      resolveRefresh?.(Response.json(secondWorld));
+    });
+    expect(
+      await screen.findByRole("heading", { name: newArticle.title }),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("heading", { name: oldArticle.title }),
+    ).toBeNull();
+  });
+
+  it("pauses live refreshes while the tab is hidden", async () => {
+    const world = liveWorld({ Canada: [articleFor("Canada")], Iran: [] });
+    let refresh: (() => void) | undefined;
+    let worldRequestCount = 0;
+    vi.spyOn(window, "setInterval").mockImplementation((handler) => {
+      refresh = handler as () => void;
+      return 1 as unknown as ReturnType<typeof setInterval>;
+    });
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url === "/countries.geojson") return geometryResponse();
+        if (url.includes("scope=world-live")) {
+          worldRequestCount += 1;
+          return Response.json(world);
+        }
+        return new Response("Unexpected request", { status: 500 });
+      }),
+    );
+    render(<WorldPulseApp MapComponent={TestMap} />);
+    await screen.findByText("Live country index complete");
+    expect(worldRequestCount).toBe(1);
+
+    Object.defineProperty(document, "hidden", {
+      configurable: true,
+      value: true,
+    });
+    act(() => refresh?.());
+
+    expect(worldRequestCount).toBe(1);
   });
 
   it("uses the server-held country feed without fetching providers on click", async () => {

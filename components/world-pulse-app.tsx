@@ -12,7 +12,6 @@ import {
 import {
   eventsDescribeSameOccurrence,
   mergeCanonicalEvents,
-  mergeEventFeeds,
 } from "@/lib/live-news";
 import {
   biasDistributionForArticles,
@@ -61,39 +60,6 @@ const EMPTY_FEED: FeedState = {
   loading: false,
   error: null,
 };
-
-function mergeLiveFeedMaps(
-  latestFeeds: Record<string, FeedState>,
-  currentFeeds: Record<string, FeedState>,
-  countryNames: string[],
-) {
-  return Object.fromEntries(
-    countryNames.flatMap((countryName) => {
-      const latest = latestFeeds[countryName];
-      const current = currentFeeds[countryName];
-      if (!latest && !current) return [];
-      const latestAt = Date.parse(latest?.updatedAt ?? "");
-      const currentAt = Date.parse(current?.updatedAt ?? "");
-      const latestIsNewer =
-        !current ||
-        (Number.isFinite(latestAt) &&
-          (!Number.isFinite(currentAt) || latestAt >= currentAt));
-      const newest = latestIsNewer ? latest : current;
-      const older = latestIsNewer ? current : latest;
-      const events = !older?.events.length
-        ? (newest?.events ?? [])
-        : !newest?.events.length
-          ? older.events
-          : mergeEventFeeds(newest.events, older.events);
-      return [[countryName, {
-        ...(newest ?? older ?? EMPTY_FEED),
-        events,
-        loading: false,
-        error: null,
-      } satisfies FeedState]];
-    }),
-  ) as Record<string, FeedState>;
-}
 
 const INITIAL_VISIBLE_EVENT_LIMIT = 40;
 const SNAPSHOT_REQUEST_TIMEOUT_MS = 8_500;
@@ -1885,12 +1851,6 @@ export function WorldPulseApp({
   const [countryFeeds, setCountryFeeds] = useState<Record<string, FeedState>>(
     initialWorld?.countryFeeds ?? {},
   );
-  const [liveCountryFeeds, setLiveCountryFeeds] = useState<
-    Record<string, FeedState>
-  >(initialWorld?.countryFeeds ?? {});
-  const [countrySignalFeeds, setCountrySignalFeeds] = useState<
-    Record<string, FeedState>
-  >(initialWorld?.countryFeeds ?? {});
   const [worldScanSettled, setWorldScanSettled] = useState(
     !liveUpdates || Boolean(initialWorld),
   );
@@ -1928,9 +1888,13 @@ export function WorldPulseApp({
     }
     let cancelled = false;
     let loaded = false;
+    let inFlight = false;
+    let latestGeneratedAt = "";
     const controller = new AbortController();
     const workers = new Set<Worker>();
     const loadLiveWorld = async () => {
+      if (cancelled || inFlight || document.hidden) return;
+      inFlight = true;
       try {
         const response = await fetch(liveWorldUrl, {
           cache: "no-store",
@@ -1944,6 +1908,10 @@ export function WorldPulseApp({
         if (live.scope !== "world-live" || !Array.isArray(live.countries)) {
           throw new Error("The live world feed is invalid.");
         }
+        if (live.generatedAt === latestGeneratedAt) {
+          loaded = true;
+          return;
+        }
         const world = await buildLiveWorldInBackground(
           live,
           countryDirectory,
@@ -1951,21 +1919,31 @@ export function WorldPulseApp({
         );
         if (!cancelled) {
           loaded = true;
+          latestGeneratedAt = live.generatedAt;
           setInitialWorld(world);
           setInitialWorldDecodeFailed(false);
         }
       } catch {
         if (!cancelled && !loaded) setInitialWorldDecodeFailed(true);
+      } finally {
+        inFlight = false;
       }
     };
     void loadLiveWorld();
-    const interval = window.setInterval(loadLiveWorld, 60_000);
+    const interval = window.setInterval(() => {
+      void loadLiveWorld();
+    }, 60_000);
+    const refreshWhenVisible = () => {
+      if (!document.hidden) void loadLiveWorld();
+    };
+    document.addEventListener("visibilitychange", refreshWhenVisible);
     return () => {
       cancelled = true;
       controller.abort();
       for (const worker of workers) worker.terminate();
       workers.clear();
       window.clearInterval(interval);
+      document.removeEventListener("visibilitychange", refreshWhenVisible);
     };
   }, [
     countryDirectory,
@@ -2054,27 +2032,7 @@ export function WorldPulseApp({
         return;
       }
       setGlobalFeed(initialWorld.globalFeed);
-      setCountryFeeds((current) =>
-        mergeLiveFeedMaps(
-          initialWorld.countryFeeds,
-          current,
-          countryNames,
-        ),
-      );
-      setLiveCountryFeeds((current) =>
-        mergeLiveFeedMaps(
-          initialWorld.countryFeeds,
-          current,
-          countryNames,
-        ),
-      );
-      setCountrySignalFeeds((current) =>
-        mergeLiveFeedMaps(
-          initialWorld.countryFeeds,
-          current,
-          countryNames,
-        ),
-      );
+      setCountryFeeds(initialWorld.countryFeeds);
       setPreparedCountryCount(countryNames.length);
       setGlobalFeedReady(true);
       setWorldScanSettled(true);
@@ -2085,23 +2043,9 @@ export function WorldPulseApp({
   const mapCountries = useMemo(
     () =>
       countryDirectory.map((country): MapCountry => {
-        const fullSignalFeed = countrySignalFeeds[country.name];
-        const mapSignalFeed = liveCountryFeeds[country.name];
-        const signalFeed = fullSignalFeed ?? mapSignalFeed;
+        const signalFeed = countryFeeds[country.name];
         if (signalFeed) {
-          const synchronizedEvents = (
-            fullSignalFeed?.events === mapSignalFeed?.events
-              ? (fullSignalFeed?.events ?? [])
-              : mergeEventFeeds(
-                  fullSignalFeed?.events ?? [],
-                  mapSignalFeed?.events ?? [],
-                )
-          ).sort(
-            (left, right) =>
-              right.importanceScore - left.importanceScore ||
-              Date.parse(right.lastUpdatedAt) -
-                Date.parse(left.lastUpdatedAt),
-          );
+          const synchronizedEvents = signalFeed.events;
           return {
             ...country,
             events: synchronizedEvents,
@@ -2116,42 +2060,12 @@ export function WorldPulseApp({
           signalReady: false,
         };
       }),
-    [
-      countryDirectory,
-      countrySignalFeeds,
-      liveCountryFeeds,
-    ],
+    [countryDirectory, countryFeeds],
   );
   const activeCountry =
     mapCountries.find((country) => country.mapId === selectedCountry.mapId) ??
     selectedCountry;
   const fullCountryFeed = countryFeeds[activeCountry.name];
-  const liveCountryFeed = liveCountryFeeds[activeCountry.name];
-  const combinedCountryFeed = useMemo(
-    () => {
-      const combined =
-        fullCountryFeed && !fullCountryFeed.error
-          ? {
-              ...fullCountryFeed,
-              events: mergeEventFeeds(
-                fullCountryFeed.events,
-                liveCountryFeed?.events ?? [],
-              ),
-            }
-          : liveCountryFeed ?? fullCountryFeed;
-      if (!combined || !activeCountry.signalReady) return combined;
-      return {
-        ...combined,
-        events: activeCountry.events,
-      };
-    },
-    [
-      activeCountry.events,
-      activeCountry.signalReady,
-      fullCountryFeed,
-      liveCountryFeed,
-    ],
-  );
   const fallbackCountryFeed: FeedState = {
     events: activeCountry.events,
     updatedAt: globalFeed.updatedAt,
@@ -2160,7 +2074,9 @@ export function WorldPulseApp({
     error: null,
   };
   const resolvedCountryFeed =
-    combinedCountryFeed ?? fallbackCountryFeed;
+    fullCountryFeed && activeCountry.signalReady
+      ? { ...fullCountryFeed, events: activeCountry.events }
+      : fullCountryFeed ?? fallbackCountryFeed;
   const activeFeed = globalView ? globalFeed : resolvedCountryFeed;
 
   const geocodedGlobalEvents = useMemo(
